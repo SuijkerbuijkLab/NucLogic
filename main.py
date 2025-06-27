@@ -7,7 +7,6 @@ from scipy.ndimage import zoom
 from cellpose.utils import stitch3D
 import numpy as np
 import pandas as pd
-from skimage.measure import regionprops
 
 import os
 import re
@@ -44,37 +43,34 @@ model = utils.load_model()
 summary_results = []
 
 for file in files:
-    # frame_path = os.path.join(output_directory, file)
-    # print(f"Processing {file}...")
-    # frame = tifffile.imread(frame_path)
-    # frame = utils.single_channel(frame)  # Ensure single channel data
+    # Load each frame
+    frame_path = os.path.join(output_directory, file)
+    print(f"Processing {file}...")
+    frame = tifffile.imread(frame_path)
+    frame = utils.single_channel(frame)  # Ensure single channel data
 
-    # original_shape = frame.shape  # Save original shape for later rescaling
-    # frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale imagefor speed
+    original_shape = frame.shape  # Save original shape for later rescaling
+    frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale imagefor speed
 
-    # frame = utils.threshold(frame)  # Apply mean thresholding
+    frame = utils.threshold(frame)  # Apply mean thresholding
 
-    # segmented_stack = utils.segment(frame, model)  # Segment per Z using the model
-    # segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
+    segmented_stack = utils.segment(frame, model)  # Segment per Z using the model
+    segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
 
-    # # Rescale the segmented stack to the original shape
-    # zoom_factors = np.array(original_shape) / np.array(segmented_stack.shape)
-    # segmented_stack = zoom(segmented_stack, zoom=zoom_factors, order=0).astype(
-    #     np.uint16
-    # )
-
-    # # Save segmented tiffile
-    # os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)
-    # segmented_tiff_file = os.path.join(
-    #     input_directory, "segmented", f"{file.split('.')[0]}_masks.tif"
-    # )
-    # tifffile.imwrite(segmented_tiff_file, segmented_stack)
-
-    segmented_stack = tifffile.imread(
-        r"C:\Users\6331823\Downloads\crop_test\segmented\Channel-ref-frame-0_masks.tif"
+    # Rescale the segmented stack to the original shape
+    zoom_factors = np.array(original_shape) / np.array(segmented_stack.shape)
+    segmented_stack = zoom(segmented_stack, zoom=zoom_factors, order=0).astype(
+        np.uint16
     )
-    # Get properties of the masked nuclei
 
+    # Save segmented tiffile
+    os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)
+    segmented_tiff_file = os.path.join(
+        input_directory, "segmented", f"{file.split('.')[0]}_masks.tif"
+    )
+    tifffile.imwrite(segmented_tiff_file, segmented_stack)
+
+    # Get properties of the masked nuclei
     props = utils.properties_mask(segmented_stack)
 
     # Get properties of the WT and CRC channels at the masked nuclei locations

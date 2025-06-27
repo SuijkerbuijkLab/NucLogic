@@ -9,5 +9,7 @@ from .segment import segment
 from .properties_mask import properties_mask
 from .properties_channel import properties_channel
 from .phenotype import phenotype
+from .split_files import split_files
+from .max_project import max_project
 
 print("utils package loaded successfully")
