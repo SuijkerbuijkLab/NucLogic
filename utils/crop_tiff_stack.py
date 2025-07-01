@@ -32,7 +32,7 @@ def crop_tiff_stack(input_dir, output_dir, projXY_path, crop=True):
 
         frames = sorted(frame_numbers)
 
-        with alive_bar(frames, title="Cropping frames") as bar:
+        with alive_bar(len(frames), title="Cropping frames") as bar:
             for t in frames:
                 ref_path = os.path.join(input_dir, f"Channel-ref-frame-{t}.tif")
                 crc_path = os.path.join(input_dir, f"Channel-CRC-frame-{t}.tif")
