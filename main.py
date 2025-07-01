@@ -1,5 +1,5 @@
 """
-The part of the programm you need to run
+The part of the program you need to run
 """
 
 import tifffile

@@ -7,7 +7,7 @@ from alive_progress import alive_bar
 import os
 
 
-def split_files(file, output_directory, nuclei=3, WT=2, CRC=1):
+def split_files(file, output_directory, nuclei=2, WT=1, CRC=0):
     os.makedirs(output_directory, exist_ok=True)
 
     movie = ims(file)  # T,C,Z,Y,X
@@ -30,3 +30,4 @@ def split_files(file, output_directory, nuclei=3, WT=2, CRC=1):
                 tifffile.imwrite(tif, image)
 
             bar()
+            
