@@ -2,4 +2,4 @@
 #*.log to do everything ending in log
 #venv/ to do a whole folder
 #input/*.xlsx to do all file types in a folder
-__pycache__/
+utils/__pycache__/
