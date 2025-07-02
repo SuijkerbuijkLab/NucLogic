@@ -86,7 +86,6 @@ def crop_tiff_stack(input_dir, output_dir, projXY_path, crop=True):
 
                         z_list = []
                         for z in range(slice_max):
-                            plane = ref[z, :, :]
                             plane_check = tt_ref[z, :, :]
                             if np.mean(plane_check) > thrs_intensity:
                                 z_list.append(z)
