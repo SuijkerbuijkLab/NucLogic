@@ -17,34 +17,44 @@ import utils
 input_directory = r"C:\Users\6331823\Downloads\crop_test"
 rescale_factor = (1, 0.5, 0.5)  # Rescale factor for the images for cellpose processing
 
-output_directory = os.path.join(str(input_directory), "cropped")
+
+ims_file = [
+    os.path.join(input_directory, f)
+    for f in os.listdir(input_directory)
+    if f.endswith(".ims")
+]
+
+output_directory_frames = os.path.join(str(input_directory), "frames")
+
+utils.split_files(ims_file, output_directory_frames)
+
+output_directory_cropped = os.path.join(str(input_directory), "cropped")
 
 XY_path = [
     os.path.join(input_directory, f)
     for f in os.listdir(input_directory)
     if "cropped" in f and f.endswith(".tif")
 ]
-utils.crop_tiff_stack(input_directory, output_directory, XY_path)
+utils.crop_tiff_stack(input_directory, output_directory_cropped, XY_path)
 
 files = sorted(
     [
         f
-        for f in os.listdir(output_directory)
+        for f in os.listdir(output_directory_cropped)
         if f.startswith("Channel-ref") and f.endswith(".tif")
     ]
 )
 
-# model = utils.load_model(
-#     custom_model=True,
-#     model_path=r"Z:\users\6331823\Mario Pipeline\codes\models\organoids_3D.pkl",
-# )
-model = utils.load_model()
+model = utils.load_model(
+    custom_model=False,
+    model_path=r"Z:\users\6331823\Mario Pipeline\codes\models\organoids_3D.pkl",
+)
 
 summary_results = []
 
 for file in files:
     # Load each frame
-    frame_path = os.path.join(output_directory, file)
+    frame_path = os.path.join(output_directory_cropped, file)
     print(f"Processing {file}...")
     frame = tifffile.imread(frame_path)
     frame = utils.single_channel(frame)  # Ensure single channel data
@@ -117,3 +127,4 @@ for file in files:
 summary_results = pd.DataFrame(summary_results)
 summary_csv = os.path.join(input_directory, "summary_results.csv")
 summary_results.to_csv(summary_csv, sep="\t", index=False)
+
