@@ -1,4 +1,3 @@
-from .process_directory import process_directory
 from .crop_tiff_stack import crop_tiff_stack
 from .compute_knn_features import compute_knn_features
 from .single_channel import single_channel

@@ -14,7 +14,7 @@ import re
 import utils
 
 # Add directory where all organoid data is stored
-input_directory = r"C:\Users\6331823\Downloads\crop_test"
+input_directory = r"C:\Users\6331823\Local SSD\test"
 rescale_factor = (1, 0.5, 0.5)  # Rescale factor for the images for cellpose processing
 
 
@@ -22,7 +22,7 @@ ims_file = [
     os.path.join(input_directory, f)
     for f in os.listdir(input_directory)
     if f.endswith(".ims")
-]
+][0]
 
 output_directory_frames = os.path.join(str(input_directory), "frames")
 
@@ -35,7 +35,7 @@ XY_path = [
     for f in os.listdir(input_directory)
     if "cropped" in f and f.endswith(".tif")
 ]
-utils.crop_tiff_stack(input_directory, output_directory_cropped, XY_path)
+utils.crop_tiff_stack(output_directory_frames, output_directory_cropped, XY_path)
 
 files = sorted(
     [
@@ -63,6 +63,16 @@ for file in files:
     frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale imagefor speed
 
     frame = utils.threshold(frame)  # Apply mean thresholding
+
+    #Save frames to train new model, remove later
+    depthIm, heightIm, widthIm = frame.shape
+    os.makedirs(os.path.join(input_directory, "thresholded_slices_for_training"), exist_ok=True)
+    for z in range(depthIm):
+        plane_2d = frame[z, :, :]
+        slice_file = os.path.join(
+        input_directory, "thresholded_slices_for_training", f"{file.split('.')[0]}_z{z}_slice.tif")
+        tifffile.imwrite(slice_file, plane_2d)
+    #Done with saving, remove later in between
 
     segmented_stack = utils.segment(frame, model)  # Segment per Z using the model
     segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
@@ -125,6 +135,6 @@ for file in files:
 
 # Save summary of the whole movie as a csv
 summary_results = pd.DataFrame(summary_results)
-summary_csv = os.path.join(input_directory, "summary_results.csv")
-summary_results.to_csv(summary_csv, sep="\t", index=False)
-
+summary_txt = os.path.join(input_directory, "summary_results.txt")
+summary_results.to_csv(summary_txt, sep="\t", index=False)
+print(f"Finished analysing organoid! Wohooo")
