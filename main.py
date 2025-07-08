@@ -64,16 +64,6 @@ for file in files:
 
     frame = utils.threshold(frame)  # Apply mean thresholding
 
-    #Save frames to train new model, remove later
-    depthIm, heightIm, widthIm = frame.shape
-    os.makedirs(os.path.join(input_directory, "thresholded_slices_for_training"), exist_ok=True)
-    for z in range(depthIm):
-        plane_2d = frame[z, :, :]
-        slice_file = os.path.join(
-        input_directory, "thresholded_slices_for_training", f"{file.split('.')[0]}_z{z}_slice.tif")
-        tifffile.imwrite(slice_file, plane_2d)
-    #Done with saving, remove later in between
-
     segmented_stack = utils.segment(frame, model)  # Segment per Z using the model
     segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
 
