@@ -1,16 +1,17 @@
 import tifffile
 import scipy.ndimage as ndimage
-import cellpose.utils as cellpose_utils
 from skimage.measure import regionprops
 import pandas as pd
+import numpy as np
+import trackpy as tp
 
 import os
 
-from .load_model import load_model
+from load_model import load_model
 
 
 def crop_tiff_stack(XY_path, output_directory):
-    model = load_model(custom_model=True, model_path=r"")
+    model = load_model(True, r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\cpsam_20250709_110949")
 
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
@@ -25,58 +26,78 @@ def crop_tiff_stack(XY_path, output_directory):
 
     masks = []
     for frame in range(timepoints):
+        print(frame)
         image = XY[frame, :, :]
         # tif = os.path.join(output_directory, f"frame-{frame}.tif")
         # tifffile.imwrite(tif, image)
         mask, _, _ = model.eval(image, diameter=None, do_3D=False)
         masks.append(mask)
-    XY_mask = cellpose_utils.stack_to_3D(masks, axis=0)
-    # In this mask try to find the one that is the organoid we want to keep.
-    # Base this on the coordinates in XY and the size of the organoid.
 
-    XY_mask = ndimage.zoom(masks, (1, 5, 5), order=0)
+    XY_mask = np.stack(masks, axis=0).astype(np.uint16)
 
-    props = regionprops(XY_mask)
-    data = []
-    for prop in props:
-        label = prop.label
-        centroid = prop.centroid  # (t, y, x)
-        bounding_box = prop.bbox  # (min_t, min_y, min_x, max_t, max_y, max_x)
-        volume = prop.area
+    rescale_factors = (1, original.shape[1] / XY_mask.shape[1], original.shape[2] / XY_mask.shape[2])
+    XY_mask = ndimage.zoom(masks, rescale_factors, order=0)
+    tifffile.imwrite(os.path.join(output_directory, "mask.tif"), XY_mask)
+    print(" saved mask")
 
-        data.append(
-            {
-                "label": label,
-                "t": centroid[0],
-                "y": centroid[1],
-                "x": centroid[2],
-                "bounding_box": bounding_box,
-                "volume": volume,
-            }
-        )
+    features = []
+    for t in range(timepoints):
+        props = regionprops(XY_mask[t])
+        for prop in props:
+            features.append({
+                'frame': t,
+                'y': prop.centroid[0],
+                'x': prop.centroid[1],
+                'label': prop.label
+            })
+    features_df = pd.DataFrame(features)
 
-    df_props = pd.DataFrame(data)
+    linked = tp.link_df(features_df, search_range=30, memory=2)  # adjust search_range as needed
 
-    center_image = (XY_mask.shape[1] / 2, XY_mask.shape[2] / 2)
-    df_props["distance_to_center"] = (
-        (df_props["y"] - center_image[0]) ** 2 + (df_props["x"] - center_image[1]) ** 2
-    ) ** 0.5
-    # Filter for first timepoint
-    df_first_timepoint = df_props[df_props["t"] == 0]
+    # Now 'particle' column gives the tracked ID for each organoid
+    print(linked.head())
 
-    # Find the row with the minimum distance to center
-    closest_organoid = df_first_timepoint.loc[
-        df_first_timepoint["distance_to_center"].idxmin()
-    ]
+    # Example: get the trajectory for the organoid closest to center at t=0
+    center_y, center_x = XY_mask.shape[1] / 2, XY_mask.shape[2] / 2
+    t0 = linked[linked['frame'] == 0].copy()
+    t0['dist'] = ((t0['y'] - center_y)**2 + (t0['x'] - center_x)**2)**0.5
+    closest_particle = t0.loc[t0['dist'].idxmin(), 'particle']
 
-    organoid = original.copy()
-    organoid[organoid != closest_organoid["label"]] = 0
+    # Get all frames for this tracked organoid
+    organoid_track = linked[linked['particle'] == closest_particle]
+    print(organoid_track)
 
-    tif = os.path.join(output_directory, f"XY_copped.tif")
-    tifffile.imwrite(tif, organoid)
+    organoid_only = np.zeros_like(original)
+    for _, row in organoid_track.iterrows():
+        t = int(row['frame'])
+        label = int(row['label'])
+        organoid_only[t][XY_mask[t] == label] = original[t][XY_mask[t] == label]
 
+    tifffile.imwrite(os.path.join(output_directory, "XY_tracked_cropped.tif"), organoid_only)
 
-input_directory = r"C:\Users\6331823\Local SSD\TL02"
+    # Find coordinates of non-zero pixels
+    for frame in range(timepoints):
+        maskXY = organoid_only[frame] > 0
+        coordsXY = np.where(maskXY)
+
+        # Adjust cropping limits based on XY projection
+        if coordsXY[0].size > 0:
+            row_min, row_max = (
+                np.min(coordsXY[0]),
+                np.max(coordsXY[0]) + 1,
+            )
+            col_min, col_max = (
+                np.min(coordsXY[1]),
+                np.max(coordsXY[1]) + 1,
+            )
+
+        cropped = organoid_only.copy()[
+            frame, row_min:row_max, col_min:col_max
+        ]
+        tifffile.imwrite(os.path.join(output_directory, "tiffs",f"XY_cropped_{frame}.tif"), cropped)
+        
+
+input_directory = r"C:\Users\6331823\Desktop\TEMP\TL02"
 output_directory = os.path.join(input_directory, "smoothed_XY")
 
 XY_path = [
@@ -85,4 +106,4 @@ XY_path = [
     if "projXY" in f and f.endswith(".tif")
 ][0]
 
-crop_tiff_stack(XY_path, output_directory)
+crop_tiff_stack(XY_path, input_directory)

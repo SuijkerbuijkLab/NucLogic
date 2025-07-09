@@ -2,6 +2,7 @@
 from cellpose import models
 import torch
 
+import os
 
 def load_model(custom_model=False, model_path=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -11,6 +12,8 @@ def load_model(custom_model=False, model_path=None):
         model = models.CellposeModel(
             gpu=(device == "cuda"), pretrained_model=model_path
         )
+        print(f"loaded custom model: {os.path.basename(model_path)}")
     else:
         model = models.CellposeModel(gpu=(device == "cuda"))
+        print("loaded default SAM model")
     return model
