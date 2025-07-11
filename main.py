@@ -14,8 +14,8 @@ import re
 import utils
 
 # Add directory where all organoid data is stored
-input_directory = r"C:\Users\6331823\Local SSD\test"
-rescale_factor = (1, 0.5, 0.5)  # Rescale factor for the images for cellpose processing
+input_directory = r"C:\Users\6331823\Desktop\TEMP\TL01\folder"
+#rescale_factor = (1, 1, 1)  # Rescale factor for the images for cellpose processing
 
 
 ims_file = [
@@ -26,16 +26,18 @@ ims_file = [
 
 output_directory_frames = os.path.join(str(input_directory), "frames")
 
-utils.split_files(ims_file, output_directory_frames)
+#utils.split_files(ims_file, output_directory_frames)
 
 output_directory_cropped = os.path.join(str(input_directory), "cropped")
 
+utils.max_project(ims_file, input_directory)
 XY_path = [
     os.path.join(input_directory, f)
     for f in os.listdir(input_directory)
-    if "cropped" in f and f.endswith(".tif")
+    if "projXY" in f and f.endswith(".tif")
 ]
-utils.crop_tiff_stack(output_directory_frames, output_directory_cropped, XY_path)
+
+utils.crop(XY_path, output_directory_frames, output_directory_cropped, r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\whole_organoid_segmentation")
 
 files = sorted(
     [
@@ -47,7 +49,7 @@ files = sorted(
 
 model = utils.load_model(
     custom_model=False,
-    model_path=r"Z:\users\6331823\Mario Pipeline\codes\models\organoids_3D.pkl",
+    model_path=r"C:\Users\6331823\Desktop\TEMP\Train model cell segmentation\models\cell_segmentation_organoid",
 )
 
 summary_results = []
@@ -60,18 +62,18 @@ for file in files:
     frame = utils.single_channel(frame)  # Ensure single channel data
 
     original_shape = frame.shape  # Save original shape for later rescaling
-    frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale imagefor speed
+    #frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale imagefor speed
 
-    frame = utils.threshold(frame)  # Apply mean thresholding
+    #frame = utils.threshold(frame)  # Apply mean thresholding
 
     segmented_stack = utils.segment(frame, model)  # Segment per Z using the model
     segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
 
     # Rescale the segmented stack to the original shape
-    zoom_factors = np.array(original_shape) / np.array(segmented_stack.shape)
-    segmented_stack = zoom(segmented_stack, zoom=zoom_factors, order=0).astype(
-        np.uint16
-    )
+    #zoom_factors = np.array(original_shape) / np.array(segmented_stack.shape)
+    #segmented_stack = zoom(segmented_stack, zoom=zoom_factors, order=0).astype(
+    #    np.uint16
+    #)
 
     # Save segmented tiffile
     os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)

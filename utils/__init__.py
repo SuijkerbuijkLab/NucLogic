@@ -9,5 +9,7 @@ from .properties_channel import properties_channel
 from .phenotype import phenotype
 from .split_files import split_files
 from .max_project import max_project
+from .crop import crop
+
 
 print("utils package loaded successfully")

@@ -7,14 +7,15 @@ import trackpy as tp
 
 import os
 
-from load_model import load_model
-from threshold import threshold
+from utils.load_model import load_model
+from utils.threshold import threshold
+#from load_model import load_model
+#from threshold import threshold
 
-
-def crop_tiff_stack(XY_path, input_frames, output_directory):
+def crop(XY_path, input_frames, output_directory, model_path=None):
     model = load_model(
         True,
-        r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\cpsam_20250709_110949",
+        model_path,
     )
 
     if not os.path.exists(output_directory):
@@ -32,8 +33,8 @@ def crop_tiff_stack(XY_path, input_frames, output_directory):
     for frame in range(timepoints):
         print(frame)
         image = XY[frame, :, :]
-        # tif = os.path.join(output_directory, f"frame-{frame}.tif")
-        # tifffile.imwrite(tif, image)
+        #tif = os.path.join(output_directory, f"frame-{frame}.tif")
+        #tifffile.imwrite(tif, image)
         mask, _, _ = model.eval(image, diameter=None, do_3D=False)
         masks.append(mask)
 
@@ -105,8 +106,7 @@ def crop_tiff_stack(XY_path, input_frames, output_directory):
                 np.max(coordsXY[1]) + 1,
             )
 
-        cropped = organoid_only.copy()[frame, row_min:row_max, col_min:col_max]
-
+        
         ref = tifffile.imread(
             os.path.join(input_frames, f"Channel-ref-frame-{frame}.tif")
         )[:, row_min:row_max, col_min:col_max]
@@ -119,7 +119,7 @@ def crop_tiff_stack(XY_path, input_frames, output_directory):
             if np.mean(plane_check) > thrs_intensity:
                 z_list.append(z)
 
-        slice_min, slice_max = min(z_list) - 1, max(z_list) + 1
+        slice_min, slice_max = min(z_list), max(z_list) + 1
         ref = ref[slice_min:slice_max, :, :]
 
         tifffile.imwrite(
@@ -136,25 +136,25 @@ def crop_tiff_stack(XY_path, input_frames, output_directory):
             )
 
 
-input_directory = r"C:\Users\6331823\Local SSD\TL02"
-output_directory = os.path.join(input_directory, "cropped")
+# input_directory = r"C:\Users\6331823\Desktop\TEMP\test"
+# output_directory_cropped = os.path.join(input_directory, "cropped")
 
-XY_path = [
-    os.path.join(input_directory, f)
-    for f in os.listdir(input_directory)
-    if "projXY" in f and f.endswith(".tif")
-][0]
-
-output_directory_frames = os.path.join(str(input_directory), "frames")
-
-# from split_files import split_files
-
-# ims_file = [
+# XY_path = [
 #     os.path.join(input_directory, f)
 #     for f in os.listdir(input_directory)
-#     if f.endswith(".ims")
+#     if "projXY" in f and f.endswith(".tif")
 # ][0]
 
-# split_files(ims_file, output_directory_frames)
+# output_directory_frames = os.path.join(str(input_directory), "frames")
 
-crop_tiff_stack(XY_path, output_directory_frames, output_directory)
+# # from split_files import split_files
+
+# # ims_file = [
+# #     os.path.join(input_directory, f)
+# #     for f in os.listdir(input_directory)
+# #     if f.endswith(".ims")
+# # ][0]
+
+# # split_files(ims_file, output_directory_frames)
+
+# crop(XY_path, output_directory_frames, output_directory_cropped, r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\whole_organoid_segmentation")
