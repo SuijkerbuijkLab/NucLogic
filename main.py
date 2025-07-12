@@ -14,7 +14,7 @@ import re
 import utils
 
 # Add directory where all organoid data is stored
-input_directory = r"C:\Users\6331823\Desktop\TEMP\TL01\folder"
+input_directory = r"C:\Users\6331823\Desktop\TEMP\test"
 #rescale_factor = (1, 1, 1)  # Rescale factor for the images for cellpose processing
 
 
@@ -30,14 +30,14 @@ output_directory_frames = os.path.join(str(input_directory), "frames")
 
 output_directory_cropped = os.path.join(str(input_directory), "cropped")
 
-utils.max_project(ims_file, input_directory)
+#utils.max_project(ims_file, input_directory)
 XY_path = [
     os.path.join(input_directory, f)
     for f in os.listdir(input_directory)
     if "projXY" in f and f.endswith(".tif")
 ]
 
-utils.crop(XY_path, output_directory_frames, output_directory_cropped, r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\whole_organoid_segmentation")
+#utils.crop(XY_path, output_directory_frames, output_directory_cropped, r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\whole_organoid_segmentation")
 
 files = sorted(
     [
@@ -48,8 +48,8 @@ files = sorted(
 )
 
 model = utils.load_model(
-    custom_model=False,
-    model_path=r"C:\Users\6331823\Desktop\TEMP\Train model cell segmentation\models\cell_segmentation_organoid",
+    custom_model=True,
+    model_path=r"C:\Users\6331823\Desktop\TEMP\Train model cell segmentation\models\cell_segmentation_organoid2",
 )
 
 summary_results = []

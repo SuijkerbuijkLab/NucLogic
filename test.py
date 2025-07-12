@@ -21,54 +21,16 @@ input_directory = r"C:\Users\6331823\Desktop\TEMP\TL01\folder"
 ims_file = [
     os.path.join(input_directory, f)
     for f in os.listdir(input_directory)
-    if f.endswith(".tif")
+    if f.endswith("output.tif")
 ][0]
 
 output_directory_frames = os.path.join(str(input_directory), "frames")
 
 os.makedirs(output_directory_frames, exist_ok=True)
 
-movie = tifffile.imread(ims_file)  # T,Z,C,Y,X
-print(movie.shape)
-#movie = np.moveaxis(movie, 1, 2)  # T,Z,
-print(movie.shape)
-
-for frame in range(movie.shape[0]):
-    for channel in range(movie.shape[2]):
-        image = movie[frame, channel, :, :, :]
-        if channel == 1:
-            name = "CRC"
-        elif channel == 2:
-            name = "WT"
-        elif channel == 0:
-            name = "Ref"
-        else:
-            name = "Channel4"
-        tif = os.path.join(
-            output_directory_frames, f"Channel-{name}-frame-{frame}.tif"
-        )
-        tifffile.imwrite(tif, image)
-
-
-
 output_directory_cropped = os.path.join(str(input_directory), "cropped")
+os.makedirs(output_directory_cropped, exist_ok=True)
 
-movie = movie[:, :, 0, :, :] # Remaining object is T Z Y X
-
-max_data = np.max(movie, axis=1) # Project axis Z 
-
-tif = os.path.join(input_directory, f"projXY.tif")
-tifffile.imwrite(tif, max_data)
-
-print(f"Saved max Z-projection at {tif}")
-
-XY_path = [
-    os.path.join(input_directory, f)
-    for f in os.listdir(input_directory)
-    if "projXY" in f and f.endswith(".tif")
-]
-
-utils.crop(XY_path, output_directory_frames, output_directory_cropped, r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\whole_organoid_segmentation")
 
 files = sorted(
     [
@@ -79,8 +41,8 @@ files = sorted(
 )
 
 model = utils.load_model(
-    custom_model=False,
-    model_path=r"C:\Users\6331823\Desktop\TEMP\Train model cell segmentation\models\cell_segmentation_organoid",
+    custom_model=True,
+    model_path=r"C:\Users\6331823\Desktop\TEMP\Train model cell segmentation\models\cell_segmentation_organoid2",
 )
 
 summary_results = []

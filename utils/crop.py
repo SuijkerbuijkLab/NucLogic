@@ -23,7 +23,9 @@ def crop(XY_path, input_frames, output_directory, model_path=None):
 
     original = tifffile.imread(XY_path)
 
-    XY = ndimage.zoom(original, (1, 0.2, 0.2), order=0)
+    resize_factors = (1, 200 / original.shape[1] , 200 / original.shape[2])
+
+    XY = ndimage.zoom(original, resize_factors, order=0)
 
     XY = ndimage.gaussian_filter(XY, sigma=(0, 2, 2))
 
@@ -46,8 +48,6 @@ def crop(XY_path, input_frames, output_directory, model_path=None):
         original.shape[2] / XY_mask.shape[2],
     )
     XY_mask = ndimage.zoom(masks, rescale_factors, order=0)
-    tifffile.imwrite(os.path.join(output_directory, "mask.tif"), XY_mask)
-    print(" saved mask")
 
     features = []
     for t in range(timepoints):
