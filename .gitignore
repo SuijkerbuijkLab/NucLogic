@@ -3,3 +3,4 @@
 #venv/ to do a whole folder
 #input/*.xlsx to do all file types in a folder
 utils/__pycache__/
+__pycache__/
