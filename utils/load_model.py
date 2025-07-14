@@ -4,11 +4,11 @@ import torch
 
 import os
 
-def load_model(custom_model=False, model_path=None):
+def load_model(model_path=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device.upper()} for processing.")
 
-    if custom_model and model_path:
+    if model_path:
         model = models.CellposeModel(
             gpu=(device == "cuda"), pretrained_model=model_path
         )

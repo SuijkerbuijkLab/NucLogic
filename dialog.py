@@ -77,6 +77,3 @@ class dialog:
         else:
             print(f"Selected directories:{self.dirs}")
             self.root.destroy()
-
-
-test = dialog().dirs

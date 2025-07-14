@@ -4,6 +4,9 @@ from skimage.measure import regionprops
 import pandas as pd
 import numpy as np
 import trackpy as tp
+import esda
+from scipy.ndimage import zoom
+import libpysal
 
 import os
 
@@ -12,12 +15,7 @@ from utils.threshold import threshold
 #from load_model import load_model
 #from threshold import threshold
 
-def crop(XY_path, input_frames, output_directory, model_path=None):
-    model = load_model(
-        True,
-        model_path,
-    )
-
+def crop(XY_path, input_frames, output_directory, model):
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
@@ -33,10 +31,7 @@ def crop(XY_path, input_frames, output_directory, model_path=None):
 
     masks = []
     for frame in range(timepoints):
-        print(frame)
         image = XY[frame, :, :]
-        #tif = os.path.join(output_directory, f"frame-{frame}.tif")
-        #tifffile.imwrite(tif, image)
         mask, _, _ = model.eval(image, diameter=None, do_3D=False)
         masks.append(mask)
 
@@ -68,7 +63,7 @@ def crop(XY_path, input_frames, output_directory, model_path=None):
     )  # adjust search_range as needed
 
     # Now 'particle' column gives the tracked ID for each organoid
-    print(linked.head())
+    
 
     # Example: get the trajectory for the organoid closest to center at t=0
     center_y, center_x = XY_mask.shape[1] / 2, XY_mask.shape[2] / 2
@@ -110,16 +105,30 @@ def crop(XY_path, input_frames, output_directory, model_path=None):
         ref = tifffile.imread(
             os.path.join(input_frames, f"Channel-ref-frame-{frame}.tif")
         )[:, row_min:row_max, col_min:col_max]
-        ref = threshold(ref)  # Apply thresholding to the reference channel
-        tt_ref = threshold(ref)
-        thrs_intensity = np.mean(tt_ref)
-        z_list = []
-        for z in range(ref.shape[0]):
-            plane_check = tt_ref[z, :, :]
-            if np.mean(plane_check) > thrs_intensity:
-                z_list.append(z)
 
-        slice_min, slice_max = min(z_list), max(z_list) + 1
+        shapeW = zoom(ref, zoom = (1,0.2,0.2), order=0)
+        w = libpysal.weights.lat2W(shapeW.shape[1], shapeW.shape[2])
+
+        z_list = []
+        for z in range(shapeW.shape[0]):
+            plane_check = shapeW[z, :, :]
+            moran = esda.Moran(plane_check.ravel(), w)
+            if moran.I > 0.6:
+                #print(f"Slice {z}, moran: {moran.I}")
+                z_list.append(z)                
+            # else:
+            #     print(f"Skipping slice {z} (low signal), moran: {moran.I}")
+
+        # ref = threshold(ref)  # Apply thresholding to the reference channel
+        # tt_ref = threshold(ref)
+        # thrs_intensity = np.mean(tt_ref)
+        # z_list = []
+        # for z in range(ref.shape[0]):
+        #     plane_check = tt_ref[z, :, :]
+        #     if np.mean(plane_check) > thrs_intensity:
+        #         z_list.append(z)
+
+        slice_min, slice_max = min(z_list)-1, max(z_list) + 2
         ref = ref[slice_min:slice_max, :, :]
 
         tifffile.imwrite(
