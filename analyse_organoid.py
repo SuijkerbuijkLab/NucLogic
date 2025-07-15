@@ -14,7 +14,14 @@ import re
 
 import utils
 
-def analyse_organoid(input_directory, cell_model, organoid_model, frames_existing = False, croped_existing = False):
+
+def analyse_organoid(
+    input_directory,
+    cell_model,
+    organoid_model,
+    frames_existing=False,
+    croped_existing=False,
+):
     output_directory_frames = os.path.join(str(input_directory), "frames")
     if not frames_existing:
         ims_files = [
@@ -23,7 +30,9 @@ def analyse_organoid(input_directory, cell_model, organoid_model, frames_existin
             if f.endswith(".ims")
         ]
         if not ims_files:
-            print(f"Warning: No IMS file found in {input_directory}. Skipping this folder.")
+            print(
+                f"Warning: No IMS file found in {input_directory}. Skipping this folder."
+            )
             return
 
         ims_file = ims_files[0]
@@ -31,9 +40,9 @@ def analyse_organoid(input_directory, cell_model, organoid_model, frames_existin
         utils.split_files(ims_file, output_directory_frames)
 
         utils.max_project(ims_file, input_directory)
-    
+
     output_directory_cropped = os.path.join(str(input_directory), "cropped")
-    
+
     if not croped_existing:
         utils.crop(
             os.path.join(input_directory, "projXY.tif"),
@@ -50,13 +59,9 @@ def analyse_organoid(input_directory, cell_model, organoid_model, frames_existin
         ]
     )
 
-    # cell_model = utils.load_model(
-    #     custom_model=True,
-    #     model_path=r"C:\Users\6331823\Desktop\TEMP\Train model cell segmentation\models\cell_segmentation_organoid2",
-    # )
-
     summary_results = []
-
+    max_dims = [0, 0, 0]
+    segmented_movie = []
 
     for file in alive_it(files, title="Segmenting frames"):
         # Load each frame
@@ -64,19 +69,10 @@ def analyse_organoid(input_directory, cell_model, organoid_model, frames_existin
         frame = tifffile.imread(frame_path)
         frame = utils.single_channel(frame)  # Ensure single channel data
 
-        original_shape = frame.shape  # Save original shape for later rescaling
-        # frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale image for speed
-
-        # frame = utils.threshold(frame)  # Apply mean thresholding
-
-        segmented_stack = utils.segment(frame, cell_model)  # Segment per Z using the model
+        segmented_stack = utils.segment(
+            frame, cell_model
+        )  # Segment per Z using the model
         segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
-
-        # Rescale the segmented stack to the original shape
-        # zoom_factors = np.array(original_shape) / np.array(segmented_stack.shape)
-        # segmented_stack = zoom(segmented_stack, zoom=zoom_factors, order=0).astype(
-        #     np.uint16
-        # )
 
         # Save segmented tiffile
         os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)
@@ -84,6 +80,9 @@ def analyse_organoid(input_directory, cell_model, organoid_model, frames_existin
             input_directory, "segmented", f"{file.split('.')[0]}_masks.tif"
         )
         tifffile.imwrite(segmented_tiff_file, segmented_stack)
+        segmented_movie.append(segmented_stack)
+        for i in range(3):
+            max_dims[i] = max(max_dims[i], segmented_stack.shape[i])
 
         # Get properties of the masked nuclei
         props = utils.properties_mask(segmented_stack)
@@ -126,9 +125,29 @@ def analyse_organoid(input_directory, cell_model, organoid_model, frames_existin
                 "phenotype_count_empty": count_phenotype_empty,
             }
         )
-            
+
     # Save summary of the whole movie as a csv
     summary_results = pd.DataFrame(summary_results)
     summary_txt = os.path.join(input_directory, "summary_results.txt")
     summary_results.to_csv(summary_txt, sep="\t", index=False)
-    
+
+    def pad_to_shape(array, target_shape):
+        pad_width = []
+        for dim, target in zip(array.shape, target_shape):
+            total_pad = target - dim
+            pad_before = total_pad // 2
+            pad_after = total_pad - pad_before
+            pad_width.append((pad_before, pad_after))
+        return np.pad(array, pad_width, mode="constant", constant_values=0)
+
+    # Pad all frames
+    segmented_movie_padded = [
+        pad_to_shape(stack, max_dims) for stack in segmented_movie
+    ]
+
+    # Stack across time
+    segmented_movie_array = np.stack(segmented_movie_padded, axis=0)
+
+    # Save it
+    segmented_movie_tiff = os.path.join(input_directory, "segmented_movie.tif")
+    tifffile.imwrite(segmented_movie_tiff, segmented_movie_array)
