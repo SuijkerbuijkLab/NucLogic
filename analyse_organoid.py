@@ -14,31 +14,33 @@ import re
 
 import utils
 
-def analyse_organoid(input_directory, cell_model, organoid_model):
-    ims_files = [
-        os.path.join(input_directory, f)
-        for f in os.listdir(input_directory)
-        if f.endswith(".ims")
-    ]
-    if not ims_files:
-        print(f"Warning: No IMS file found in {input_directory}. Skipping this folder.")
-        return
-
-    ims_file = ims_files[0]
-
+def analyse_organoid(input_directory, cell_model, organoid_model, frames_existing = False, croped_existing = False):
     output_directory_frames = os.path.join(str(input_directory), "frames")
-    utils.split_files(ims_file, output_directory_frames)
+    if not frames_existing:
+        ims_files = [
+            os.path.join(input_directory, f)
+            for f in os.listdir(input_directory)
+            if f.endswith(".ims")
+        ]
+        if not ims_files:
+            print(f"Warning: No IMS file found in {input_directory}. Skipping this folder.")
+            return
 
-    utils.max_project(ims_file, input_directory)
+        ims_file = ims_files[0]
+
+        utils.split_files(ims_file, output_directory_frames)
+
+        utils.max_project(ims_file, input_directory)
     
     output_directory_cropped = os.path.join(str(input_directory), "cropped")
-    #organoid_model = utils.load_model(r"E:\Users\Sebastian_van_Dijk\TEMP\Train model whole organoid segmentation\smoothed_XY\models\whole_organoid_segmentation")
-    utils.crop(
-        os.path.join(input_directory, "projXY.tif"),
-        output_directory_frames,
-        output_directory_cropped,
-        organoid_model,
-    )
+    
+    if not croped_existing:
+        utils.crop(
+            os.path.join(input_directory, "projXY.tif"),
+            output_directory_frames,
+            output_directory_cropped,
+            organoid_model,
+        )
 
     files = sorted(
         [
@@ -55,7 +57,7 @@ def analyse_organoid(input_directory, cell_model, organoid_model):
 
     summary_results = []
 
-    with alive_bar(files, title="Segmenting frames") as bar:
+    with alive_bar(len(files), title="Segmenting frames") as bar:
         for file in files:
             # Load each frame
             frame_path = os.path.join(output_directory_cropped, file)
@@ -124,9 +126,10 @@ def analyse_organoid(input_directory, cell_model, organoid_model):
                     "phenotype_count_empty": count_phenotype_empty,
                 }
             )
-
+            bar()
+            
         # Save summary of the whole movie as a csv
         summary_results = pd.DataFrame(summary_results)
         summary_txt = os.path.join(input_directory, "summary_results.txt")
         summary_results.to_csv(summary_txt, sep="\t", index=False)
-        bar()
+    

@@ -9,11 +9,11 @@ cell_model = load_model(
 )
     
 organoid_model = load_model(
-    r"E:\Users\Sebastian_van_Dijk\TEMP\Train model whole organoid segmentation\smoothed_XY\models\whole_organoid_segmentation",
+    r"Z:\users\6331823\Mario Pipeline\whole_organoid_segmentation",
     )
 
 organoids = dialog().dirs
 for organoid in organoids:
     print(f"Processing organoid: {os.path.basename(organoid)}")
-    analyse_organoid(organoid, cell_model, organoid_model)
+    analyse_organoid(organoid, cell_model, organoid_model, True)
     print(f"Finished processing organoid: {organoid}")
