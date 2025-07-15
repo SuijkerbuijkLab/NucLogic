@@ -108,7 +108,7 @@ def crop(XY_path, input_frames, output_directory, model):
                 os.path.join(input_frames, f"Channel-ref-frame-{frame}.tif")
             )[:, row_min:row_max, col_min:col_max]
 
-            XZ = np.max(image, axis=1)
+            XZ = np.max(ref, axis=1)
             z_list = []
             for idx, row in enumerate(XZ):
                 # Create weights for 1D data (e.g., k-nearest neighbors with k=2)

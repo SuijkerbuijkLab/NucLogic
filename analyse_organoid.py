@@ -7,7 +7,7 @@ from scipy.ndimage import zoom
 from cellpose.utils import stitch3D
 import numpy as np
 import pandas as pd
-from alive_progress import alive_bar
+from alive_progress import alive_it
 
 import os
 import re
@@ -57,79 +57,78 @@ def analyse_organoid(input_directory, cell_model, organoid_model, frames_existin
 
     summary_results = []
 
-    with alive_bar(len(files), title="Segmenting frames") as bar:
-        for file in files:
-            # Load each frame
-            frame_path = os.path.join(output_directory_cropped, file)
-            frame = tifffile.imread(frame_path)
-            frame = utils.single_channel(frame)  # Ensure single channel data
 
-            original_shape = frame.shape  # Save original shape for later rescaling
-            # frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale image for speed
+    for file in alive_it(files, title="Segmenting frames"):
+        # Load each frame
+        frame_path = os.path.join(output_directory_cropped, file)
+        frame = tifffile.imread(frame_path)
+        frame = utils.single_channel(frame)  # Ensure single channel data
 
-            # frame = utils.threshold(frame)  # Apply mean thresholding
+        original_shape = frame.shape  # Save original shape for later rescaling
+        # frame = zoom(frame, zoom=rescale_factor, order=1)  # Rescale image for speed
 
-            segmented_stack = utils.segment(frame, cell_model)  # Segment per Z using the model
-            segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
+        # frame = utils.threshold(frame)  # Apply mean thresholding
 
-            # Rescale the segmented stack to the original shape
-            # zoom_factors = np.array(original_shape) / np.array(segmented_stack.shape)
-            # segmented_stack = zoom(segmented_stack, zoom=zoom_factors, order=0).astype(
-            #     np.uint16
-            # )
+        segmented_stack = utils.segment(frame, cell_model)  # Segment per Z using the model
+        segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
 
-            # Save segmented tiffile
-            os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)
-            segmented_tiff_file = os.path.join(
-                input_directory, "segmented", f"{file.split('.')[0]}_masks.tif"
-            )
-            tifffile.imwrite(segmented_tiff_file, segmented_stack)
+        # Rescale the segmented stack to the original shape
+        # zoom_factors = np.array(original_shape) / np.array(segmented_stack.shape)
+        # segmented_stack = zoom(segmented_stack, zoom=zoom_factors, order=0).astype(
+        #     np.uint16
+        # )
 
-            # Get properties of the masked nuclei
-            props = utils.properties_mask(segmented_stack)
+        # Save segmented tiffile
+        os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)
+        segmented_tiff_file = os.path.join(
+            input_directory, "segmented", f"{file.split('.')[0]}_masks.tif"
+        )
+        tifffile.imwrite(segmented_tiff_file, segmented_stack)
 
-            # Get properties of the WT and CRC channels at the masked nuclei locations
-            frameNumber = re.search(r"frame-(\d+)", file).group(1)
-            wt_ch = os.path.join(
-                input_directory, "cropped", f"Channel-WT-frame-{frameNumber}.tif"
-            )
-            df_wt = utils.properties_channel(segmented_stack, wt_ch, "WT")
+        # Get properties of the masked nuclei
+        props = utils.properties_mask(segmented_stack)
 
-            crc_ch = os.path.join(
-                input_directory, "cropped", f"Channel-CRC-frame-{frameNumber}.tif"
-            )
-            df_crc = utils.properties_channel(segmented_stack, crc_ch, "CRC")
+        # Get properties of the WT and CRC channels at the masked nuclei locations
+        frameNumber = re.search(r"frame-(\d+)", file).group(1)
+        wt_ch = os.path.join(
+            input_directory, "cropped", f"Channel-WT-frame-{frameNumber}.tif"
+        )
+        df_wt = utils.properties_channel(segmented_stack, wt_ch, "WT")
 
-            df_final = props.merge(df_wt, on="label").merge(df_crc, on="label")
+        crc_ch = os.path.join(
+            input_directory, "cropped", f"Channel-CRC-frame-{frameNumber}.tif"
+        )
+        df_crc = utils.properties_channel(segmented_stack, crc_ch, "CRC")
 
-            (
-                df_final,
-                count_phenotype_c1,
-                count_phenotype_c2,
-                count_phenotype_c1and2,
-                count_phenotype_empty,
-            ) = utils.phenotype(df_final)
+        df_final = props.merge(df_wt, on="label").merge(df_crc, on="label")
 
-            os.makedirs(os.path.join(input_directory, "properties"), exist_ok=True)
-            output_txt_file = os.path.join(
-                input_directory, "properties", f"{file.split('.')[0]}_props.txt"
-            )
-            df_final.to_csv(output_txt_file, sep="\t", index=False)
+        (
+            df_final,
+            count_phenotype_c1,
+            count_phenotype_c2,
+            count_phenotype_c1and2,
+            count_phenotype_empty,
+        ) = utils.phenotype(df_final)
 
-            # Append data from this frame to the summary
-            summary_results.append(
-                {
-                    "file": file,
-                    "phenotype_count_c1": count_phenotype_c1,
-                    "phenotype_count_c2": count_phenotype_c2,
-                    "phenotype_count_c1and2": count_phenotype_c1and2,
-                    "phenotype_count_empty": count_phenotype_empty,
-                }
-            )
-            bar()
+        os.makedirs(os.path.join(input_directory, "properties"), exist_ok=True)
+        output_txt_file = os.path.join(
+            input_directory, "properties", f"{file.split('.')[0]}_props.txt"
+        )
+        df_final.to_csv(output_txt_file, sep="\t", index=False)
+
+        # Append data from this frame to the summary
+        summary_results.append(
+            {
+                "file": file,
+                "phenotype_count_c1": count_phenotype_c1,
+                "phenotype_count_c2": count_phenotype_c2,
+                "phenotype_count_c1and2": count_phenotype_c1and2,
+                "phenotype_count_empty": count_phenotype_empty,
+            }
+        )
             
-        # Save summary of the whole movie as a csv
-        summary_results = pd.DataFrame(summary_results)
-        summary_txt = os.path.join(input_directory, "summary_results.txt")
-        summary_results.to_csv(summary_txt, sep="\t", index=False)
+    # Save summary of the whole movie as a csv
+    summary_results = pd.DataFrame(summary_results)
+    summary_txt = os.path.join(input_directory, "summary_results.txt")
+    summary_results.to_csv(summary_txt, sep="\t", index=False)
     
