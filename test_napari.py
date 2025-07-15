@@ -1,30 +1,42 @@
 import tifffile
-from libpysal.weights import KNN
-from esda.moran import Moran
-import numpy as np
 import napari
+import numpy as np
 
 import os
 
 
-image = tifffile.imread(
-    r"Z:\users\6331823\Mario Pipeline\new\TL27\frames\Channel-Ref-frame-39.tif"
-)[:, 200:820, 170:800]
+input_directory = r"E:\Users\Sebastian_van_Dijk\TEMP\TL27\segmented"
 
-XZ = np.max(image, axis=1)
+frames = []
+shapes = []
 
-for idx, row in enumerate(XZ):
-    # Create weights for 1D data (e.g., k-nearest neighbors with k=2)
-    coords = np.arange(len(row)).reshape(-1, 1)
-    w_1d = KNN.from_array(coords, k=2)
+# Step 1: Load all frames and record their shapes
+for frame in range(60):
+    image = tifffile.imread(
+        os.path.join(input_directory, f"Channel-ref-frame-{frame}_masks.tif")
+    )
+    frames.append(image)
+    shapes.append(image.shape)
 
-    # Compute Moran's I
-    moran = Moran(row, w_1d)
-    print(f"Row {idx}, Moran's I: {moran.I}")
+# Step 2: Find the maximum shape across all frames
+max_shape = np.max(np.array(shapes), axis=0)
 
+# Step 3: Pad each image symmetrically to match max_shape
+def pad_to_shape(img, target_shape):
+    pad_width = []
+    for dim, target in zip(img.shape, target_shape):
+        total_pad = target - dim
+        pad_before = total_pad // 2
+        pad_after = total_pad - pad_before
+        pad_width.append((pad_before, pad_after))
+    return np.pad(img, pad_width, mode='constant', constant_values=0)
 
-# viewer = napari.Viewer()
-# viewer.add_image(XZ, name="max")
+padded_frames = [pad_to_shape(img, max_shape) for img in frames]
 
+# Step 4: Stack into a single array
+stacked = np.stack(padded_frames, axis=0)
 
-# napari.run()
+viewer = napari.Viewer()
+viewer.add_labels(stacked, name="max", scale = (1, 4.94/0.621, 1, 1))
+
+napari.run()
