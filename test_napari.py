@@ -8,8 +8,8 @@ import os
 
 
 image = tifffile.imread(
-    r"Z:\users\6331823\Mario Pipeline\new\TL27\frames\Channel-Ref-frame-39.tif"
-)[:, 200:820, 170:800]
+    r"Z:\users\6331823\Mario Pipeline\new\TL01_mario\frames\Channel-Ref-frame-39.tif"
+)
 
 XZ = np.max(image, axis=1)
 
@@ -23,8 +23,8 @@ for idx, row in enumerate(XZ):
     print(f"Row {idx}, Moran's I: {moran.I}")
 
 
-# viewer = napari.Viewer()
-# viewer.add_image(XZ, name="max")
+viewer = napari.Viewer()
+viewer.add_image(XZ, name="max")
 
 
-# napari.run()
+napari.run()

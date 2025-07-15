@@ -120,15 +120,24 @@ def crop(XY_path, input_frames, output_directory, model):
                 if moran.I > 0.15:
                     z_list.append(idx)
 
-            # Trim the z_list to remove outliers
-            if len(z_list) > 8:
-                z_list_sorted = sorted(z_list)
-                z_list_trimmed = z_list_sorted[4:-4]
-            else:
-                z_list_trimmed = z_list
+            z_vals_sorted = sorted(set(z_list))
+            max_block = []
+            current_block = [z_vals_sorted[0]]
 
-            slice_min = max(min(z_list_trimmed) - 5, 0)
-            slice_max = min(max(z_list_trimmed) + 7, ref.shape[0])
+            for i in range(1, len(z_vals_sorted)):
+                if z_vals_sorted[i] == z_vals_sorted[i - 1] + 1:
+                    current_block.append(z_vals_sorted[i])
+                else:
+                    if len(current_block) > len(max_block):
+                        max_block = current_block
+                    current_block = [z_vals_sorted[i]]
+
+            # Final check in case the longest block ends the loop
+            if len(current_block) > len(max_block):
+                max_block = current_block
+
+            slice_min = max(min(max_block) - 1, 0)
+            slice_max = min(max(max_block) + 1, ref.shape[0])
             ref = ref[slice_min:slice_max, :, :]
 
             tifffile.imwrite(
@@ -145,27 +154,3 @@ def crop(XY_path, input_frames, output_directory, model):
                     image,
                 )
             bar()
-
-
-# input_directory = r"C:\Users\6331823\Desktop\TEMP\test"
-# output_directory_cropped = os.path.join(input_directory, "cropped")
-
-# XY_path = [
-#     os.path.join(input_directory, f)
-#     for f in os.listdir(input_directory)
-#     if "projXY" in f and f.endswith(".tif")
-# ][0]
-
-# output_directory_frames = os.path.join(str(input_directory), "frames")
-
-# # from split_files import split_files
-
-# # ims_file = [
-# #     os.path.join(input_directory, f)
-# #     for f in os.listdir(input_directory)
-# #     if f.endswith(".ims")
-# # ][0]
-
-# # split_files(ims_file, output_directory_frames)
-
-# crop(XY_path, output_directory_frames, output_directory_cropped, r"C:\Users\6331823\Desktop\TEMP\TL02\smoothed_XY\models\whole_organoid_segmentation")
