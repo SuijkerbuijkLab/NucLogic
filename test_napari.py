@@ -1,11 +1,21 @@
-import napari
 import tifffile
+import esda
+import libpysal
+import numpy as np
+import napari
 
-# Load the 3D TIFF file
-mask = tifffile.imread(r"E:\Users\Sebastian_van_Dijk\TEMP\TL01\segmented\Channel-ref-frame-59_masks.tif")
+import os
 
-# Start napari viewer and show the mask
-viewer = napari.Viewer()
-viewer.add_labels(mask, name="Organoid Mask", scale=(4.96/0.621, 1, 1))
 
-napari.run()
+image = tifffile.imread(r"E:\Users\Sebastian_van_Dijk\TEMP\TL27\frames\Channel-Ref-frame-59.tif")[:, 200:820, 170:800]
+
+XZ = np.max(image, axis=1)
+
+for row in itterrows
+
+
+# viewer = napari.Viewer()
+# viewer.add_image(XZ, name="max")
+
+
+# napari.run()
