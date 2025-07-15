@@ -4,17 +4,19 @@ from skimage.measure import regionprops
 import pandas as pd
 import numpy as np
 import trackpy as tp
-import esda
+from libpysal.weights import KNN
+from esda.moran import Moran
 from scipy.ndimage import zoom
-import libpysal
 from alive_progress import alive_bar
 
 import os
 
 from utils.load_model import load_model
 from utils.threshold import threshold
-#from load_model import load_model
-#from threshold import threshold
+
+# from load_model import load_model
+# from threshold import threshold
+
 
 def crop(XY_path, input_frames, output_directory, model):
     if not os.path.exists(output_directory):
@@ -22,7 +24,7 @@ def crop(XY_path, input_frames, output_directory, model):
 
     original = tifffile.imread(XY_path)
 
-    resize_factors = (1, 200 / original.shape[1] , 200 / original.shape[2])
+    resize_factors = (1, 200 / original.shape[1], 200 / original.shape[2])
 
     XY = ndimage.zoom(original, resize_factors, order=0)
 
@@ -64,7 +66,6 @@ def crop(XY_path, input_frames, output_directory, model):
     )  # adjust search_range as needed
 
     # Now 'particle' column gives the tracked ID for each organoid
-    
 
     # Example: get the trajectory for the organoid closest to center at t=0
     center_y, center_x = XY_mask.shape[1] / 2, XY_mask.shape[2] / 2
@@ -103,40 +104,31 @@ def crop(XY_path, input_frames, output_directory, model):
                     np.max(coordsXY[1]) + 1,
                 )
 
-            
             ref = tifffile.imread(
                 os.path.join(input_frames, f"Channel-ref-frame-{frame}.tif")
             )[:, row_min:row_max, col_min:col_max]
 
-            shapeW = zoom(ref, zoom = (1,0.2,0.2), order=0)
-            w = libpysal.weights.lat2W(shapeW.shape[1], shapeW.shape[2])
-
+            XZ = np.max(image, axis=1)
             z_list = []
-            for z in range(shapeW.shape[0]):
-                plane_check = shapeW[z, :, :]
-                moran = esda.Moran(plane_check.ravel(), w)
-                print(f"Slice {z}, moran: {moran.I}")
-                if moran.I > 0.1:
-                    #print(f"Slice {z}, moran: {moran.I}")
-                    z_list.append(z)                
-                # else:
-                #     print(f"Skipping slice {z} (low signal), moran: {moran.I}")
+            for idx, row in enumerate(XZ):
+                # Create weights for 1D data (e.g., k-nearest neighbors with k=2)
+                coords = np.arange(len(row)).reshape(-1, 1)
+                w_1d = KNN.from_array(coords, k=2)
 
-            # ref = threshold(ref)  # Apply thresholding to the reference channel
-            # tt_ref = threshold(ref)
-            # thrs_intensity = np.mean(tt_ref)
-            # z_list = []
-            # for z in range(ref.shape[0]):
-            #     plane_check = tt_ref[z, :, :]
-            #     if np.mean(plane_check) > thrs_intensity:
-            #         z_list.append(z)
+                # Compute Moran's I
+                moran = Moran(row, w_1d)
+                if moran.I > 0.15:
+                    z_list.append(idx)
+
+            # Trim the z_list to remove outliers
             if len(z_list) > 8:
                 z_list_sorted = sorted(z_list)
                 z_list_trimmed = z_list_sorted[4:-4]
             else:
-                z_list_trimmed = z_list 
+                z_list_trimmed = z_list
 
-            slice_min, slice_max = min(z_list_trimmed)-5, max(z_list_trimmed) + 7
+            slice_min = max(min(z_list_trimmed) - 5, 0)
+            slice_max = min(max(z_list_trimmed) + 7, ref.shape[0])
             ref = ref[slice_min:slice_max, :, :]
 
             tifffile.imwrite(
@@ -149,9 +141,11 @@ def crop(XY_path, input_frames, output_directory, model):
                 )[slice_min:slice_max, row_min:row_max, col_min:col_max]
 
                 tifffile.imwrite(
-                    os.path.join(output_directory, f"Channel-{x}-frame-{frame}.tif"), image
+                    os.path.join(output_directory, f"Channel-{x}-frame-{frame}.tif"),
+                    image,
                 )
             bar()
+
 
 # input_directory = r"C:\Users\6331823\Desktop\TEMP\test"
 # output_directory_cropped = os.path.join(input_directory, "cropped")
