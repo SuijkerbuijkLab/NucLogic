@@ -5,26 +5,23 @@ ui = dialog()
 ui.show()
 organoids = ui.dirs
 
+channel_names = [name for name in ui.channel_info]
 
 import os
 
 from main_functions.analyse_organoid import analyse_organoid
 from utils.load_model import load_model
 from dialog import dialog
-import napari
-import tifffile
 import traceback
 import shutil
 
 cell_model = load_model(
-    r"E:\Users\Sebastian_van_Dijk\TEMP\Train model cell segmentation\models\cell_segmentation_organoid2",
+    r"E:\Users\Sebastian_van_Dijk\Train model cell segmentation\models\cell_segmentation_organoid2",
 )
 
 organoid_model = load_model(
-    r"Z:\users\6331823\Mario Pipeline\whole_organoid_segmentation",
+    r"E:\Users\Sebastian_van_Dijk\Train model whole organoid segmentation\smoothed_XY\models\whole_organoid_segmentation",
 )
-
-channel_names = [name for name, _ in ui.channel_info]
 
 def process_next(index):
     if index >= len(organoids):
@@ -39,7 +36,7 @@ def process_next(index):
                          cell_model, 
                          organoid_model,
                          channel_names=channel_names,
-                         crop_existing=ui.advanced_settings["cropped_exists"])
+                         croped_existing=ui.advanced_settings["cropped_exists"])
     except Exception as e:
         print(f"Skipped organoid due to error: {e}")
         traceback.print_exc()

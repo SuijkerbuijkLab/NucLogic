@@ -33,10 +33,18 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
 
     timepoints, y, x = XY.shape
 
+    tifffile.imwrite(os.path.join(output_directory,"for model.tif"), XY)
+
     masks = []
     for frame in range(timepoints):
         image = XY[frame, :, :]
-        mask, _, _ = model.eval(image, diameter=None, do_3D=False)
+        mask, _, _ = model.eval(image,    
+            diameter=None,
+            normalize=True,
+            flow_threshold=0.4,
+            invert=False,
+            resample=True,
+            do_3D=False)
         masks.append(mask)
 
     XY_mask = np.stack(masks, axis=0).astype(np.uint16)
@@ -48,6 +56,8 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
     )
     XY_mask = ndimage.zoom(masks, rescale_factors, order=0)
 
+    tifffile.imwrite(os.path.join(output_directory, "mask.tif"), XY_mask)
+    
     features = []
     for t in range(timepoints):
         props = regionprops(XY_mask[t])
@@ -61,6 +71,7 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
                 }
             )
     features_df = pd.DataFrame(features)
+
 
     linked = tp.link_df(
         features_df, search_range=30, memory=2
@@ -135,10 +146,11 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
                 w_1d = KNN.from_array(coords, k=2)
                 moran = Moran(row, w_1d)
                 moran_values.append((idx, moran.I))  # store both index and value
+                print(moran.I)
 
             # Step 2: Calculate dynamic threshold based on max value
             max_moran = max(val for _, val in moran_values)
-            threshold = 0.6 * max_moran
+            threshold = 0.2 * max_moran
 
             # Step 3: Filter Z slices using threshold
             z_list = [idx for idx, val in moran_values if val >= threshold]

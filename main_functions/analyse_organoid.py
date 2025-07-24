@@ -50,17 +50,18 @@ def analyse_organoid(
     if not croped_existing:
         utils.max_project(input_file, input_directory, nuclei=nuclei_channel)
         utils.crop(
-            os.path.join(input_directory, f"{name}_projXY.tif"),
-            organoid_model,
-            output_directory_cropped,
-            organoid_model,
+            XY_path=os.path.join(input_directory, f"{name}_projXY.tif"),
+            input_file=input_file,
+            model=organoid_model,
+            output_directory=output_directory_cropped,
+            nuclei=nuclei_channel,
         )
 
     files = sorted(
         [
             f
             for f in os.listdir(output_directory_cropped)
-            if f.startswith("Channel-ref") and f.endswith(".tif")
+            if f.startswith("Frame") and f.endswith(".tif")
         ]
     )
 
