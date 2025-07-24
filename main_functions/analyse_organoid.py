@@ -26,19 +26,24 @@ def analyse_organoid(
     nuclei_channel = next(
         (i for i, ch in enumerate(channel_names) if ch.lower() == "nuclei"), -1
     )
+    WT_channel = next(
+        (i for i, ch in enumerate(channel_names) if ch.lower() == "wt"), -1
+    )
+    CRC_channel = next(
+        (i for i, ch in enumerate(channel_names) if ch.lower() == "crc"), -1
+    )
 
     input_files = [
-            os.path.join(input_directory, f)
-            for f in os.listdir(input_directory)
-            if f.endswith(".ims") or f.endswith(".tif")
+        os.path.join(input_directory, f)
+        for f in os.listdir(input_directory)
+        if f.endswith(".ims") or f.endswith(".tif")
     ]
 
     if not input_files:
-        print(
-            f"Warning: No IMS file found in {input_directory}. Skipping this folder."
-        )
+        print(f"Warning: No IMS file found in {input_directory}. Skipping this folder.")
         return
 
+    input_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
     input_file = input_files[0]
     name = os.path.basename(input_file).split(".")[0]
 
@@ -46,7 +51,7 @@ def analyse_organoid(
         utils.max_project(input_file, input_directory, nuclei=nuclei_channel)
         utils.crop(
             os.path.join(input_directory, f"{name}_projXY.tif"),
-            ,
+            organoid_model,
             output_directory_cropped,
             organoid_model,
         )
@@ -67,10 +72,10 @@ def analyse_organoid(
         # Load each frame
         frame_path = os.path.join(output_directory_cropped, file)
         frame = tifffile.imread(frame_path)
-        frame = utils.single_channel(frame)  # Ensure single channel data
+        frame_nuclei = frame[nuclei_channel, :, :, :]
 
         segmented_stack = utils.segment(
-            frame, cell_model
+            frame_nuclei, cell_model
         )  # Segment per Z using the model
         segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
 
@@ -88,16 +93,11 @@ def analyse_organoid(
         props = utils.properties_mask(segmented_stack)
 
         # Get properties of the WT and CRC channels at the masked nuclei locations
-        frameNumber = re.search(r"frame-(\d+)", file).group(1)
-        wt_ch = os.path.join(
-            input_directory, "cropped", f"Channel-WT-frame-{frameNumber}.tif"
-        )
-        df_wt = utils.properties_channel(segmented_stack, wt_ch, "WT")
+        frame_WT = frame[WT_channel, :, :, :]
+        df_wt = utils.properties_channel(segmented_stack, frame_WT, "WT")
 
-        crc_ch = os.path.join(
-            input_directory, "cropped", f"Channel-CRC-frame-{frameNumber}.tif"
-        )
-        df_crc = utils.properties_channel(segmented_stack, crc_ch, "CRC")
+        frame_CRC = frame[CRC_channel, :, :, :]
+        df_crc = utils.properties_channel(segmented_stack, frame_CRC, "CRC")
 
         df_final = props.merge(df_wt, on="label").merge(df_crc, on="label")
 
@@ -131,18 +131,9 @@ def analyse_organoid(
     summary_txt = os.path.join(input_directory, "summary_results.txt")
     summary_results.to_csv(summary_txt, sep="\t", index=False)
 
-    def pad_to_shape(array, target_shape):
-        pad_width = []
-        for dim, target in zip(array.shape, target_shape):
-            total_pad = target - dim
-            pad_before = total_pad // 2
-            pad_after = total_pad - pad_before
-            pad_width.append((pad_before, pad_after))
-        return np.pad(array, pad_width, mode="constant", constant_values=0)
-
     # Pad all frames
     segmented_movie_padded = [
-        pad_to_shape(stack, max_dims) for stack in segmented_movie
+        utils.pad_to_shape(stack, max_dims) for stack in segmented_movie
     ]
 
     # Stack across time
