@@ -8,6 +8,7 @@ from libpysal.weights import KNN
 from esda.moran import Moran
 from scipy.ndimage import zoom
 from alive_progress import alive_bar
+from imaris_ims_file_reader.ims import ims
 
 import os
 
@@ -18,7 +19,7 @@ from utils.threshold import threshold
 # from threshold import threshold
 
 
-def crop(XY_path, input_frames, output_directory, model):
+def crop(XY_path, input_file, output_directory, model, nuclei=2):
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
@@ -83,9 +84,19 @@ def crop(XY_path, input_frames, output_directory, model):
         label = int(row["label"])
         organoid_only[t][XY_mask[t] == label] = original[t][XY_mask[t] == label]
 
+    name = os.path.basename(XY_path).replace(".tif", "")
     tifffile.imwrite(
-        os.path.join(output_directory, "XY_tracked_cropped.tif"), organoid_only
+        os.path.join(
+            os.path.dirname(output_directory),
+            f"{name}_tracked.tif",
+        ),
+        organoid_only,
     )
+
+    if input_file.endswith(".ims"):
+        movie = ims(input_file)  # T,C,Z,Y,X
+    elif input_file.endswith(".tif"):
+        movie = tifffile.imread(input_file)
 
     with alive_bar(timepoints, title="Cropping frames") as bar:
         # Find coordinates of non-zero pixels
@@ -104,21 +115,33 @@ def crop(XY_path, input_frames, output_directory, model):
                     np.max(coordsXY[1]) + 1,
                 )
 
-            ref = tifffile.imread(
-                os.path.join(input_frames, f"Channel-ref-frame-{frame}.tif")
-            )[:, row_min:row_max, col_min:col_max]
+            ref = movie[frame, nuclei, :, row_min:row_max, col_min:col_max]
+            ref_crop = maskXY[
+                row_min:row_max, col_min:col_max
+            ]  # shape (Y_crop, X_crop)
+            ref_expanded = ref_crop[np.newaxis, :, :]
+            ref_expanded = np.repeat(
+                ref_expanded, ref.shape[0], axis=0
+            )  # expand over Z
+            ref_masked = np.where(ref_expanded > 0, ref, 0).astype(np.uint16)
 
-            XZ = np.max(ref, axis=1)
+            XZ = np.max(ref_masked, axis=1)
             z_list = []
+            moran_values = []  # Collect Moran’s I for all rows
+
+            # Step 1: Calculate Moran's I for each row
             for idx, row in enumerate(XZ):
-                # Create weights for 1D data (e.g., k-nearest neighbors with k=2)
                 coords = np.arange(len(row)).reshape(-1, 1)
                 w_1d = KNN.from_array(coords, k=2)
-
-                # Compute Moran's I
                 moran = Moran(row, w_1d)
-                if moran.I > 0.15:
-                    z_list.append(idx)
+                moran_values.append((idx, moran.I))  # store both index and value
+
+            # Step 2: Calculate dynamic threshold based on max value
+            max_moran = max(val for _, val in moran_values)
+            threshold = 0.6 * max_moran
+
+            # Step 3: Filter Z slices using threshold
+            z_list = [idx for idx, val in moran_values if val >= threshold]
 
             z_vals_sorted = sorted(set(z_list))
             max_block = []
@@ -136,21 +159,36 @@ def crop(XY_path, input_frames, output_directory, model):
             if len(current_block) > len(max_block):
                 max_block = current_block
 
-            slice_min = max(min(max_block) - 1, 0)
-            slice_max = min(max(max_block) + 1, ref.shape[0])
-            ref = ref[slice_min:slice_max, :, :]
+            slice_min = max(min(max_block) - 2, 0)
+            slice_max = min(max(max_block) + 2, ref.shape[0])
 
-            tifffile.imwrite(
-                os.path.join(output_directory, f"Channel-ref-frame-{frame}.tif"), ref
+            cropped_image = movie[
+                frame, :, slice_min:slice_max, row_min:row_max, col_min:col_max
+            ]
+
+            # Get 2D mask crop
+            mask_crop = maskXY[
+                row_min:row_max, col_min:col_max
+            ]  # shape: (Y_crop, X_crop)
+
+            # Expand mask to 4D: (C, Z, Y_crop, X_crop)
+            mask_expanded = mask_crop[np.newaxis, np.newaxis, :, :]
+
+            # Repeat over C and Z to match cropped_image shape
+            mask_expanded = np.repeat(
+                mask_expanded, cropped_image.shape[0], axis=0
+            )  # C
+            mask_expanded = np.repeat(
+                mask_expanded, cropped_image.shape[1], axis=1
+            )  # Z
+
+            # Apply the mask
+            cropped_image_masked = np.where(mask_expanded, cropped_image, 0).astype(
+                np.uint16
             )
 
-            for x in ["CRC", "WT"]:
-                image = tifffile.imread(
-                    os.path.join(input_frames, f"Channel-{x}-frame-{frame}.tif")
-                )[slice_min:slice_max, row_min:row_max, col_min:col_max]
-
-                tifffile.imwrite(
-                    os.path.join(output_directory, f"Channel-{x}-frame-{frame}.tif"),
-                    image,
-                )
+            tifffile.imwrite(
+                os.path.join(output_directory, f"Frame-{frame}.tif"),
+                cropped_image_masked,
+            )
             bar()
