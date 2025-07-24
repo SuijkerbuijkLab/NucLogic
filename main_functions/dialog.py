@@ -46,8 +46,7 @@ class dialog:
 
         # Containers for entries and dropdowns
         self.channel_name_entries = []
-        self.color_preview_labels = []
-
+        
         # Create up to 5 channel input rows
         for i in range(5):
             row_frame = tk.Frame(self.channel_frame)

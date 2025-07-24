@@ -16,7 +16,6 @@ def max_project(file, output_directory, nuclei=2):
     movie = movie[:, nuclei, :, :, :] # Remaining object is T Z Y X
     
     max_data = np.max(movie, axis=1) # Project axis Z 
-    
     name = os.path.basename(file).split(".")[0]
     tif = os.path.join(output_directory, f"{name}_projXY.tif")
     tifffile.imwrite(tif, max_data)

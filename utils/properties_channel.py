@@ -6,8 +6,6 @@ import tifffile
 
 
 def properties_channel(mask, image, type=None):
-    image = tifffile.imread(image)
-
     props_channel = regionprops_table(
         mask, intensity_image=image, properties=["label", "area", "mean_intensity"]
     )
