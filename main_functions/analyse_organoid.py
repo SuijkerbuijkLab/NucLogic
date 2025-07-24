@@ -19,34 +19,34 @@ def analyse_organoid(
     input_directory,
     cell_model,
     organoid_model,
-    frames_existing=False,
+    channel_names,
     croped_existing=False,
 ):
-    output_directory_frames = os.path.join(str(input_directory), "frames")
-    if not frames_existing:
-        ims_files = [
+    output_directory_cropped = os.path.join(str(input_directory), "cropped")
+    nuclei_channel = next(
+        (i for i, ch in enumerate(channel_names) if ch.lower() == "nuclei"), -1
+    )
+
+    input_files = [
             os.path.join(input_directory, f)
             for f in os.listdir(input_directory)
-            if f.endswith(".ims")
-        ]
-        if not ims_files:
-            print(
-                f"Warning: No IMS file found in {input_directory}. Skipping this folder."
-            )
-            return
+            if f.endswith(".ims") or f.endswith(".tif")
+    ]
 
-        ims_file = ims_files[0]
+    if not input_files:
+        print(
+            f"Warning: No IMS file found in {input_directory}. Skipping this folder."
+        )
+        return
 
-        utils.split_files(ims_file, output_directory_frames)
-
-        utils.max_project(ims_file, input_directory)
-
-    output_directory_cropped = os.path.join(str(input_directory), "cropped")
+    input_file = input_files[0]
+    name = os.path.basename(input_file).split(".")[0]
 
     if not croped_existing:
+        utils.max_project(input_file, input_directory, nuclei=nuclei_channel)
         utils.crop(
-            os.path.join(input_directory, "projXY.tif"),
-            output_directory_frames,
+            os.path.join(input_directory, f"{name}_projXY.tif"),
+            ,
             output_directory_cropped,
             organoid_model,
         )

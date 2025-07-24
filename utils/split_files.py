@@ -10,11 +10,18 @@ import os
 def split_files(file, output_directory, nuclei=2, WT=1, CRC=0):
     os.makedirs(output_directory, exist_ok=True)
 
-    movie = ims(file)  # T,C,Z,Y,X
+    if file.endswith(".ims"):
+        movie = ims(file)  # T,C,Z,Y,X
+        timepoints = movie.TimePoints
+        channels = movie.Channels
+    elif file.endswith(".tif"):
+        movie = tifffile.imread(file)
+        timepoints = movie.shape[0]
+        channels = movie.shape[1]
 
-    with alive_bar(movie.TimePoints, title="Making TIFFs from frames") as bar:
-        for frame in range(movie.TimePoints):
-            for channel in range(movie.Channels):
+    with alive_bar(timepoints, title="Making TIFFs from frames") as bar:
+        for frame in range(timepoints):
+            for channel in range(channels):
                 image = movie[frame, channel, :, :, :]
                 if channel == CRC:
                     name = "CRC"
