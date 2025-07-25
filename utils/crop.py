@@ -33,8 +33,6 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
 
     timepoints, y, x = XY.shape
 
-    tifffile.imwrite(os.path.join(output_directory,"for model.tif"), XY)
-
     masks = []
     for frame in range(timepoints):
         image = XY[frame, :, :]
@@ -45,7 +43,17 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
             invert=False,
             resample=True,
             do_3D=False)
-        masks.append(mask)
+        
+        labels = np.unique(mask)
+        labels = labels[labels != 0]  # skip background
+
+        dilated = np.zeros_like(mask)
+
+        for label in labels:
+            binary = (mask == label)
+            dilated_binary = ndimage.binary_dilation(binary, iterations=3)
+            dilated[dilated_binary] = label
+        masks.append(dilated)
 
     XY_mask = np.stack(masks, axis=0).astype(np.uint16)
 
@@ -55,8 +63,6 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
         original.shape[2] / XY_mask.shape[2],
     )
     XY_mask = ndimage.zoom(masks, rescale_factors, order=0)
-
-    tifffile.imwrite(os.path.join(output_directory, "mask.tif"), XY_mask)
     
     features = []
     for t in range(timepoints):
