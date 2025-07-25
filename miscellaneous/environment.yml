@@ -1,3 +1,5 @@
+# This file contains a yml description of the environment that conda can make to run this python program
+
 name: organoid_cropper_env
 channels:
   - defaults
