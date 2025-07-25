@@ -75,10 +75,12 @@ def analyse_organoid(
         frame = tifffile.imread(frame_path)
         frame_nuclei = frame[nuclei_channel, :, :, :]
 
+       
+
         segmented_stack = utils.segment(
             frame_nuclei, cell_model
         )  # Segment per Z using the model
-        segmented_stack = stitch3D(segmented_stack)  # Connect masks across Z
+        segmented_stack_stitched = stitch3D(segmented_stack)  # Connect masks across Z
 
         # Save segmented tiffile
         os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)
@@ -112,9 +114,9 @@ def analyse_organoid(
 
         os.makedirs(os.path.join(input_directory, "properties"), exist_ok=True)
         output_txt_file = os.path.join(
-            input_directory, "properties", f"{file.split('.')[0]}_props.txt"
+            input_directory, "properties", f"{file.split('.')[0]}_props.csv"
         )
-        df_final.to_csv(output_txt_file, sep="\t", index=False)
+        df_final.to_csv(output_txt_file, index=False)
 
         # Append data from this frame to the summary
         summary_results.append(
@@ -129,8 +131,8 @@ def analyse_organoid(
 
     # Save summary of the whole movie as a csv
     summary_results = pd.DataFrame(summary_results)
-    summary_txt = os.path.join(input_directory, "summary_results.txt")
-    summary_results.to_csv(summary_txt, sep="\t", index=False)
+    summary_txt = os.path.join(input_directory, "summary_results.csv")
+    summary_results.to_csv(summary_txt, index=False)
 
     # Pad all frames
     segmented_movie_padded = [

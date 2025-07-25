@@ -33,8 +33,8 @@ def process_next(index):
 
     try:
         analyse_organoid(organoid, 
-                         cell_model, 
-                         organoid_model,
+                         cell_model=cell_model, 
+                         organoid_model=organoid_model,
                          channel_names=channel_names,
                          croped_existing=ui.advanced_settings["cropped_exists"])
     except Exception as e:
