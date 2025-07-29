@@ -31,24 +31,11 @@ def analyse_organoid(
         (i for i, ch in enumerate(channel_names) if ch.lower() == "crc"), -1
     )
 
-    # Find the existing IMS or Tiff files in this folder
-    input_files = [
-        os.path.join(input_directory, f)
-        for f in os.listdir(input_directory)
-        if f.endswith(".ims") or f.endswith(".tif")
-    ]
+    # Find the biggest existing IMS or Tiff file in this folder and use it as the input
+    input_file = utils.find_input_file(input_directory=input_directory)
 
-    # If no IMS or Tiff file is found, print a warning
-    if not input_files:
-        print(f"Warning: No IMS file found in {input_directory}. Skipping this folder.")
-        return
-
-    # From the found IMS and Tiff files, select the bigest file to use as the input file, as this is probably the main file you want to analyse
-    input_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
-    input_file = input_files[0]
-    name = os.path.basename(input_file).split(".")[
-        0
-    ]  # Get what the file name is without the extension to use for new file generation
+    # Get what the file name is without the extension to use for new file generation
+    name = os.path.basename(input_file).split(".")[0]
 
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
@@ -71,15 +58,12 @@ def analyse_organoid(
         ]
     )
 
-    summary_results = []  # Used to generate a summary file for every organoid movie
-    max_dims = [
-        0,
-        0,
-        0,
-    ]  # Used to create padding around every frame to make sure we can stack frames of different XYZ sizes into a single movie for viewing in FIJI / whatever
-    segmented_movie = (
-        []
-    )  # Used to keep track of every segmented frame to make into a single movie as stated above
+    # Used to generate a summary file for every organoid movie
+    summary_results = []
+    # Used to create padding around every frame to make sure we can stack frames of different XYZ sizes into a single movie for viewing in FIJI / whatever
+    max_dims = [0, 0, 0]
+    # Used to keep track of every segmented frame to make into a single movie as stated aboves
+    segmented_movie = []
 
     # Loop over every frame, this alive it makes sure we get a nice printed progress bar in the CMD
     for file in alive_it(files, title="Segmenting frames"):

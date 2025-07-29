@@ -9,6 +9,7 @@ from .phenotype import phenotype
 from .max_project import max_project
 from .crop import crop
 from .pad_to_shape import pad_to_shape
+from .find_input_file import find_input_file
 
 
 print("utils package loaded successfully")
