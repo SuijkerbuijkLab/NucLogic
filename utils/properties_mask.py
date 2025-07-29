@@ -1,13 +1,17 @@
-# Function to get properties from masked images and put them in a pd df
+# Function to get properties from masked images and put them in a pandas df
 
 from skimage.measure import regionprops
 import pandas as pd
 
 
 def properties_mask(image):
+
+    # Get the properties of every mask in the image
     props = regionprops(image)
 
     data = []
+
+    # For every mask found, get the label, centeroid, boundingbox, and volume
     for prop in props:
         label = prop.label
         centroid = prop.centroid  # (z, y, x)
@@ -25,6 +29,7 @@ def properties_mask(image):
             }
         )
 
+    # Make a pandas data frame from the data
     df_props = pd.DataFrame(data)
 
     return df_props
