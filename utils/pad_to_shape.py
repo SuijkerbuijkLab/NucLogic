@@ -1,3 +1,5 @@
+# Function to get an incomming stack of images and pad them all to the correct shape based on the max dimensions
+
 import numpy as np
 
 
