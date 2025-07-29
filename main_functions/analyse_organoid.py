@@ -106,6 +106,10 @@ def analyse_organoid(
 
         # Combine the information of nuclei, WT, and CRC channel into a single dataframe
         df_final = props.merge(df_wt, on="label").merge(df_crc, on="label")
+        df_final['wt_crc_ratio'] = df_final.apply(
+            lambda row: row['raw_WT'] / row['raw_CRC'] if row['raw_CRC'] != 0 else 5,
+            axis=1
+        )
 
         # On the combined dataframe, we run the phenotype function to calculate for every cell whether it is a WT or CRC cell
         (

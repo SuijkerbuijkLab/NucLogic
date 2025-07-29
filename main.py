@@ -11,13 +11,12 @@ import os
 
 from main_functions.analyse_organoid import analyse_organoid
 from utils.load_model import load_model
-from dialog import dialog
 import traceback
 import shutil
 
 # Loading the model that is used to segment cells
 cell_model = load_model(
-    r"E:\Users\Sebastian_van_Dijk\Train model cell segmentation\models\cell_segmentation_organoid2",
+    r"E:\Users\Sebastian_van_Dijk\Train model cell segmentation\models\cell_segmentation_organoid3",
 )
 
 # Loading the model that is used to segment the important organoid
