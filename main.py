@@ -13,6 +13,7 @@ from main_functions.analyse_organoid import analyse_organoid
 from utils.load_model import load_model
 import traceback
 import shutil
+import pandas as pd
 
 # Loading the model that is used to segment cells
 cell_model = load_model(
@@ -49,6 +50,10 @@ def process_next(index):
         print(f"Skipped organoid due to error: {e}")
         traceback.print_exc()
 
+    # Make an overview results of all segmented organoids
+    df = pd.read_csv(os.path.join(organoid, "summary_results.csv"))
+    results.append(df)
+
     # Delete the cropped folder if the user specified this, this will save a lot of space on the disk
     if ui.advanced_settings["delete_cropped"] and os.path.exists(
         os.path.join(organoid, "cropped")
@@ -78,7 +83,15 @@ def process_next(index):
     progress.root.after(10, lambda: process_next(index + 1))
 
 
+# Dataframe that will contain all data
+results = []
+
 # Running the function and progressbar
 progress = progressbar(total_tasks=len(organoids))
 progress.root.after(10, lambda: process_next(0))
 progress.root.mainloop()
+
+# Saving the results data frame
+results = pd.concat(results, ignore_index=True)
+results_csv = os.path.join(os.path.basename(organoids[0]), "global_results.csv")
+results.to_csv(results_csv, index=False)
