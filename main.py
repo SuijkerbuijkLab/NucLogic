@@ -9,6 +9,7 @@ channel_names = [name for name in ui.channel_info]
 channel_names = [name for name in channel_names if name != ""]
 
 import os
+import re
 
 from main_functions.analyse_organoid import analyse_organoid
 from utils.load_model import load_model
@@ -18,13 +19,18 @@ import pandas as pd
 
 # Loading the model that is used to segment cells
 cell_model = load_model(
-    r"C:\Users\6331823\Local SSD\Train model cell segmentation\models\cell_segmentation_organoid3",
+    r"C:\Users\6331823\Local SSD\Train model cell segmentation\models\cell_segmentation_4",
 )
 
 # Loading the model that is used to segment the important organoid
 organoid_model = load_model(
-    r"C:\Users\6331823\Local SSD\Train model whole organoid segmentation\smoothed_XY\models\whole_organoid_segmentation",
+    r"C:\Users\6331823\Local SSD\Train model whole organoid segmentation\smoothed_XY\models\whole_liver_organoid_segmentation",
 )
+
+
+def extract_frame_number(filename):
+    match = re.search(r"Frame-(\d+)", filename)
+    return int(match.group(1)) if match else -1
 
 
 # This process next function is the main loop, it is encoded in this function to make sure the progress bar of the UI works and updates after every organoid
@@ -47,13 +53,28 @@ def process_next(index):
             channel_names=channel_names,
             croped_existing=ui.advanced_settings["cropped_exists"],
         )
+
+        # Make an overview results of all segmented organoids
+        df = pd.read_csv(os.path.join(organoid, "summary_results_organoid.csv"))
+        summary_results.append(df)
+
+        # Make a file that really has all data collected of all organoids
+        all_properties = []
+        files = [
+            f
+            for f in os.listdir(os.path.join(organoid, "properties"))
+            if f.endswith(".csv")
+        ]
+        files = sorted(files, key=extract_frame_number)
+        for file in files:
+            df = pd.read_csv(os.path.join(organoid, "properties", file))
+            df.insert(0, "organoid", os.path.basename(organoid))
+            all_properties.append(df)
+        all_properties = pd.concat(all_properties, ignore_index=True)
+        results.append(all_properties)
     except Exception as e:
         print(f"Skipped organoid due to error: {e}")
         traceback.print_exc()
-
-    # Make an overview results of all segmented organoids
-    df = pd.read_csv(os.path.join(organoid, "summary_results.csv"))
-    results.append(df)
 
     # Delete the cropped folder if the user specified this, this will save a lot of space on the disk
     if ui.advanced_settings["delete_cropped"] and os.path.exists(
@@ -84,6 +105,9 @@ def process_next(index):
     progress.root.after(10, lambda: process_next(index + 1))
 
 
+# Dataframe that will contain all summarised data
+summary_results = []
+
 # Dataframe that will contain all data
 results = []
 
@@ -92,7 +116,12 @@ progress = progressbar(total_tasks=len(organoids))
 progress.root.after(10, lambda: process_next(0))
 progress.root.mainloop()
 
-# Saving the results data frame
+# Saving the summary results data frame
+summary_results = pd.concat(summary_results, ignore_index=True)
+summary_results_csv = os.path.join(os.path.dirname(organoids[0]), "summary_results.csv")
+summary_results.to_csv(summary_results_csv, index=False)
+
+# Saving the  results data frame
 results = pd.concat(results, ignore_index=True)
-results_csv = os.path.join(os.path.dirname(organoids[0]), "global_results.csv")
+results_csv = os.path.join(os.path.dirname(organoids[0]), "full_results.csv")
 results.to_csv(results_csv, index=False)

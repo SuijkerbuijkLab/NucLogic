@@ -23,6 +23,7 @@ def segment(image, model):
             invert=False,
             resample=True,
             do_3D=False,
+            progress=None,
         )
 
         # Add mask to the mask list

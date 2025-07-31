@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from alive_progress import alive_it
 import tables
+import itertools
 
 import os
 import re
@@ -26,17 +27,17 @@ def analyse_organoid(
     croped_existing=False,  # Is there already a folder present that contains cropped tiffs, then we can skip cropping
 ):
     # Set some parameters for the rest of the scripped
-    print(channel_names)
     output_directory_cropped = os.path.join(str(input_directory), "cropped")
-    nuclei_channel = next(
-        (i for i, ch in enumerate(channel_names) if ch.lower() == "nuclei"), -1
-    )
-    WT_channel = next(
-        (i for i, ch in enumerate(channel_names) if ch.lower() == "wt"), -1
-    )
-    CRC_channel = next(
-        (i for i, ch in enumerate(channel_names) if ch.lower() == "crc"), -1
-    )
+
+    # Extract channel indices with a dictionary for dynamic access
+    channel_indices = {
+        ch.lower(): i for i, ch in enumerate(channel_names) if ch.strip()
+    }
+
+    # Always process the nuclei channel
+    nuclei_channel = channel_indices.get("nuclei", -1)
+    if nuclei_channel == -1:
+        raise ValueError("Nuclei channel is required.")
 
     # Find the biggest existing IMS or Tiff file in this folder and use it as the input
     input_file = utils.find_input_file(input_directory=input_directory)
@@ -76,7 +77,6 @@ def analyse_organoid(
     )
 
     files = sorted(files, key=extract_frame_number)
-    print(files)
 
     # Used to create padding around every frame to make sure we can stack frames of different XYZ sizes into a single movie for viewing in FIJI / whatever
     max_dims = [0, 0, 0]
@@ -119,22 +119,36 @@ def analyse_organoid(
 
         # Get properties of every cell in the WT and CRC channels at the masked nuclei locations
         # We do this on an image where the median value (background) is subtracted from the signal
-        frame_WT = frame[WT_channel, :, :, :]
-        offset_WT = utils.offset_image(frame_WT, type="median")
-        df_wt = utils.properties_channel(segmented_stack, offset_WT, "WT")
-
-        frame_CRC = frame[CRC_channel, :, :, :]
-        offset_CRC = utils.offset_image(frame_CRC, type="median")
-        df_crc = utils.properties_channel(segmented_stack, offset_CRC, "CRC")
+        channel_dfs = {}  # Store channel dataframes during for loop
+        for ch_name, ch_index in channel_indices.items():
+            if ch_name == "nuclei":
+                continue  # Skip nuclei for separate processing or if handled elsewhere
+            frame_ch = frame[ch_index, :, :, :]
+            offset_ch = utils.offset_image(frame_ch, type="median")
+            df_ch = utils.properties_channel(
+                segmented_stack, offset_ch, channel_names[ch_index]
+            )
+            channel_dfs[channel_names[ch_index]] = df_ch
 
         # Combine the information of nuclei, WT, and CRC channel into a single dataframe
-        df_final = props.merge(df_wt, on="label").merge(df_crc, on="label")
-        df_final["file"] = file
-        df_final["wt_crc_ratio"] = df_final.apply(
-            lambda row: row["raw_WT"] / row["raw_CRC"] if row["raw_CRC"] != 0 else 5,
-            axis=1,
-        )
-        df_final["log_ratio"] = np.log10(df_final["wt_crc_ratio"] + 1e-6)
+        df_final = props.copy()
+        for ch_name, df_ch in channel_dfs.items():
+            df_final = df_final.merge(df_ch, on="label")
+        df_final.insert(0, "frame", int(re.search(r"\d+", file).group()))
+
+        # Add some extra statistics to the dataframe.
+        channels = [ch for ch in channel_dfs.keys() if ch.lower() != "nuclei"]
+        for ch_a, ch_b in itertools.combinations(channels, 2):
+            raw_a = f"raw_{ch_a}"
+            raw_b = f"raw_{ch_b}"
+            ratio_col = f"ratio_{ch_a}_{ch_b}"
+            log_col = f"log_{ratio_col}"
+
+            df_final[ratio_col] = df_final.apply(
+                lambda row: row[raw_a] / row[raw_b] if row[raw_b] != 0 else 30,
+                axis=1,
+            )
+            df_final[log_col] = np.log10(df_final[ratio_col] + 1e-6)
 
         # Save the dataframe that contains all information and phenotypes of this frame to a file named properties
         os.makedirs(os.path.join(input_directory, "properties"), exist_ok=True)
@@ -150,14 +164,32 @@ def analyse_organoid(
     properties = pd.concat(properties, ignore_index=True)
 
     # Calculate the cutoff value between WT and CRC cells based on the ratio between their signals
-    cutoff = utils.calculate_cutoff(properties, "log_ratio")
+    for ch_a, ch_b in itertools.combinations(channels, 2):
+        cutoff = utils.calculate_cutoff(properties, f"log_ratio_{ch_a}_{ch_b}")
 
     summary_results = []
     for file in files:
-        df = properties[properties["file"] == file]
-        crc_count = np.sum(df["log_ratio"] < cutoff)
-        wt_count = np.sum(df["log_ratio"] >= cutoff)
+        df = properties[properties["frame"] == int(re.search(r"\d+", file).group())]
+        for ch_a, ch_b in itertools.combinations(channels, 2):
+            crc_count = np.sum(df[f"log_ratio_{ch_a}_{ch_b}"] < cutoff)
+            wt_count = np.sum(df[f"log_ratio_{ch_a}_{ch_b}"] >= cutoff)
+            log_col = f"log_ratio_{ch_a}_{ch_b}"
         total = crc_count + wt_count
+
+        old_df = pd.read_csv(
+            os.path.join(
+                input_directory, "properties", f"{file.split('.')[0]}_props.csv"
+            )
+        )
+        old_df["phenotype"] = old_df["phenotype"] = np.where(
+            old_df[log_col] < cutoff, "CRC", "WT"
+        )
+        old_df.to_csv(
+            os.path.join(
+                input_directory, "properties", f"{file.split('.')[0]}_props.csv"
+            ),
+            index=False,
+        )
 
         results = {
             "organoid": name,
@@ -178,7 +210,7 @@ def analyse_organoid(
     )
 
     # Save summary of the whole movie as a csv
-    summary_txt = os.path.join(input_directory, "summary_results.csv")
+    summary_txt = os.path.join(input_directory, "summary_results_organoid.csv")
     summary_results.to_csv(summary_txt, index=False)
 
     # Generate plots and save these as a report
