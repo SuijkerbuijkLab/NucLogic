@@ -2,10 +2,11 @@
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+import pandas as pd
 
 
 def generate_report(df, time_interval=1, output_path="report.pdf"):
-    times = df["file"] * time_interval
+    times = list(df.index.values) * time_interval
 
     with PdfPages(output_path) as pdf:
         # Plot % of cells over time
