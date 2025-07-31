@@ -6,6 +6,7 @@ ui = dialog()
 ui.show()
 organoids = ui.dirs
 channel_names = [name for name in ui.channel_info]
+channel_names = [name for name in channel_names if name != ""]
 
 import os
 
@@ -17,12 +18,12 @@ import pandas as pd
 
 # Loading the model that is used to segment cells
 cell_model = load_model(
-    r"E:\Users\Sebastian_van_Dijk\Train model cell segmentation\models\cell_segmentation_organoid3",
+    r"C:\Users\6331823\Local SSD\Train model cell segmentation\models\cell_segmentation_organoid3",
 )
 
 # Loading the model that is used to segment the important organoid
 organoid_model = load_model(
-    r"E:\Users\Sebastian_van_Dijk\Train model whole organoid segmentation\smoothed_XY\models\whole_organoid_segmentation",
+    r"C:\Users\6331823\Local SSD\Train model whole organoid segmentation\smoothed_XY\models\whole_organoid_segmentation",
 )
 
 
@@ -93,5 +94,5 @@ progress.root.mainloop()
 
 # Saving the results data frame
 results = pd.concat(results, ignore_index=True)
-results_csv = os.path.join(os.path.basename(organoids[0]), "global_results.csv")
+results_csv = os.path.join(os.path.dirname(organoids[0]), "global_results.csv")
 results.to_csv(results_csv, index=False)

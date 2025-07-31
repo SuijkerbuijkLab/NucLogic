@@ -13,7 +13,7 @@ import utils
 
 
 def extract_frame_number(filename):
-    match = re.search(r"frame-(\d+)", filename)
+    match = re.search(r"Frame-(\d+)", filename)
     return int(match.group(1)) if match else -1
 
 
@@ -26,6 +26,7 @@ def analyse_organoid(
     croped_existing=False,  # Is there already a folder present that contains cropped tiffs, then we can skip cropping
 ):
     # Set some parameters for the rest of the scripped
+    print(channel_names)
     output_directory_cropped = os.path.join(str(input_directory), "cropped")
     nuclei_channel = next(
         (i for i, ch in enumerate(channel_names) if ch.lower() == "nuclei"), -1
@@ -50,6 +51,8 @@ def analyse_organoid(
         timestamps = np.array([row[2] for row in time_values])
         timestamps = timestamps // 3.6e9  # gets data in nanoseconds, calculate to hours
         time_interval = timestamps[1] - timestamps[0]
+    else:
+        time_interval = 1
 
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
@@ -73,6 +76,7 @@ def analyse_organoid(
     )
 
     files = sorted(files, key=extract_frame_number)
+    print(files)
 
     # Used to create padding around every frame to make sure we can stack frames of different XYZ sizes into a single movie for viewing in FIJI / whatever
     max_dims = [0, 0, 0]

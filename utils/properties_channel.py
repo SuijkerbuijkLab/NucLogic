@@ -14,7 +14,11 @@ def properties_channel(mask, image, type=None):
 
     # Make this into a pandas dataframe and rename some variables to the name of the channel for later merging
     props_channel = pd.DataFrame(props_channel).rename(
-        columns={"area": f"area_{type}", "mean_intensity": f"raw_{type}"}
+        columns={
+            "label": "label",
+            "area": f"area_{type}",
+            "mean_intensity": f"raw_{type}",
+        }
     )
 
     return props_channel
