@@ -11,11 +11,15 @@ def max_project(file, output_directory, nuclei=2):
     # Load in either the ims or tif file
     if file.endswith(".ims"):
         movie = ims(file)  # T,C,Z,Y,X
-    elif file.endswith(".tif"):
-        movie = tifffile.imread(file)
 
-    # Get only the information of the nuclei channel
-    movie = movie[:, nuclei, :, :, :]  # Remaining object is T Z Y X
+        # Get only the information of the nuclei channel
+        movie = movie[:, nuclei, :, :, :]  # Remaining object is T Z Y X
+
+    elif file.endswith(".tif"):
+        movie = tifffile.imread(file)  # T,Z,C,Y,X
+
+        # Get only the information of the nuclei channel
+        movie = movie[:, :, nuclei, :, :]  # Remaining object is T Z Y X
 
     # Project axis Z
     max_data = np.max(movie, axis=1)

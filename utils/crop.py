@@ -121,7 +121,8 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
     if input_file.endswith(".ims"):
         movie = ims(input_file)  # T,C,Z,Y,X
     elif input_file.endswith(".tif"):
-        movie = tifffile.imread(input_file)
+        movie = tifffile.imread(input_file)  # T,Z,C,Y,X
+        movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
 
     # Loop over every frame in the movie to crop that frame.
     with alive_bar(timepoints, title="Cropping frames") as bar:
@@ -166,11 +167,10 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
                 w_1d = KNN.from_array(coords, k=2)
                 moran = Moran(row, w_1d)
                 moran_values.append((idx, moran.I))  # store both index and value
-                print(moran.I)
 
             # Step 2: Calculate dynamic threshold based on max moran I value found
             max_moran = max(val for _, val in moran_values)
-            threshold = 0.2 * max_moran
+            threshold = 0.3 * max_moran
 
             # Step 3: Filter Z slices using threshold
             z_list = [idx for idx, val in moran_values if val >= threshold]
