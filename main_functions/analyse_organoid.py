@@ -9,6 +9,7 @@ import itertools
 
 import os
 import re
+import sys
 
 import utils
 
@@ -96,11 +97,15 @@ def analyse_organoid(
         frame_nuclei = frame[nuclei_channel, :, :, :]
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
+        # stdout silenced to stop printing random stuff
+        old_stdout = sys.stdout  # backup current stdout
+        sys.stdout = open(os.devnull, "w")
         segmented_stack = utils.segment(frame_nuclei, cell_model)
 
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
         segmented_stack_stitched = stitch3D(segmented_stack)
+        sys.stdout = old_stdout  # reset old stdout
 
         # Save segmentation mask tiffile
         os.makedirs(os.path.join(input_directory, "segmented"), exist_ok=True)
