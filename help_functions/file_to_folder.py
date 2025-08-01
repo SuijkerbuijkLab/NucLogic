@@ -3,7 +3,7 @@
 import os
 import shutil
 
-input_directory = r"C:\Users\6331823\Local SSD\Data_Anna\mixed"
+input_directory = r"C:\Users\6331823\Local SSD\Data_Anna\crc"
 
 for file in os.listdir(input_directory):
     file_path = os.path.join(input_directory, file)

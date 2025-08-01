@@ -4,6 +4,13 @@ import numpy as np
 from sklearn.mixture import GaussianMixture
 
 
+def solve_gasussians(m1, s1, m2, s2):
+    a = 1.0 / (2.0 * s1**2) - 1.0 / (2.0 * s2**2)
+    b = m2 / (s2**2) - m1 / (s1**2)
+    c = m1**2 / (2 * s1**2) - m2**2 / (2.0 * s2**2) - np.log(s2 / s1)
+    return np.roots([a, b, c])
+
+
 def calculate_cutoff(df, column):
 
     # Reshape the data into something we can use for kmeans
@@ -20,13 +27,16 @@ def calculate_cutoff(df, column):
     means = gmm.means_.flatten()
     means.sort()  # Sorted so you know which is the low/high cluster
 
-    # Separate the clusters
-    group_low = ratios[gmm_labels == np.argmin(means)]
-    group_high = ratios[gmm_labels == np.argmax(means)]
+    # Calculate the stds for the sigmas
+    variances = gmm.covariances_.flatten()
+    stds = np.sqrt(variances)
 
-    # Find boundary values and cutoff
-    lower_max = np.max(group_low)
-    upper_min = np.min(group_high)
-    cutoff = (lower_max + upper_min) / 2
+    # To fill in the formula
+    mu1, mu2 = means
+    sigma1, sigma2 = stds
+
+    # Solve quadratic formula, and the highest intersection point is the cutoff value
+    solved_val = solve_gasussians(mu1, sigma1, mu2, sigma2)
+    cutoff = sorted(solved_val)[-1]
 
     return cutoff
