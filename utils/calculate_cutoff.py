@@ -20,23 +20,17 @@ def calculate_cutoff(df, column):
     gmm = GaussianMixture(n_components=2, random_state=0)
     gmm.fit(ratios)
 
-    # Predict cluster labels
-    gmm_labels = gmm.predict(ratios)
-
-    # Access the means of the Gaussian components
-    means = gmm.means_.flatten()
-    means.sort()  # Sorted so you know which is the low/high cluster
-
-    # Calculate the stds for the sigmas
-    variances = gmm.covariances_.flatten()
-    stds = np.sqrt(variances)
-
     # To fill in the formula
-    mu1, mu2 = means
-    sigma1, sigma2 = stds
+    mu1, mu2 = gmm.means_.flatten()
+    sigma1, sigma2 = np.sqrt(gmm.covariances_.flatten())
 
     # Solve quadratic formula, and the highest intersection point is the cutoff value
-    solved_val = solve_gasussians(mu1, sigma1, mu2, sigma2)
-    cutoff = sorted(solved_val)[-1]
+    if np.std(ratios) > 0.7:  # mixed
+        solved_val = solve_gasussians(mu1, sigma1, mu2, sigma2)
+        cutoff = solved_val[1]
+    elif ratios.mean() > 0:  # wt
+        cutoff = ratios.min() - 0.1
+    elif ratios.mean() <= 0:  # crc
+        cutoff = ratios.max() + 0.1
 
     return cutoff
