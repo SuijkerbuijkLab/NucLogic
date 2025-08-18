@@ -150,7 +150,7 @@ def analyse_organoid(
             log_col = f"log_{ratio_col}"
 
             df_final[ratio_col] = df_final.apply(
-                lambda row: row[raw_a] / row[raw_b] if row[raw_b] != 0 else 30,
+                lambda row: (row[raw_a] + 1e-6) / (row[raw_b] + 1e-6),
                 axis=1,
             )
             df_final[log_col] = np.log10(df_final[ratio_col] + 1e-6)
