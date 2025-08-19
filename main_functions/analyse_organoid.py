@@ -59,13 +59,16 @@ def analyse_organoid(
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
     if not croped_existing:
-        utils.max_project(input_file, input_directory, nuclei=nuclei_channel)
+        proj_XY = utils.max_project(input_file, input_directory, nuclei=nuclei_channel)
+        proj_XY_name = os.path.join(os.path.dirname(input_file), f"{name}_projXY.tif")
+        tifffile.imwrite(proj_XY_name, proj_XY)
         utils.crop(
-            XY_path=os.path.join(input_directory, f"{name}_projXY.tif"),
+            proj_XY=proj_XY,
             input_file=input_file,
             model=organoid_model,
             output_directory=output_directory_cropped,
             nuclei=nuclei_channel,
+            name=name,
         )
 
     # Find all the created cropped tiff files, every file is a 1 frame of the movie

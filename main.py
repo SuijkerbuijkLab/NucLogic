@@ -13,6 +13,7 @@ import re
 
 from main_functions.analyse_organoid import analyse_organoid
 from utils.load_model import load_model
+from sam2.build_sam import build_sam2_video_predictor
 import traceback
 import shutil
 import pandas as pd
@@ -23,9 +24,12 @@ cell_model = load_model(
 )
 
 # Loading the model that is used to segment the important organoid
-organoid_model = load_model(
-    r"C:\Users\6331823\Local SSD\Train model whole organoid segmentation\smoothed_XY\models\whole_liver_organoid_segmentation",
-)
+# organoid_model = load_model(
+#     r"C:\Users\6331823\Local SSD\Train model whole organoid segmentation\smoothed_XY\models\whole_liver_organoid_segmentation",
+# )
+CHECKPOINT = r"C:\Users\6331823\Downloads\sam2.1_hiera_small.pt"
+CONFIG = r"C:\Users\6331823\Downloads\sam2.1_hiera_s.yaml"
+organoid_model = build_sam2_video_predictor(CONFIG, CHECKPOINT)
 
 
 def extract_frame_number(filename):

@@ -1,118 +1,88 @@
 # Function that will crop a movie based on an existing XY max projection
 
 import tifffile
-import scipy.ndimage as ndimage
 from skimage.measure import regionprops
 import pandas as pd
 import numpy as np
 import trackpy as tp
 from libpysal.weights import KNN
 from esda.moran import Moran
-from scipy.ndimage import zoom
 from alive_progress import alive_bar
 from imaris_ims_file_reader.ims import ims
+from PIL import Image
+import scipy.ndimage as ndimage
+import cv2
 
-import os
+import os, shutil, tempfile
 
 from utils.load_model import load_model
 from utils.threshold import threshold
 
 
-def crop(XY_path, input_file, output_directory, model, nuclei=2):
+def crop(proj_XY, input_file, output_directory, model, nuclei=2, name="projXY_tracked"):
     # Create the output directory to save the files
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
-    # Read the XY max projection, resize it smaller and apply a gaussian blur so cellpose can find the organoids
-    original = tifffile.imread(XY_path)
-    resize_factors = (1, 200 / original.shape[1], 200 / original.shape[2])
-    XY = ndimage.zoom(original, resize_factors, order=0)
-    XY = ndimage.gaussian_filter(XY, sigma=(0, 2, 2))
+    # Convert movie to 8 bit for meta SAM
+    proj_XY_8bit = ((proj_XY / proj_XY.max()) * 255).astype(np.uint8)
 
-    # Get the dimensions of the movie XY max projection to loop over timepoints
-    timepoints, y, x = XY.shape
+    # Temporary directory for saving frames
+    temp_dir = tempfile.mkdtemp()
 
-    # Loop over every frame
-    masks = []
-    for frame in range(timepoints):
-        image = XY[frame, :, :]
-        # Apply cellpose to the frame to find where organoids are
-        mask, _, _ = model.eval(
-            image,
-            diameter=None,
-            normalize=True,
-            flow_threshold=0.4,
-            invert=False,
-            resample=True,
-            do_3D=False,
-        )
+    # Itterate over movie frames
+    for i, frame in enumerate(proj_XY_8bit):
+        # Convert image to RGB grayscale image
+        if frame.ndim == 2:
+            frame = np.stack([frame] * 3, axis=-1)
 
-        # Dilate the found masks to make sure we don't cut off outer membranes / edges of organoids
-        labels = np.unique(mask)
-        labels = labels[labels != 0]  # skip background
-        dilated = np.zeros_like(mask)
-        for label in labels:
-            binary = mask == label
-            dilated_binary = ndimage.binary_dilation(binary, iterations=3)
-            dilated[dilated_binary] = label
+        # Normalize the frame to 0-255 range
+        frame = (frame / frame.max() * 255).astype(np.uint8)
 
-        # Save the mask of this frame to the list of the whole movie
-        masks.append(dilated)
+        # Save the frame as a JPEG image
+        Image.fromarray(frame).save(os.path.join(temp_dir, f"{i:05d}.jpeg"))
 
-    # Concatante the list of masks into a real movie of masks
-    XY_mask = np.stack(masks, axis=0).astype(np.uint16)
+    # Get inference state
+    inference_state = model.init_state(temp_dir)
 
-    # Rescale the masks back to the original size
-    rescale_factors = (
-        1,
-        original.shape[1] / XY_mask.shape[1],
-        original.shape[2] / XY_mask.shape[2],
+    # Calculate center point where organoid should be
+    center_point = get_center(proj_XY_8bit)
+    _, object_ids, mask_logits = model.add_new_points(
+        inference_state=inference_state,
+        frame_idx=0,
+        obj_id=1,
+        points=center_point,
+        labels=np.array([1]),
     )
-    XY_mask = ndimage.zoom(masks, rescale_factors, order=0)
 
-    # Get the data of every mask in the movie
-    features = []
-    for t in range(timepoints):
-        props = regionprops(XY_mask[t])
-        for prop in props:
-            features.append(
-                {
-                    "frame": t,
-                    "y": prop.centroid[0],
-                    "x": prop.centroid[1],
-                    "label": prop.label,
-                }
-            )
-    features_df = pd.DataFrame(features)
+    # Get the masks of the organoid
+    all_masks = []
+    for frame_idx, object_ids, mask_logits in model.propagate_in_video(inference_state):
+        masks = (mask_logits > 0.0).cpu().numpy()  # shape: (N, X, H, W)
+        N, X, H, W = masks.shape
+        masks = masks.reshape(N * X, H, W)
+        all_masks.append(masks)
 
-    # Track the found masks over time during the movie
-    linked = tp.link_df(
-        features_df, search_range=40, memory=2
-    )  # adjust search_range as needed
+    shutil.rmtree(temp_dir)
 
-    # Get the trajectory for the organoid closest to center at t=0
-    center_y, center_x = XY_mask.shape[1] / 2, XY_mask.shape[2] / 2
-    t0 = linked[linked["frame"] == 0].copy()
-    t0["dist"] = ((t0["y"] - center_y) ** 2 + (t0["x"] - center_x) ** 2) ** 0.5
-    closest_particle = t0.loc[t0["dist"].idxmin(), "particle"]
+    all_masks = np.stack(all_masks, axis=0)  # shape: (T, C, Y, X)
+    all_masks = all_masks[:, 0]  # T Y X
 
-    # Get all frames for this tracked organoid
-    organoid_track = linked[linked["particle"] == closest_particle]
-    print(organoid_track)
+    # Dilate the masks by 12 pixels to ensure the organoid is fully in there
+    new_masks = []
+    for _, mask in enumerate(all_masks):
+        mask = ndimage.binary_dilation(mask, iterations=12)
+        new_masks.append(mask)
+    new_masks = np.stack(new_masks, axis=0).astype(np.uint16)
 
-    # Make a movie that only shows the original movie at the place of the selected organoid
-    organoid_only = np.zeros_like(original)
-    for _, row in organoid_track.iterrows():
-        t = int(row["frame"])
-        label = int(row["label"])
-        organoid_only[t][XY_mask[t] == label] = original[t][XY_mask[t] == label]
+    # Create new movie that only has the tracked organoid
+    organoid_only = np.where(new_masks, proj_XY, 0)
 
     # Save this tracked movie to the output folder
-    name = os.path.basename(XY_path).replace(".tif", "")
     tifffile.imwrite(
         os.path.join(
             os.path.dirname(output_directory),
-            f"{name}_tracked.tif",
+            f"{name}_projXY_tracked.tif",
         ),
         organoid_only,
     )
@@ -123,6 +93,8 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
     elif input_file.endswith(".tif"):
         movie = tifffile.imread(input_file)  # T,Z,C,Y,X
         movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
+
+    timepoints, y, x = proj_XY.shape
 
     # Loop over every frame in the movie to crop that frame.
     with alive_bar(timepoints, title="Cropping frames") as bar:
@@ -223,3 +195,44 @@ def crop(XY_path, input_file, output_directory, model, nuclei=2):
                 cropped_image_masked,
             )
             bar()
+
+
+def get_center(movie):
+    first_frame = movie[0]
+    # Normalize and convert to 8-bit
+    frame = ((first_frame / first_frame.max()) * 255).astype(np.uint8)
+    frame = ndimage.gaussian_filter(frame, sigma=(10, 10))
+
+    # Apply threshold (you can tweak the value)
+    median = np.median(frame)
+    mean = np.mean(frame)
+    _, binary_mask = cv2.threshold(frame, median + 10, 255, cv2.THRESH_BINARY)
+
+    filled_mask = ndimage.binary_fill_holes(binary_mask).astype(np.uint8)
+    num_labels, labels, stats_array, centroids = cv2.connectedComponentsWithStats(
+        filled_mask
+    )
+    center = np.array([frame.shape[0] // 2, frame.shape[1] // 2])
+
+    df = {
+        "label": np.arange(1, num_labels),
+        "area": stats_array[1:, cv2.CC_STAT_AREA],
+        "centroid": [c for c in centroids[1:]],  # keep as array
+    }
+
+    df = pd.DataFrame(df)
+    # Compute distances to center
+    df["distance_to_center"] = df["centroid"].apply(
+        lambda c: np.linalg.norm(center - c)
+    )
+
+    # Filter and select
+    filtered_df = df[df["area"] > 3000]
+    closest = filtered_df.loc[filtered_df["distance_to_center"].idxmin()]
+
+    # Result
+    selected_centroid = closest["centroid"]
+    selected_centroid = np.array(
+        [[selected_centroid[0], selected_centroid[1]]], dtype=np.float32
+    )
+    return selected_centroid
