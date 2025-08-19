@@ -26,7 +26,5 @@ def max_project(file, output_directory, nuclei=2):
 
     # Save the new file
     name = os.path.basename(file).split(".")[0]
-    tif = os.path.join(output_directory, f"{name}_projXY.tif")
-    tifffile.imwrite(tif, max_data)
 
-    print(f"Saved max Z-projection at {tif}")
+    return max_data
