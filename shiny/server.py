@@ -147,6 +147,54 @@ def server(input, output, session):
         return summarize_growth(df)
 
     @render.plot
+    def growth_by_sample_plot():
+        df = growth_summary()
+        ylim_max = input.ylim_max()
+
+        if df.empty or "type" not in df.columns:
+            fig, ax = plt.subplots()
+            ax.text(0.5, 0.5, "No data available", ha="center", va="center")
+            ax.axis("off")
+            return fig
+
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharex=False)
+
+        for i, type_name in enumerate(df["type"].unique()):
+            ax = axes[i]
+            subset = df[df["type"] == type_name]
+
+            for organoid, group in subset.groupby("organoid"):
+                ax.plot(
+                    group["time"],
+                    group["relative_wt"],
+                    "m-",
+                    marker="o",
+                    label=f"{organoid} WT",
+                    alpha=0.6,
+                )
+                ax.plot(
+                    group["time"],
+                    group["relative_crc"],
+                    "g-",
+                    marker="o",
+                    label=f"{organoid} CRC",
+                    alpha=0.6,
+                )
+            ax.set_title(f"Type: {type_name}")
+            ax.set_xticks(sorted(subset["time"].unique())[::2])
+            # ax.legend(fontsize="small", loc="upper left", ncol=1)
+
+            # Apply y-axis limit if provided
+            if ylim_max is not None:
+                ax.set_ylim(top=ylim_max)
+
+        fig.suptitle("Relative cell growth per sample", x=0.54)
+        fig.supxlabel("Time (h)", x=0.54)
+        fig.supylabel("Number of cells per organoid\n       (normalized to t=0)")
+        plt.tight_layout()
+        return fig
+
+    @render.plot
     def growth_by_type_plot():
         df = growth_summary()
         ylim_max = input.ylim_max()
@@ -184,7 +232,7 @@ def server(input, output, session):
                 label="CRC",
                 capsize=4,
             )
-            ax.set_title(f"Sample: {type_name}")
+            ax.set_title(f"Type: {type_name}")
             ax.set_xticks(mean["time"][::2])
             ax.legend()
 
