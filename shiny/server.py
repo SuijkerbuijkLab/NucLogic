@@ -2,8 +2,12 @@ from shiny import reactive, render, ui
 
 import pandas as pd
 import matplotlib.pyplot as plt
+import tkinter as tk
+from tkinter import filedialog
 
-import os
+
+import os, re, traceback, shutil
+import subprocess, sys
 
 
 def summarize_growth(data):
@@ -65,33 +69,47 @@ def classify_type(name):
 
 
 def server(input, output, session):
-    @render.ui
-    @reactive.event(input.show_slider)
-    def ui_slider():
-        if input.show_slider():
-            value = input.slider() if "slider" in input else 5
-            return ui.input_slider(
-                "slider", "Choose a number", min=1, max=10, value=value
-            )
+    selected_path = reactive.Value("")
+
+    @reactive.effect
+    @reactive.event(
+        input.browse_dirs_segmentation,
+        input.browse_dirs_cropper,
+        input.browse_dirs_plotting,
+        input.browse_dirs_napari,
+    )
+    def run_launcher():
+        print("Button clicked — launching folder picker...")
+        try:
+            subprocess.run(["python", r"shiny\launcher.py"], check=True)
+            with open("selected_path.txt", "r") as f:
+                path = f.read().strip()
+                selected_path.set(path)
+                print(f"✅ Path loaded into app: {path}")
+        except Exception as e:
+            print(f"❌ Error running launcher: {e}")
 
     selection_state = reactive.Value(True)
 
     @reactive.effect
-    @reactive.event(input.toggle_select)
-    def _():
+    @reactive.event(
+        input.toggle_select_segmentation,
+        input.toggle_select_cropper,
+        input.toggle_select_plotting,
+        input.toggle_select_napari,
+    )
+    def toggle_selection():
         selection_state.set(not selection_state.get())
+        print("Togled selection state:", selection_state.get())
 
-    @render.text
-    def organoid_list():
-        path = input.path()
+    def organoid_list_core(path, selection_state, input_id):
+        _ = selection_state.get()
+
         if path and os.path.isdir(path):
             try:
                 files = os.listdir(path)
                 newfiles = [
-                    file
-                    for file in files
-                    if os.path.isdir(os.path.join(path, file))
-                    and "properties" in os.listdir(os.path.join(path, file))
+                    file for file in files if os.path.isdir(os.path.join(path, file))
                 ]
                 if not newfiles:
                     return ui.markdown("**No valid organoids found.**")
@@ -99,7 +117,7 @@ def server(input, output, session):
                 selected = newfiles if selection_state.get() else []
 
                 return ui.input_selectize(
-                    "organoid_select",
+                    input_id,
                     "Select organoids",
                     multiple=True,
                     choices=newfiles,
@@ -110,10 +128,295 @@ def server(input, output, session):
         else:
             return ui.markdown("**Invalid or empty path.**")
 
+    @render.ui
+    def organoid_list_plotting():
+        return organoid_list_core(
+            selected_path.get(), selection_state, "organoid_select_plotting"
+        )
+
+    @render.ui
+    def organoid_list_cropper():
+        return organoid_list_core(
+            selected_path.get(), selection_state, "organoid_select_cropper"
+        )
+
+    @render.ui
+    def organoid_list_segmentation():
+        return organoid_list_core(
+            selected_path.get(), selection_state, "organoid_select_segmentation"
+        )
+
+    @render.ui
+    def organoid_list_napari():
+        return organoid_list_core(
+            selected_path.get(), selection_state, "organoid_select_napari"
+        )
+
+    @reactive.effect
+    @reactive.event(input.run_segmenter)
+    def run_segmentation():
+        from main_functions.analyse_organoid import analyse_organoid
+        from utils.load_model import load_model
+        from sam2.build_sam import build_sam2_video_predictor
+
+        def extract_frame_number(filename):
+            match = re.search(r"Frame-(\d+)", filename)
+            return int(match.group(1)) if match else -1
+
+        # Load models once
+        cell_model = load_model(
+            r"C:\Users\6331823\Local SSD\Train model cell segmentation\models\cell_segmentation_4"
+        )
+        organoid_model = build_sam2_video_predictor(
+            r"C:\Users\6331823\Downloads\sam2.1_hiera_s.yaml",
+            r"C:\Users\6331823\Downloads\sam2.1_hiera_small.pt",
+        )
+
+        # Get organoid paths
+        base_path = selected_path.get()
+        organoid_names = input.organoid_select_segmentation()
+        organoids = [os.path.join(base_path, name) for name in organoid_names]
+
+        # Get channel names
+        channel_names = [getattr(input, f"channel_{i}")().strip() for i in range(5)]
+        channel_names = [name for name in channel_names if name]
+
+        # Get advanced settings
+        settings = {
+            "cropped_exists": input.cropped_exists(),
+            "delete_cropped": input.delete_cropped(),
+            "delete_max_proj": input.delete_max_proj(),
+            "delete_max_proj_tracked": input.delete_max_proj_tracked(),
+        }
+
+        summary_results = []
+        results = []
+
+        for i, organoid in enumerate(organoids):
+            print(f"Processing organoid: {os.path.basename(organoid)}")
+            try:
+                analyse_organoid(
+                    organoid,
+                    cell_model=cell_model,
+                    organoid_model=organoid_model,
+                    channel_names=channel_names,
+                    croped_existing=settings["cropped_exists"],
+                )
+
+                df = pd.read_csv(os.path.join(organoid, "summary_results_organoid.csv"))
+                summary_results.append(df)
+
+                all_properties = []
+                files = [
+                    f
+                    for f in os.listdir(os.path.join(organoid, "properties"))
+                    if f.endswith(".csv")
+                ]
+                files = sorted(files, key=extract_frame_number)
+                for file in files:
+                    df = pd.read_csv(os.path.join(organoid, "properties", file))
+                    df.insert(0, "organoid", os.path.basename(organoid))
+                    all_properties.append(df)
+                all_properties = pd.concat(all_properties, ignore_index=True)
+                results.append(all_properties)
+
+            except Exception as e:
+                print(f"Skipped organoid due to error: {e}")
+                traceback.print_exc()
+
+            # Cleanup
+            if settings["delete_cropped"]:
+                cropped_path = os.path.join(organoid, "cropped")
+                if os.path.exists(cropped_path):
+                    shutil.rmtree(cropped_path)
+
+            max_proj = [f for f in os.listdir(organoid) if f.endswith("projXY.tif")]
+            max_proj_tracked = [
+                f for f in os.listdir(organoid) if f.endswith("projXY_tracked.tif")
+            ]
+
+            if settings["delete_max_proj"] and max_proj:
+                path = os.path.join(organoid, max_proj[0])
+                if os.path.exists(path):
+                    os.remove(path)
+
+            if settings["delete_max_proj_tracked"] and max_proj_tracked:
+                path = os.path.join(organoid, max_proj_tracked[0])
+                if os.path.exists(path):
+                    os.remove(path)
+
+            print(f"Finished processing organoid: {organoid}")
+
+        # Save results
+        if summary_results:
+            summary_df = pd.concat(summary_results, ignore_index=True)
+            summary_df.to_csv(
+                os.path.join(base_path, "summary_results.csv"), index=False
+            )
+
+        if results:
+            full_df = pd.concat(results, ignore_index=True)
+            full_df.to_csv(os.path.join(base_path, "full_results.csv"), index=False)
+
+        print("✅ Segmentation complete.")
+        progress_count.set(i + 1)
+
+    progress_count = reactive.Value(0)
+
+    @render.ui
+    def segmentation_progress():
+        total = len(input.organoid_select_segmentation() or [])
+        completed = progress_count.get()
+
+        if total == 0:
+            return ui.markdown("**No organoids selected.**")
+
+        percent = int((completed / total) * 100)
+
+        return ui.div(
+            ui.tags.label(f"Segmented: {completed}/{total} organoids ({percent}%)"),
+            ui.div(
+                ui.div(
+                    style=f"width: {percent}%; background-color: #4caf50; height: 20px; border-radius: 4px;"
+                ),
+                style="width: 100%; background-color: #eee; border-radius: 4px;",
+            ),
+        )
+
+    @reactive.effect
+    @reactive.event(input.run_cropper)
+    def run_cropper():
+        is_cropping.set(True)  # Show spinner
+        from main_functions.crop_organoid import crop_organoid
+        from sam2.build_sam import build_sam2_video_predictor
+
+        # Load models once
+        organoid_model = build_sam2_video_predictor(
+            r"C:\Users\6331823\Downloads\sam2.1_hiera_s.yaml",
+            r"C:\Users\6331823\Downloads\sam2.1_hiera_small.pt",
+        )
+
+        # Get organoid paths
+        base_path = selected_path.get()
+        organoid_names = input.organoid_select_cropper()
+        organoids = [os.path.join(base_path, name) for name in organoid_names]
+
+        # Get channel names
+        channel_names = [
+            getattr(input, f"channel_cropper_{i}")().strip() for i in range(5)
+        ]
+        channel_names = [name for name in channel_names if name]
+
+        channel_colors = [
+            getattr(input, f"channel_color_cropper_{i}")() for i in range(5)
+        ]
+        channel_colors = [
+            color
+            for i, color in enumerate(channel_colors)
+            if channel_names and i < len(channel_names)
+        ]
+
+        # Get advanced settings
+        settings = {
+            "cropped_exists": input.cropped_exists_cropper(),
+            "delete_cropped": input.delete_cropped_cropper(),
+            "delete_max_proj": input.delete_max_proj_cropper(),
+            "delete_max_proj_tracked": input.delete_max_proj_tracked_cropper(),
+        }
+
+        # Loop through organoids and run cropping
+        for i, organoid in enumerate(organoids):
+            print(f"Cropping organoid: {os.path.basename(organoid)}")
+            try:
+                crop_organoid(
+                    input_directory=organoid,
+                    organoid_model=organoid_model,
+                    channel_names=channel_names,
+                    channel_colors=channel_colors,
+                    crop_existing=settings["cropped_exists"],
+                )
+            except Exception as e:
+                print(f"Failed to crop {organoid}: {e}")
+            else:
+                print(f"Finished cropping: {organoid}")
+
+            # Cleanup
+            if settings["delete_cropped"]:
+                cropped_path = os.path.join(organoid, "cropped")
+                if os.path.exists(cropped_path):
+                    shutil.rmtree(cropped_path)
+
+            max_proj = [f for f in os.listdir(organoid) if f.endswith("projXY.tif")]
+            max_proj_tracked = [
+                f for f in os.listdir(organoid) if f.endswith("projXY_tracked.tif")
+            ]
+
+            if settings["delete_max_proj"] and max_proj:
+                path = os.path.join(organoid, max_proj[0])
+                if os.path.exists(path):
+                    os.remove(path)
+
+            if settings["delete_max_proj_tracked"] and max_proj_tracked:
+                path = os.path.join(organoid, max_proj_tracked[0])
+                if os.path.exists(path):
+                    os.remove(path)
+
+            progress_count_cropper.set(i + 1)
+            is_cropping.set(False)  # Hide spinner
+
+    is_cropping = reactive.Value(False)
+
+    @render.ui
+    def cropper_spinner():
+        if is_cropping.get():
+            return ui.tags.span(
+                "⏳ Cropping...", style="margin-left: 10px; color: #888;"
+            )
+        else:
+            return ui.tags.span("")  # Empty when not running
+
+    progress_count_cropper = reactive.Value(0)
+
+    @render.ui
+    def cropper_progress():
+        total = len(input.organoid_select_cropper() or [])
+        completed = progress_count_cropper.get()
+
+        if total == 0:
+            return ui.markdown("**No organoids selected.**")
+
+        percent = int((completed / total) * 100)
+
+        return ui.div(
+            ui.tags.label(f"Segmented: {completed}/{total} organoids ({percent}%)"),
+            ui.div(
+                ui.div(
+                    style=f"width: {percent}%; background-color: #4caf50; height: 20px; border-radius: 4px;"
+                ),
+                style="width: 100%; background-color: #eee; border-radius: 4px;",
+            ),
+        )
+
+    @reactive.effect
+    @reactive.event(input.launch_napari)
+    def open_napari():
+        import json
+
+        path = selected_path.get()
+        selected = input.organoid_select_napari() or []
+        full_paths = [os.path.join(path, name) for name in selected]
+
+        # Save paths to a temp file
+        with open("napari_paths.json", "w") as f:
+            json.dump(full_paths, f)
+
+        # Launch Napari viewer
+        subprocess.Popen([sys.executable, r"shiny\napari_launcher.py"])
+
     @reactive.calc
     def organoid_data():
-        path = input.path()
-        selected = input.organoid_select()
+        path = selected_path.get()
+        selected = input.organoid_select_plotting()
         if not path or not selected:
             return pd.DataFrame()
 
