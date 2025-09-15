@@ -45,7 +45,9 @@ app_ui = ui.page_navbar(
                     ui.input_checkbox(
                         "delete_max_proj_tracked", "Delete tracked max projection", True
                     ),
-                    ui.input_action_button("run_segmenter", "Run Segmenter"),
+                    ui.input_action_button(
+                        "run_segmenter", "Run Segmenter", width="200px"
+                    ),
                     ui.output_ui("segmentation_progress"),
                 ),
             ),
@@ -72,11 +74,13 @@ app_ui = ui.page_navbar(
                     *[
                         ui.div(
                             ui.tags.span(
-                                f"{i+1}:", style="width: 30px; display: inline-block;"
+                                f"{i+1}:",
+                                style="width: 30px; display: inline-block; margin-top: 5.5px;",
                             ),
-                            ui.input_text(f"channel_cropper_{i}", "", width="150px"),
+                            ui.input_text(f"channel_cropper_{i}", "", width="200px"),
                             ui.tags.span(
-                                "Color:", style="margin-left: 10px;margin-right: 5px;"
+                                "Color:",
+                                style="margin-left: 10px;margin-right: 5px; display: inline-block; margin-top: 5.5px;",
                             ),
                             ui.input_select(
                                 f"channel_color_cropper_{i}",
@@ -92,6 +96,7 @@ app_ui = ui.page_navbar(
                                     "gray",
                                     "lime",
                                 ],
+                                width="150px",
                             ),
                             style="margin-bottom: 0px; display: flex; align-items: right;",
                         )
@@ -115,7 +120,9 @@ app_ui = ui.page_navbar(
                         True,
                     ),
                     ui.layout_columns(
-                        ui.input_action_button("run_cropper", "Run Cropper"),
+                        ui.input_action_button(
+                            "run_cropper", "Run Cropper", width="200px"
+                        ),
                         ui.output_ui("cropper_spinner"),
                     ),
                     ui.output_ui("cropper_progress"),
@@ -136,6 +143,9 @@ app_ui = ui.page_navbar(
                         "toggle_select_plotting", "Select/Deselect All"
                     ),
                     ui.output_ui("organoid_list_plotting"),
+                    ui.download_button(
+                        "download_data", "Download data of selected organoids"
+                    ),
                     bg="#f8f8f8",
                 ),
                 ui.div(
