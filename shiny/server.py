@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import filedialog
+from datetime import datetime
 
 
 import os, re, traceback, shutil
@@ -441,6 +442,18 @@ def server(input, output, session):
                 data.append(df)
 
         return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
+
+    @render.download(
+        filename=lambda: f"organoid_data_{datetime.now():%Y-%m-%d_%H-%M}.csv"
+    )
+    def download_data():
+        import io
+
+        df = organoid_data()
+        buffer = io.StringIO()
+        df.to_csv(buffer, index=False)
+        buffer.seek(0)
+        return buffer
 
     @reactive.calc
     def growth_summary():
