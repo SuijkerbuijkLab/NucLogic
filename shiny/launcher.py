@@ -6,6 +6,7 @@ import os
 def launch_folder_picker():
     root = tk.Tk()
     root.withdraw()  # Hide the root window
+    root.attributes("-topmost", True)  # Bring the dialog to the front
 
     selected_dirs = filedialog.askdirectory(
         title="Select Organism Directory", mustexist=True
