@@ -44,6 +44,6 @@ def compute_knn_features(points, k=5):
 
 
 data = pd.read_csv(
-    r"C:\Users\6331823\Local SSD\Data_Anna\Exp137\CRC_s39\properties\Frame-13_props.csv"
+    r"C:\Users\sebas\Downloads\demo_data\MIX_s47\properties\Frame-13_props.csv"
 )
 print(data)
