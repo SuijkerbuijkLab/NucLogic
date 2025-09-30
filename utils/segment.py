@@ -1,13 +1,11 @@
 # File that goes over an image slice by slice and applies cellpose
 
 import numpy as np
-import tifffile
-import os
 
 
 def segment(image, model):
     # Get the shape of the image to find amount of Z slices
-    depthIm, heightIm, widthIm = image.shape
+    depthIm, _, _ = image.shape
 
     # Keep track of mask of every z slice
     masks_list = []

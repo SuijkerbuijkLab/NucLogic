@@ -1,8 +1,7 @@
 # Function to get properties from masked images and corresponding channels and put them in a pd df
 
-from skimage.measure import regionprops_table
 import pandas as pd
-import tifffile
+from skimage.measure import regionprops_table
 
 
 def properties_channel(mask, image, type=None):

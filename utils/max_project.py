@@ -1,10 +1,10 @@
 # Function to make a maximum Z projection of the nuclei channel from an ims or tiff file
 
-from imaris_ims_file_reader.ims import ims
+import os
+
 import numpy as np
 import tifffile
-
-import os
+from imaris_ims_file_reader.ims import ims
 
 
 def max_project(file, output_directory, nuclei=2):

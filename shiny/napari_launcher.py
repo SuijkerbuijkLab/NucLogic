@@ -1,8 +1,9 @@
-import napari
 import json
 import os
 
-with open("miscellaneous\napari_paths.json", "r") as f:
+import napari
+
+with open(r"miscellaneous\napari_paths.json", "r") as f:
     paths = json.load(f)
 
 viewer = napari.Viewer()

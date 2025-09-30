@@ -1,15 +1,13 @@
-import tifffile
-import numpy as np
-from imaris_ims_file_reader.ims import ims
-from PyImarisWriter import PyImarisWriter as PW
-import tables
-from matplotlib.colors import to_rgba
-from alive_progress import alive_bar
-
 import os
-import re
-from datetime import datetime
 import traceback
+from datetime import datetime
+
+import numpy as np
+import tables
+import tifffile
+from alive_progress import alive_bar
+from matplotlib.colors import to_rgba
+from PyImarisWriter import PyImarisWriter as PW
 
 import utils
 
@@ -27,24 +25,14 @@ def crop_organoid(
         (i for i, ch in enumerate(channel_names) if ch.lower() == "nuclei"),
     )
 
-    ims_files = [
-        os.path.join(input_directory, f)
-        for f in os.listdir(input_directory)
-        if f.endswith(".ims")
-    ]
-
-    if not ims_files:
-        print(f"Warning: No IMS file found in {input_directory}. Skipping this folder.")
-        return
-
-    ims_movie = ims(ims_files[0])
+    ims_movie = utils.find_input_file(input_directory, types=[".ims"])
     voxel_size = ims_movie.resolution  # (Z, Y, X)
     timepoints = ims_movie.TimePoints
-    with tables.open_file(ims_files[0], "r") as hf:
+    with tables.open_file(ims_movie, "r") as hf:
         time_values = hf.root.DataSetTimes.Time.read()
     timestamps = np.array([row[2] for row in time_values])
     timestamps = timestamps // 1000
-    name = os.path.basename(ims_files[0])
+    name = os.path.basename(ims_movie)
     name = name.split(".")[0]
 
     output_filename = os.path.join(
@@ -53,16 +41,14 @@ def crop_organoid(
     )
 
     if not crop_existing:
-        proj_XY = utils.max_project(
-            ims_files[0], input_directory, nuclei=nuclei_channel
-        )
-        proj_XY_name = os.path.join(os.path.dirname(ims_files[0]), f"{name}_projXY.tif")
+        proj_XY = utils.max_project(ims_movie, input_directory, nuclei=nuclei_channel)
+        proj_XY_name = os.path.join(os.path.dirname(ims_movie), f"{name}_projXY.tif")
         tifffile.imwrite(proj_XY_name, proj_XY)
 
         try:
             utils.crop(
                 proj_XY=proj_XY,
-                input_file=ims_files[0],
+                input_file=ims_movie,
                 output_directory=output_directory_cropped,
                 model=organoid_model,
                 nuclei=nuclei_channel,

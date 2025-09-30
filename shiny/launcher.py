@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import filedialog
-import os
 
 
 def launch_folder_picker():
@@ -13,7 +12,7 @@ def launch_folder_picker():
     )
 
     if selected_dirs:
-        with open("miscellaneous\selected_path.txt", "w") as f:
+        with open(r"miscellaneous\selected_path.txt", "w") as f:
             f.write(selected_dirs)
         print(f"Saved path: {selected_dirs}")
     else:

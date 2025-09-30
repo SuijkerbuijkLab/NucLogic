@@ -1,7 +1,7 @@
 # Function to get properties from masked images and put them in a pandas df
 
-from skimage.measure import regionprops
 import pandas as pd
+from skimage.measure import regionprops
 
 
 def properties_mask(image):
