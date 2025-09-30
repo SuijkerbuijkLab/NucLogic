@@ -3,7 +3,6 @@
 
 import numpy as np
 import sklearn.neighbors
-import pandas as pd
 
 
 def knn(data, k=5):
@@ -41,9 +40,3 @@ def compute_knn_features(points, k=5):
         pC.append(count_C)
 
     return distAv, pWT, pC
-
-
-data = pd.read_csv(
-    r"C:\Users\sebas\Downloads\demo_data\MIX_s47\properties\Frame-13_props.csv"
-)
-print(data)

@@ -1,14 +1,17 @@
-from shiny import reactive, render, ui
-
-import pandas as pd
-import matplotlib.pyplot as plt
+import os
+import re
+import shutil
+import subprocess
+import sys
 import tkinter as tk
-from tkinter import filedialog
+import traceback
 from datetime import datetime
+from tkinter import filedialog
 
+import matplotlib.pyplot as plt
+import pandas as pd
 
-import os, re, traceback, shutil
-import subprocess, sys
+from shiny import reactive, render, ui
 
 
 def summarize_growth(data):
@@ -83,7 +86,7 @@ def server(input, output, session):
         print("Button clicked — launching folder picker...")
         try:
             subprocess.run(["python", r"shiny\launcher.py"], check=True)
-            with open("miscellaneous\selected_path.txt", "r") as f:
+            with open(r"miscellaneous\selected_path.txt", "r") as f:
                 path = f.read().strip()
                 selected_path.set(path)
                 print(f"✅ Path loaded into app: {path}")
@@ -156,21 +159,20 @@ def server(input, output, session):
     @reactive.effect
     @reactive.event(input.run_segmenter)
     def run_segmentation():
+        from sam2.build_sam import build_sam2_video_predictor
+
         from main_functions.analyse_organoid import analyse_organoid
         from utils.load_model import load_model
-        from sam2.build_sam import build_sam2_video_predictor
 
         def extract_frame_number(filename):
             match = re.search(r"Frame-(\d+)", filename)
             return int(match.group(1)) if match else -1
 
         # Load models once
-        cell_model = load_model(
-            r"C:\Users\6331823\Local SSD\Train model cell segmentation\models\cell_segmentation_4"
-        )
+        cell_model = load_model(r"models\cell_segmentation_4")
         organoid_model = build_sam2_video_predictor(
-            r"C:\Users\6331823\Downloads\sam2.1_hiera_s.yaml",
-            r"C:\Users\6331823\Downloads\sam2.1_hiera_small.pt",
+            r"models\sam2.1_hiera_s.yaml",
+            r"models\sam2.1_hiera_small.pt",
         )
 
         # Get organoid paths
@@ -288,13 +290,14 @@ def server(input, output, session):
     @reactive.event(input.run_cropper)
     def run_cropper():
         is_cropping.set(True)  # Show spinner
-        from main_functions.crop_organoid import crop_organoid
         from sam2.build_sam import build_sam2_video_predictor
+
+        from main_functions.crop_organoid import crop_organoid
 
         # Load models once
         organoid_model = build_sam2_video_predictor(
-            r"C:\Users\6331823\Downloads\sam2.1_hiera_s.yaml",
-            r"C:\Users\6331823\Downloads\sam2.1_hiera_small.pt",
+            r"models\sam2.1_hiera_s.yaml",
+            r"models\sam2.1_hiera_small.pt",
         )
 
         # Get organoid paths
@@ -408,7 +411,7 @@ def server(input, output, session):
         full_paths = [os.path.join(path, name) for name in selected]
 
         # Save paths to a temp file
-        with open("miscellaneous\napari_paths.json", "w") as f:
+        with open(r"miscellaneous\napari_paths.json", "w") as f:
             json.dump(full_paths, f)
 
         # Launch Napari viewer

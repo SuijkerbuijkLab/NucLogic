@@ -1,4 +1,4 @@
-# Function that will crop a movie based on an existing XY max projection
+# Function that will crop a movie based on an existing XY max projection using a SAM model
 
 import tifffile
 from skimage.measure import regionprops
@@ -15,9 +15,6 @@ import cv2
 
 import os, shutil, tempfile
 
-from utils.load_model import load_model
-from utils.threshold import threshold
-
 
 def crop(proj_XY, input_file, output_directory, model, nuclei=2, name="projXY_tracked"):
     # Create the output directory to save the files
@@ -27,47 +24,7 @@ def crop(proj_XY, input_file, output_directory, model, nuclei=2, name="projXY_tr
     # Convert movie to 8 bit for meta SAM
     proj_XY_8bit = ((proj_XY / proj_XY.max()) * 255).astype(np.uint8)
 
-    # Temporary directory for saving frames
-    temp_dir = tempfile.mkdtemp()
-
-    # Itterate over movie frames
-    for i, frame in enumerate(proj_XY_8bit):
-        # Convert image to RGB grayscale image
-        if frame.ndim == 2:
-            frame = np.stack([frame] * 3, axis=-1)
-
-        # Normalize the frame to 0-255 range
-        frame = (frame / frame.max() * 255).astype(np.uint8)
-
-        # Save the frame as a JPEG image
-        Image.fromarray(frame).save(os.path.join(temp_dir, f"{i:05d}.jpeg"))
-
-    # Get inference state
-    inference_state = model.init_state(temp_dir)
-
-    # Calculate center point where organoid should be
-    coords = get_coords(proj_XY_8bit)
-    labels = np.ones(len(coords))
-    _, object_ids, mask_logits = model.add_new_points(
-        inference_state=inference_state,
-        frame_idx=0,
-        obj_id=1,
-        points=coords,
-        labels=labels,
-    )
-
-    # Get the masks of the organoid
-    all_masks = []
-    for frame_idx, object_ids, mask_logits in model.propagate_in_video(inference_state):
-        masks = (mask_logits > 0.0).cpu().numpy()  # shape: (N, X, H, W)
-        N, X, H, W = masks.shape
-        masks = masks.reshape(N * X, H, W)
-        all_masks.append(masks)
-
-    shutil.rmtree(temp_dir)
-
-    all_masks = np.stack(all_masks, axis=0)  # shape: (T, C, Y, X)
-    all_masks = all_masks[:, 0]  # T Y X
+    all_masks = segment_organoid(proj_XY_8bit, model)
 
     # Dilate the masks by 12 pixels to ensure the organoid is fully in there
     new_masks = []
@@ -266,3 +223,48 @@ def get_points(point, offset=25):
     surrounding_points = point + offsets
     points = np.vstack([point, surrounding_points])
     return points
+
+
+def segment_organoid(proj_XY_8bit, model):
+
+    # Temporary directory for saving frames
+    temp_dir = tempfile.mkdtemp()
+
+    # Itterate over movie frames
+    for i, frame in enumerate(proj_XY_8bit):
+        # Convert image to RGB grayscale image
+        if frame.ndim == 2:
+            frame = np.stack([frame] * 3, axis=-1)
+
+        # Normalize the frame to 0-255 range
+        frame = (frame / frame.max() * 255).astype(np.uint8)
+
+        # Save the frame as a JPEG image
+        Image.fromarray(frame).save(os.path.join(temp_dir, f"{i:05d}.jpeg"))
+
+    # Get inference state
+    inference_state = model.init_state(temp_dir)
+
+    # Calculate center point where organoid should be
+    coords = get_coords(proj_XY_8bit)
+    labels = np.ones(len(coords))
+    _, object_ids, mask_logits = model.add_new_points(
+        inference_state=inference_state,
+        frame_idx=0,
+        obj_id=1,
+        points=coords,
+        labels=labels,
+    )
+
+    # Get the masks of the organoid
+    all_masks = []
+    for frame_idx, object_ids, mask_logits in model.propagate_in_video(inference_state):
+        masks = (mask_logits > 0.0).cpu().numpy()  # shape: (N, X, H, W)
+        N, X, H, W = masks.shape
+        masks = masks.reshape(N * X, H, W)
+        all_masks.append(masks)
+
+    shutil.rmtree(temp_dir)
+
+    all_masks = np.stack(all_masks, axis=0)  # shape: (T, C, Y, X)
+    all_masks = all_masks[:, 0]  # T Y X

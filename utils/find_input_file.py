@@ -3,12 +3,12 @@
 import os
 
 
-def find_input_file(input_directory):
+def find_input_file(input_directory, types=[".ims", ".tif"]):
     # Find the existing IMS or Tiff files in this folder
     input_files = [
         os.path.join(input_directory, f)
         for f in os.listdir(input_directory)
-        if f.endswith(".ims") or f.endswith(".tif")
+        if any(f.endswith(extension) for extension in types)
     ]
     # If no IMS or Tiff file is found, print a warning
     if not input_files:

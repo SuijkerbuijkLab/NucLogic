@@ -1,8 +1,9 @@
 # Function to load cellpose models
-from cellpose import models
-import torch
-
 import os
+
+import torch
+from cellpose import models
+
 
 def load_model(model_path=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
