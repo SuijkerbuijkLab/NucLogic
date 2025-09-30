@@ -13,7 +13,7 @@ def launch_folder_picker():
     )
 
     if selected_dirs:
-        with open("selected_path.txt", "w") as f:
+        with open("miscellaneous\selected_path.txt", "w") as f:
             f.write(selected_dirs)
         print(f"Saved path: {selected_dirs}")
     else:

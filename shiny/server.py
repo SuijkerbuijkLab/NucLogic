@@ -83,7 +83,7 @@ def server(input, output, session):
         print("Button clicked — launching folder picker...")
         try:
             subprocess.run(["python", r"shiny\launcher.py"], check=True)
-            with open("selected_path.txt", "r") as f:
+            with open("miscellaneous\selected_path.txt", "r") as f:
                 path = f.read().strip()
                 selected_path.set(path)
                 print(f"✅ Path loaded into app: {path}")
@@ -408,7 +408,7 @@ def server(input, output, session):
         full_paths = [os.path.join(path, name) for name in selected]
 
         # Save paths to a temp file
-        with open("napari_paths.json", "w") as f:
+        with open("miscellaneous\napari_paths.json", "w") as f:
             json.dump(full_paths, f)
 
         # Launch Napari viewer

@@ -20,7 +20,7 @@ def compute_knn_features(points, k=5):
 
     coords = np.stack([setX, setY, setZ], axis=1)
 
-    tree = KDTree(coords)
+    tree = sklearn.neighbors.KDTree(coords)
     k_use = min(k, len(coords))
     distances, indices = tree.query(coords, k=k_use)
 
