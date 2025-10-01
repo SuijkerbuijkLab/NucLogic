@@ -6,6 +6,7 @@ import pandas as pd
 from alive_progress import alive_it
 import tables
 import itertools
+from imaris_ims_file_reader.ims import ims
 
 import os
 import re
@@ -53,8 +54,13 @@ def analyse_organoid(
         timestamps = np.array([row[2] for row in time_values])
         timestamps = timestamps // 3.6e9  # gets data in nanoseconds, calculate to hours
         time_interval = timestamps[1] - timestamps[0]
+
+        # Get the voxel size of the movie
+        loaded_movie = ims(input_file)
+        voxel_size = loaded_movie.resolution  # (Z, Y, X)
     else:
         time_interval = 1
+        voxel_size = (1.0, 1.0, 1.0)  # Assume isotropic if not provided
 
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
@@ -125,6 +131,9 @@ def analyse_organoid(
         # Get properties of the masked nuclei, such as volume and location of every cell
         props = utils.properties_mask(segmented_stack)
 
+        # Compensate for voxel size to get real world xyz distance values instead of pixel values
+        props = utils.compensate_voxel_size(props, voxel_size)
+
         # Get properties of every cell in the WT and CRC channels at the masked nuclei locations
         # We do this on an image where the median value (background) is subtracted from the signal
         channel_dfs = {}  # Store channel dataframes during for loop
@@ -192,6 +201,8 @@ def analyse_organoid(
         old_df["phenotype"] = old_df["phenotype"] = np.where(
             old_df[log_col] < cutoff, "CRC", "WT"
         )
+        old_df = utils.compute_knn_features(old_df, k=5)
+
         old_df.to_csv(
             os.path.join(
                 input_directory, "properties", f"{file.split('.')[0]}_props.csv"

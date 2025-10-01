@@ -286,6 +286,80 @@ def server(input, output, session):
             ),
         )
 
+    recalculate_stats_progress_state = reactive.Value(None)
+
+    @render.ui
+    def recalculate_stats_progress():
+        return recalculate_stats_progress_state.get()
+
+    @reactive.effect
+    @reactive.event(input.recalculate_statistics)
+    def recalculate_statistics():
+
+        # Show spinner that shows function is running
+        recalculate_stats_progress_state.set(
+            ui.tags.div(
+                ui.tags.span("⏳", style="font-size: 1.5em; margin-right: 8px;"),
+                "Recalculating...",
+                style="display: flex; align-items: center;",
+            )
+        )
+
+        from main_functions.recalculate_statistics import recalculate_statistics
+
+        # Get organoid paths
+        base_path = selected_path.get()
+        organoid_names = input.organoid_select_segmentation()
+        organoids_props = [
+            os.path.join(base_path, name, "properties") for name in organoid_names
+        ]
+
+        # Here we will create a dataframe that has the data of all selected organoids and all frames
+        all_data = []
+        for organoid in organoids_props:
+            sample_data = []
+            props = [file for file in os.listdir(organoid) if file.endswith(".csv")]
+            for prop in props:
+                data = pd.read_csv(os.path.join(organoid, prop))
+                sample_data.append(data)
+            sample_data = pd.concat(sample_data, ignore_index=True)
+            sample_data.insert(0, "sample", os.path.basename(os.path.dirname(organoid)))
+            all_data.append(sample_data)
+        all_data = pd.concat(all_data, ignore_index=True)
+
+        # Now we recalculate the statistics for this dataframe
+        all_data = recalculate_statistics(all_data)
+
+        # Now we split the data back into the individual organoids and save them in a new folder called properties_recalculated
+        for organoid in organoids_props:
+            data = all_data[
+                all_data["sample"] == os.path.basename(os.path.dirname(organoid))
+            ]
+            os.makedirs(
+                os.path.join(os.path.dirname(organoid), "properties_recalculated"),
+                exist_ok=True,
+            )
+            for _, frame in data.groupby("frame"):
+                frame_number = frame["frame"].iloc[0]
+                save_path = os.path.join(
+                    os.path.dirname(organoid), "properties_recalculated"
+                )
+                frame.to_csv(
+                    os.path.join(save_path, f"Frame-{frame_number:02d}_props.csv"),
+                    index=False,
+                )
+
+        print("✅ Recalculation complete.")
+
+        # Show checkmark when function is finished in ui
+        recalculate_stats_progress_state.set(
+            ui.tags.div(
+                ui.tags.span("✅", style="font-size: 1.5em; margin-right: 8px;"),
+                "Done!",
+                style="display: flex; align-items: center; color: green;",
+            )
+        )
+
     @reactive.effect
     @reactive.event(input.run_cropper)
     def run_cropper():
@@ -401,22 +475,6 @@ def server(input, output, session):
             ),
         )
 
-    @reactive.effect
-    @reactive.event(input.launch_napari)
-    def open_napari():
-        import json
-
-        path = selected_path.get()
-        selected = input.organoid_select_napari() or []
-        full_paths = [os.path.join(path, name) for name in selected]
-
-        # Save paths to a temp file
-        with open(r"miscellaneous\napari_paths.json", "w") as f:
-            json.dump(full_paths, f)
-
-        # Launch Napari viewer
-        subprocess.Popen([sys.executable, r"shiny\napari_launcher.py"])
-
     @reactive.calc
     def organoid_data():
         path = selected_path.get()
@@ -424,9 +482,13 @@ def server(input, output, session):
         if not path or not selected:
             return pd.DataFrame()
 
+        # Check the switch value to determine which folder to use
+        use_recalculated = input.use_recalculated_statistics()
+        folder_name = "properties_recalculated" if use_recalculated else "properties"
+
         data = []
         for organoid in selected:
-            property_path = os.path.join(path, organoid, "properties")
+            property_path = os.path.join(path, organoid, folder_name)
             if not os.path.isdir(property_path):
                 continue
             props = []
@@ -564,3 +626,61 @@ def server(input, output, session):
         fig.supylabel("Number of cells per organoid\n       (normalized to t=0)")
         plt.tight_layout()
         return fig
+
+    @reactive.effect
+    @reactive.event(input.launch_napari)
+    def open_napari():
+        import json
+
+        path = selected_path.get()
+        selected = input.organoid_select_napari() or []
+        full_paths = [os.path.join(path, name) for name in selected]
+
+        files = []
+        for path in full_paths:
+            if os.path.isdir(path):
+                files.extend(
+                    [
+                        f
+                        for f in os.listdir(path)
+                        if f.endswith(".tif") or f.endswith(".ims")
+                    ]
+                )
+
+        to_visualize = []
+        for organoid_path in full_paths:
+            organoid_files = [
+                f for f in os.listdir(organoid_path) if f.endswith((".tif", ".ims"))
+            ]
+
+            if input.segmentation_result():
+                to_visualize += [
+                    os.path.join(organoid_path, f)
+                    for f in organoid_files
+                    if "segmented" in f
+                ]
+            if input.projXY():
+                to_visualize += [
+                    os.path.join(organoid_path, f)
+                    for f in organoid_files
+                    if "projXY.tif" in f
+                ]
+            if input.projXY_tracked():
+                to_visualize += [
+                    os.path.join(organoid_path, f)
+                    for f in organoid_files
+                    if "projXY_tracked" in f
+                ]
+
+        if input.full_movie():
+            for organoid_name in selected:
+                movie_path = os.path.join(path, f"{organoid_name}.tif")
+                if os.path.exists(movie_path):
+                    to_visualize.append(movie_path)
+
+        # Save paths to a temp file
+        with open(r"miscellaneous\napari_paths.json", "w") as f:
+            json.dump(to_visualize, f)
+
+        # Launch Napari viewer
+        subprocess.Popen([sys.executable, r"shiny\napari_launcher.py"])

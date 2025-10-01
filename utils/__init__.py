@@ -10,5 +10,7 @@ from .calculate_cutoff import calculate_cutoff
 from .offset_image import offset_image
 from .generate_report import generate_report
 from .dummy_callback import dummy_callback
+from .compute_knn_features import compute_knn_features
+from .compensate_voxel_size import compensate_voxel_size
 
 print("utils package loaded successfully")
