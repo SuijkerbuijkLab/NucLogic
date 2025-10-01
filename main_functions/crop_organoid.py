@@ -8,6 +8,7 @@ import tifffile
 from alive_progress import alive_bar
 from matplotlib.colors import to_rgba
 from PyImarisWriter import PyImarisWriter as PW
+from imaris_ims_file_reader.ims import ims
 
 import utils
 
@@ -26,8 +27,9 @@ def crop_organoid(
     )
 
     ims_movie = utils.find_input_file(input_directory, types=[".ims"])
-    voxel_size = ims_movie.resolution  # (Z, Y, X)
-    timepoints = ims_movie.TimePoints
+    loaded_movie = ims(ims_movie)
+    voxel_size = loaded_movie.resolution  # (Z, Y, X)
+    timepoints = loaded_movie.TimePoints
     with tables.open_file(ims_movie, "r") as hf:
         time_values = hf.root.DataSetTimes.Time.read()
     timestamps = np.array([row[2] for row in time_values])

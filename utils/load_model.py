@@ -2,10 +2,11 @@
 import os
 
 import torch
-from cellpose import models
 
 
 def load_model(model_path=None):
+    from cellpose import models
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device.upper()} for processing.")
 

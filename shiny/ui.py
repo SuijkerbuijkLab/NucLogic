@@ -16,39 +16,67 @@ app_ui = ui.page_navbar(
                     ui.output_ui("organoid_list_segmentation"),
                     bg="#f8f8f8",
                 ),
-                ui.div(
-                    ui.h4("Channel names:"),
-                    ui.h6("Please name the channel containing nuclei 'Nuclei'"),
-                    *[
+                ui.layout_columns(
+                    ui.div(
+                        ui.h4("Run single cell segmentation:"),
+                        ui.h5("Channel names:"),
+                        ui.h6("Please name the channel containing nuclei 'Nuclei'"),
+                        *[
+                            ui.tags.div(
+                                ui.tags.span(
+                                    f"{i+1}:",
+                                    style="width: 30px; display: inline-block;",
+                                ),
+                                ui.tags.span(
+                                    ui.input_text(f"channel_{i}", "", width="200px"),
+                                    style="display: inline-block;",
+                                ),
+                                style="margin-bottom: 0px;",
+                            )
+                            for i in range(5)
+                        ],
+                        ui.h5("Advanced Settings"),
                         ui.tags.div(
-                            ui.tags.span(
-                                f"{i+1}:", style="width: 30px; display: inline-block;"
+                            ui.input_checkbox(
+                                "cropped_exists",
+                                "Folders already contain cropped tiff files",
+                                False,
                             ),
-                            ui.tags.span(
-                                ui.input_text(f"channel_{i}", "", width="200px"),
-                                style="display: inline-block;",
+                            ui.input_checkbox(
+                                "delete_cropped", "Delete split cropped files", True
                             ),
-                            style="margin-bottom: 0px;",
-                        )
-                        for i in range(5)
-                    ],
-                    ui.h4("Advanced Settings"),
-                    ui.input_checkbox(
-                        "cropped_exists",
-                        "Folders already contain cropped tiff files",
-                        False,
+                            ui.input_checkbox(
+                                "delete_max_proj", "Delete max projection", True
+                            ),
+                            ui.input_checkbox(
+                                "delete_max_proj_tracked",
+                                "Delete tracked max projection",
+                                True,
+                            ),
+                            style="font-size: 14px;",
+                        ),
+                        ui.input_action_button(
+                            "run_segmenter", "Run Segmenter", width="200px"
+                        ),
+                        ui.output_ui("segmentation_progress"),
                     ),
-                    ui.input_checkbox(
-                        "delete_cropped", "Delete split cropped files", True
+                    ui.div(
+                        ui.h4("Recalculate statistics experiment wide:"),
+                        ui.h6(
+                            "Select all organoids within this experiment that you want to use to recalculate phenotypes and knn_features"
+                        ),
+                        ui.layout_columns(
+                            ui.input_action_button(
+                                "recalculate_statistics",
+                                "Recalculate Statistics",
+                                width="250px",
+                            ),
+                            ui.output_ui("recalculate_stats_progress"),
+                        ),
+                        ui.tags.small(
+                            "New statistics can be found in the properties_recalculated folder of every organoid"
+                        ),
                     ),
-                    ui.input_checkbox("delete_max_proj", "Delete max projection", True),
-                    ui.input_checkbox(
-                        "delete_max_proj_tracked", "Delete tracked max projection", True
-                    ),
-                    ui.input_action_button(
-                        "run_segmenter", "Run Segmenter", width="200px"
-                    ),
-                    ui.output_ui("segmentation_progress"),
                 ),
             ),
         ),
@@ -149,6 +177,11 @@ app_ui = ui.page_navbar(
                     bg="#f8f8f8",
                 ),
                 ui.div(
+                    ui.input_switch(
+                        "use_recalculated_statistics",
+                        "Use recalculated statistics",
+                        value=False,
+                    ),
                     ui.input_numeric(
                         "ylim_max",
                         "Set Y-axis upper limit (optional)",
@@ -178,6 +211,25 @@ app_ui = ui.page_navbar(
                     bg="#f8f8f8",
                 ),
                 ui.div(
+                    ui.h4("Visualize movies using Napari"),
+                    ui.h6("Select what type of movies you want to visualize:"),
+                    ui.tags.div(
+                        ui.input_checkbox(
+                            "segmentation_result",
+                            "Segmentation result",
+                            False,
+                        ),
+                        ui.input_checkbox("projXY", "Max Z projection", False),
+                        ui.input_checkbox(
+                            "projXY_tracked", "Tracked max Z projection", False
+                        ),
+                        ui.input_checkbox(
+                            "full_movie",
+                            "Full movie (takes longer to load)",
+                            False,
+                        ),
+                        style="font-size: 14px;",
+                    ),
                     ui.input_action_button("launch_napari", "Launch Napari"),
                 ),
             ),

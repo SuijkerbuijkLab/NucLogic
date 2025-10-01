@@ -8,9 +8,7 @@ with open(r"miscellaneous\napari_paths.json", "r") as f:
 
 viewer = napari.Viewer()
 
-for folder in paths:
-    tiffs = [f for f in os.listdir(folder) if f.endswith(".tif")]
-    for tif in tiffs:
-        viewer.open(os.path.join(folder, tif))
+for movie in paths:
+    viewer.open(movie)
 
 napari.run()
