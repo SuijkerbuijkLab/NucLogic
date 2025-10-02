@@ -168,21 +168,39 @@ def server(input, output, session):
             match = re.search(r"Frame-(\d+)", filename)
             return int(match.group(1)) if match else -1
 
+        # Get channel names
+        channel_names = [
+            getattr(input, f"channel_name_{i}")().strip() for i in range(5)
+        ]
+
+        # Get alternative channel names when different than Nuclei WT CRC channels are added
+        channel_names_alternative = [
+            getattr(input, f"channel_name_alternative_{i}")().strip() for i in range(5)
+        ]
+
+        # Make a list of the final channel names incl WT CRC Nuclei and different names
+        final_channel_names = []
+        for i in range(len(channel_names)):
+            if channel_names[i] == "Different":
+                final_channel_names.append(channel_names_alternative[i])
+            elif channel_names[i] == "Empty":
+                continue
+            else:
+                final_channel_names.append(channel_names[i])
+
         # Load models once
-        cell_model = load_model(r"models\cell_segmentation_4")
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model_dir = os.path.join(base_dir, "models")
+        cell_model = load_model(os.path.join(model_dir, "cell_segmentation_4"))
         organoid_model = build_sam2_video_predictor(
-            r"models\sam2.1_hiera_s.yaml",
-            r"models\sam2.1_hiera_small.pt",
+            os.path.join(model_dir, "sam2.1_hiera_s.yaml"),
+            os.path.join(model_dir, "sam2.1_hiera_small.pt"),
         )
 
         # Get organoid paths
         base_path = selected_path.get()
         organoid_names = input.organoid_select_segmentation()
         organoids = [os.path.join(base_path, name) for name in organoid_names]
-
-        # Get channel names
-        channel_names = [getattr(input, f"channel_{i}")().strip() for i in range(5)]
-        channel_names = [name for name in channel_names if name]
 
         # Get advanced settings
         settings = {
@@ -202,7 +220,7 @@ def server(input, output, session):
                     organoid,
                     cell_model=cell_model,
                     organoid_model=organoid_model,
-                    channel_names=channel_names,
+                    channel_names=final_channel_names,
                     croped_existing=settings["cropped_exists"],
                 )
 

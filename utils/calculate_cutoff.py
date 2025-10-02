@@ -13,6 +13,10 @@ def solve_gasussians(m1, s1, m2, s2):
 
 def calculate_cutoff(df, column):
 
+    # Make the column names all lower case for easier searching
+    column = column.lower()
+    df.columns = [col.lower() for col in df.columns]
+
     # Reshape the data into something we can use for kmeans
     ratios = df[column].to_numpy().reshape(-1, 1)
 

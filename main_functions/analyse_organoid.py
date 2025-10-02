@@ -139,9 +139,11 @@ def analyse_organoid(
         channel_dfs = {}  # Store channel dataframes during for loop
         for ch_name, ch_index in channel_indices.items():
             if ch_name == "nuclei":
-                continue  # Skip nuclei for separate processing or if handled elsewhere
+                continue  # Skip nuclei because we already got data from that via properties_mask
             frame_ch = frame[ch_index, :, :, :]
+            # Do a background subtraction on the image
             offset_ch = utils.offset_image(frame_ch, type="median")
+            # Get intensity data of this channel at the locations of the nuclei masks
             df_ch = utils.properties_channel(
                 segmented_stack, offset_ch, channel_names[ch_index]
             )
@@ -153,19 +155,26 @@ def analyse_organoid(
             df_final = df_final.merge(df_ch, on="label")
         df_final.insert(0, "frame", int(re.search(r"\d+", file).group()))
 
-        # Add some extra statistics to the dataframe.
+        # Add the ratios and log ratios of all combinations to the data frame
         channels = [ch for ch in channel_dfs.keys() if ch.lower() != "nuclei"]
         for ch_a, ch_b in itertools.combinations(channels, 2):
             raw_a = f"raw_{ch_a}"
             raw_b = f"raw_{ch_b}"
-            ratio_col = f"ratio_{ch_a}_{ch_b}"
-            log_col = f"log_{ratio_col}"
+            ratio_col1 = f"ratio_{ch_a}_{ch_b}"
+            log_col1 = f"log_{ratio_col1}"
+            ratio_col2 = f"ratio_{ch_b}_{ch_a}"
+            log_col2 = f"log_{ratio_col2}"
 
-            df_final[ratio_col] = df_final.apply(
+            df_final[ratio_col1] = df_final.apply(
                 lambda row: (row[raw_a] + 1e-6) / (row[raw_b] + 1e-6),
                 axis=1,
             )
-            df_final[log_col] = np.log10(df_final[ratio_col] + 1e-6)
+            df_final[log_col1] = np.log10(df_final[ratio_col1] + 1e-6)
+            df_final[ratio_col2] = df_final.apply(
+                lambda row: (row[raw_b] + 1e-6) / (row[raw_a] + 1e-6),
+                axis=1,
+            )
+            df_final[log_col2] = np.log10(df_final[ratio_col2] + 1e-6)
 
         # Save the dataframe that contains all information and phenotypes of this frame to a file named properties
         os.makedirs(os.path.join(input_directory, "properties"), exist_ok=True)
@@ -181,16 +190,16 @@ def analyse_organoid(
     properties = pd.concat(properties, ignore_index=True)
 
     # Calculate the cutoff value between WT and CRC cells based on the ratio between their signals
-    for ch_a, ch_b in itertools.combinations(channels, 2):
-        cutoff = utils.calculate_cutoff(properties, f"log_ratio_{ch_a}_{ch_b}")
+    cutoff = utils.calculate_cutoff(properties, f"log_ratio_WT_CRC")
 
     summary_results = []
     for file in files:
         df = properties[properties["frame"] == int(re.search(r"\d+", file).group())]
         for ch_a, ch_b in itertools.combinations(channels, 2):
-            crc_count = np.sum(df[f"log_ratio_{ch_a}_{ch_b}"] < cutoff)
-            wt_count = np.sum(df[f"log_ratio_{ch_a}_{ch_b}"] >= cutoff)
-            log_col = f"log_ratio_{ch_a}_{ch_b}"
+            log_col = f"log_ratio_WT_CRC"
+            crc_count = np.sum(df[log_col] < cutoff)
+            wt_count = np.sum(df[log_col] >= cutoff)
+
         total = crc_count + wt_count
 
         old_df = pd.read_csv(
@@ -245,7 +254,20 @@ def analyse_organoid(
 
     # Stack all segmentation mask frames of the movie across time
     segmented_movie_array = np.stack(segmented_movie_padded, axis=0)
+    # Add a singleton channel axis → shape becomes TZCYX
+    segmented_movie_array = np.expand_dims(segmented_movie_array, axis=2)
 
     # Save this segmentation movie
     segmented_movie_tiff = os.path.join(input_directory, "segmented_movie.tif")
-    tifffile.imwrite(segmented_movie_tiff, segmented_movie_array)
+    tifffile.imwrite(
+        segmented_movie_tiff,
+        segmented_movie_array,
+        imagej=True,
+        resolution=((1 / 0.65) * 25400, (1 / 0.65) * 25400),
+        metadata={
+            "unit": "um",
+            "axes": "TZCYX",
+            "TimeIncrement": 1,
+            "TimeIncrementUnit": "h",
+        },
+    )
