@@ -12,6 +12,7 @@ from imaris_ims_file_reader.ims import ims
 from PIL import Image
 import scipy.ndimage as ndimage
 import cv2
+from .offset_image import offset_image
 
 import os, shutil, tempfile
 
@@ -88,6 +89,10 @@ def crop(proj_XY, input_file, output_directory, model, nuclei=2, name="projXY_tr
 
             # Make an max XZ projection that we will use to see what Z slices are important
             XZ = np.max(ref_masked, axis=1)
+
+            # Apply offset to enhance contrast and make background and signal more distinct
+            XZ = offset_image(XZ, type="median")
+
             z_list = []
             moran_values = []  # Collect Moran’s I for all rows
 
@@ -100,7 +105,7 @@ def crop(proj_XY, input_file, output_directory, model, nuclei=2, name="projXY_tr
 
             # Step 2: Calculate dynamic threshold based on max moran I value found
             max_moran = max(val for _, val in moran_values)
-            threshold = 0.3 * max_moran
+            threshold = 0.4 * max_moran
 
             # Step 3: Filter Z slices using threshold
             z_list = [idx for idx, val in moran_values if val >= threshold]
@@ -110,7 +115,7 @@ def crop(proj_XY, input_file, output_directory, model, nuclei=2, name="projXY_tr
             current_block = [z_vals_sorted[0]]
 
             for i in range(1, len(z_vals_sorted)):
-                if z_vals_sorted[i] == z_vals_sorted[i - 1] + 1:
+                if z_vals_sorted[i] - z_vals_sorted[i - 1] <= 6:
                     current_block.append(z_vals_sorted[i])
                 else:
                     if len(current_block) > len(max_block):
@@ -247,6 +252,7 @@ def segment_organoid(proj_XY_8bit, model):
 
     # Calculate center point where organoid should be
     coords = get_coords(proj_XY_8bit)
+    print(coords)
     labels = np.ones(len(coords))
     _, object_ids, mask_logits = model.add_new_points(
         inference_state=inference_state,
