@@ -1,1 +1,2 @@
 *.pt filter=lfs diff=lfs merge=lfs -text
+models/cell_segmentation* filter=lfs diff=lfs merge=lfs -text
