@@ -101,7 +101,12 @@ def crop(proj_XY, input_file, output_directory, model, nuclei=2, name="projXY_tr
                 coords = np.arange(len(row)).reshape(-1, 1)
                 w_1d = KNN.from_array(coords, k=2)
                 moran = Moran(row, w_1d)
-                moran_values.append((idx, moran.I))  # store both index and value
+                if not np.isnan(
+                    moran.I
+                ):  # Make sure this value is not NA, which can happen in truly background / random data
+                    moran_values.append((idx, moran.I))  # store both index and value
+                else:
+                    moran_values.append((idx, 0))
 
             # Step 2: Calculate dynamic threshold based on max moran I value found
             max_moran = max(val for _, val in moran_values)
@@ -204,7 +209,7 @@ def get_coords(movie):
     # Get coordinates from the eroded mask
     coords = np.column_stack(np.where(eroded_mask))
 
-    sampled_points = coords[np.random.choice(len(coords), 5, replace=False)]
+    sampled_points = coords[np.random.choice(len(coords), 5, replace=False)][:, ::-1]
     selected_centroid = closest["centroid"]
     selected_centroid = np.array(
         [[int(selected_centroid[0]), int(selected_centroid[1])]], dtype=np.int32
@@ -213,21 +218,6 @@ def get_coords(movie):
     combined_points = np.vstack([sampled_points, selected_centroid])
 
     return combined_points
-
-
-def get_points(point, offset=25):
-    offsets = np.array(
-        [
-            [offset, 0],  # +offset x (right)
-            [-offset, 0],  # -offset x (left)
-            [0, offset],  # +offset y (down)
-            [0, -offset],  # -offset y (up)
-        ]
-    )
-
-    surrounding_points = point + offsets
-    points = np.vstack([point, surrounding_points])
-    return points
 
 
 def segment_organoid(proj_XY_8bit, model):
@@ -252,7 +242,7 @@ def segment_organoid(proj_XY_8bit, model):
 
     # Calculate center point where organoid should be
     coords = get_coords(proj_XY_8bit)
-    print(coords)
+
     labels = np.ones(len(coords))
     _, object_ids, mask_logits = model.add_new_points(
         inference_state=inference_state,
@@ -274,3 +264,5 @@ def segment_organoid(proj_XY_8bit, model):
 
     all_masks = np.stack(all_masks, axis=0)  # shape: (T, C, Y, X)
     all_masks = all_masks[:, 0]  # T Y X
+
+    return all_masks

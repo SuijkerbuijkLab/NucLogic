@@ -145,7 +145,7 @@ def analyse_organoid(
             offset_ch = utils.offset_image(frame_ch, type="median")
             # Get intensity data of this channel at the locations of the nuclei masks
             df_ch = utils.properties_channel(
-                segmented_stack, offset_ch, channel_names[ch_index]
+                segmented_stack, offset_ch, channel_names[ch_index].lower()
             )
             channel_dfs[channel_names[ch_index]] = df_ch
 
@@ -156,7 +156,7 @@ def analyse_organoid(
         df_final.insert(0, "frame", int(re.search(r"\d+", file).group()))
 
         # Add the ratios and log ratios of all combinations to the data frame
-        channels = [ch for ch in channel_dfs.keys() if ch.lower() != "nuclei"]
+        channels = [ch.lower() for ch in channel_dfs.keys() if ch.lower() != "nuclei"]
         for ch_a, ch_b in itertools.combinations(channels, 2):
             raw_a = f"raw_{ch_a}"
             raw_b = f"raw_{ch_b}"
@@ -190,13 +190,14 @@ def analyse_organoid(
     properties = pd.concat(properties, ignore_index=True)
 
     # Calculate the cutoff value between WT and CRC cells based on the ratio between their signals
-    cutoff = utils.calculate_cutoff(properties, f"log_ratio_WT_CRC")
+    cutoff = utils.calculate_cutoff(properties, f"log_ratio_wt_crc")
+    print(cutoff)
 
     summary_results = []
     for file in files:
         df = properties[properties["frame"] == int(re.search(r"\d+", file).group())]
         for ch_a, ch_b in itertools.combinations(channels, 2):
-            log_col = f"log_ratio_WT_CRC"
+            log_col = f"log_ratio_wt_crc"
             crc_count = np.sum(df[log_col] < cutoff)
             wt_count = np.sum(df[log_col] >= cutoff)
 
@@ -207,9 +208,7 @@ def analyse_organoid(
                 input_directory, "properties", f"{file.split('.')[0]}_props.csv"
             )
         )
-        old_df["phenotype"] = old_df["phenotype"] = np.where(
-            old_df[log_col] < cutoff, "CRC", "WT"
-        )
+        old_df["phenotype"] = np.where(old_df[log_col] < cutoff, "crc", "wt")
         old_df = utils.compute_knn_features(old_df, k=5)
 
         old_df.to_csv(

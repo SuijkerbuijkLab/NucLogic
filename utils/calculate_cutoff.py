@@ -29,7 +29,7 @@ def calculate_cutoff(df, column):
     sigma1, sigma2 = np.sqrt(gmm.covariances_.flatten())
 
     # Solve quadratic formula, and the highest intersection point is the cutoff value
-    if np.std(ratios) > 0.7:  # mixed
+    if np.std(ratios) > 0.55:  # mixed
         solved_val = solve_gasussians(mu1, sigma1, mu2, sigma2)
         cutoff = solved_val[1]
     elif ratios.mean() > 0:  # wt

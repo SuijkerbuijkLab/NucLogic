@@ -15,7 +15,7 @@ from shiny import reactive, render, ui
 
 
 def summarize_growth(data):
-    filtered = data[data["phenotype"].isin(["WT", "CRC"])].copy()
+    filtered = data[data["phenotype"].isin(["wt", "crc"])].copy()
 
     # Count phenotype occurrences per organoid and frame
     counts = (
@@ -29,45 +29,54 @@ def summarize_growth(data):
         index=["organoid", "frame"], columns="phenotype", values="count", fill_value=0
     ).reset_index()
 
+    # Add missing columns if they don't exist
+    if "wt" not in pivoted.columns:
+        pivoted["wt"] = 0
+    if "crc" not in pivoted.columns:
+        pivoted["crc"] = 0
+
     # Merge back the type info
     types = data[["organoid", "type"]].drop_duplicates()
     pivoted = pivoted.merge(types, on="organoid", how="left")
 
     # Normalize by frame 0 per organoid
     def normalize(group):
-        baseline = group[group["frame"] == 0][["WT", "CRC"]]
+        baseline = group[group["frame"] == 0][["wt", "crc"]]
         if baseline.empty:
             group["relative_wt"] = None
             group["relative_crc"] = None
         else:
             base_vals = baseline.iloc[0]
             group["relative_wt"] = (
-                group["WT"] / base_vals["WT"] if base_vals["WT"] > 0 else None
+                group["wt"] / base_vals["wt"] if base_vals["wt"] > 0 else None
             )
             group["relative_crc"] = (
-                group["CRC"] / base_vals["CRC"] if base_vals["CRC"] > 0 else None
+                group["crc"] / base_vals["crc"] if base_vals["crc"] > 0 else None
             )
         return group
 
     summary = pivoted.groupby("organoid").apply(normalize).reset_index(drop=True)
 
     # Compute % composition
-    summary["%wt"] = summary["WT"] / (summary["WT"] + summary["CRC"])
-    summary["%crc"] = summary["CRC"] / (summary["WT"] + summary["CRC"])
+    summary["%wt"] = summary["wt"] / (summary["wt"] + summary["crc"])
+    summary["%crc"] = summary["crc"] / (summary["wt"] + summary["crc"])
+    print(summary)
     summary = summary.rename(columns={"frame": "time"})
 
     return summary
 
 
-def classify_type(name):
-    name_lower = name.lower()
+def classify_type(df):
+    phenotypes = df["phenotype"].unique()
 
-    if "mix" in name_lower:
-        return "Mixed"
-    elif "wt" in name_lower:
-        return "WT"
-    elif "crc" in name_lower:
-        return "CRC"
+    # Check if there's only one phenotype and it's "crc" (case insensitive)
+    if len(phenotypes) == 1 and phenotypes[0].lower() == "crc":
+        return "crc"
+    # Check if there's only one phenotype and it's "wt" (case insensitive)
+    elif len(phenotypes) == 1 and phenotypes[0].lower() == "wt":
+        return "wt"
+    elif len(phenotypes) == 2:
+        return "mix"
     else:
         return "unknown"
 
@@ -173,12 +182,12 @@ def server(input, output, session):
             getattr(input, f"channel_name_{i}")().strip() for i in range(5)
         ]
 
-        # Get alternative channel names when different than Nuclei WT CRC channels are added
+        # Get alternative channel names when different than Nuclei wt crc channels are added
         channel_names_alternative = [
             getattr(input, f"channel_name_alternative_{i}")().strip() for i in range(5)
         ]
 
-        # Make a list of the final channel names incl WT CRC Nuclei and different names
+        # Make a list of the final channel names incl wt crc Nuclei and different names
         final_channel_names = []
         for i in range(len(channel_names)):
             if channel_names[i] == "Different":
@@ -332,7 +341,7 @@ def server(input, output, session):
             os.path.join(base_path, name, "properties") for name in organoid_names
         ]
 
-        # Here we will create a dataframe that has the data of all selected organoids and all frames
+        # Here we will create a dataframe that has the data of all selected mixed organoids and all frames
         all_data = []
         for organoid in organoids_props:
             sample_data = []
@@ -521,7 +530,7 @@ def server(input, output, session):
             if props:
                 df = pd.concat(props, ignore_index=True)
                 df.insert(0, "organoid", organoid)
-                df.insert(0, "type", classify_type(organoid))
+                df.insert(0, "type", classify_type(df))
                 data.append(df)
 
         return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
@@ -568,7 +577,7 @@ def server(input, output, session):
                     group["relative_wt"],
                     "m-",
                     marker="o",
-                    label=f"{organoid} WT",
+                    label=f"{organoid} wt",
                     alpha=0.6,
                 )
                 ax.plot(
@@ -576,7 +585,7 @@ def server(input, output, session):
                     group["relative_crc"],
                     "g-",
                     marker="o",
-                    label=f"{organoid} CRC",
+                    label=f"{organoid} crc",
                     alpha=0.6,
                 )
             ax.set_title(f"Type: {type_name}")
@@ -620,7 +629,7 @@ def server(input, output, session):
                 mean["relative_wt"],
                 yerr=std["relative_wt"],
                 fmt="m-o",
-                label="WT",
+                label="wt",
                 capsize=4,
             )
             ax.errorbar(
@@ -628,7 +637,7 @@ def server(input, output, session):
                 mean["relative_crc"],
                 yerr=std["relative_crc"],
                 fmt="g-o",
-                label="CRC",
+                label="crc",
                 capsize=4,
             )
             ax.set_title(f"Type: {type_name}")

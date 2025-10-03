@@ -14,25 +14,26 @@ from utils.compute_knn_features import compute_knn_features
 def recalculate_statistics(data):
 
     # Find the column that contains log_ratio using regex
-    column_name = data.filter(regex="log_ratio").columns[0]
+    column_name = data.filter(regex="log_ratio_wt_crc").columns[0]
 
     # Calculate the cutoff based on all data
     cutoff = calculate_cutoff(data, column=column_name)
+    print(f"New cutoff calculated: {cutoff}")
 
     # Loop over data of each sample and determine if it is WT or CRC based on the new cutoff
     new_data = []
     for _, df in data.groupby("sample"):
-        percentage_cutoff = (df[column_name] < cutoff).sum() / len(df) * 100
+        percentage_cutoff = (df[column_name] < (cutoff - 0.2)).sum() / len(df) * 100
 
         # If there are this many cells above the threshold, its likely a pure WT sample
         if percentage_cutoff < 3:
-            df["phenotype"] = "WT"
+            df["phenotype"] = "wt"
         # If there are this many cells below the threshold, its likely a pure CRC sample
-        elif percentage_cutoff > 97:
-            df["phenotype"] = "CRC"
+        elif percentage_cutoff > 99:
+            df["phenotype"] = "crc"
         # Otherwise we have a mixed sample, where we use the cutoff to determine WT or CRC per cell
         else:
-            df["phenotype"] = np.where(df[column_name] < cutoff, "CRC", "WT")
+            df["phenotype"] = np.where(df[column_name] < cutoff, "crc", "wt")
 
         # Loop over every individual frame to recalculate the knn_features
         new_dfs = []
