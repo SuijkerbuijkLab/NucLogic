@@ -7,7 +7,7 @@ import tifffile
 from imaris_ims_file_reader.ims import ims
 
 
-def max_project(file, output_directory, nuclei=2):
+def max_project(file, output_directory, nuclei=2, name="nuclei", fixed=False):
     # Load in either the ims or tif file
     if file.endswith(".ims"):
         movie = ims(file)  # T,C,Z,Y,X
@@ -21,10 +21,13 @@ def max_project(file, output_directory, nuclei=2):
         # Get only the information of the nuclei channel
         movie = movie[:, :, nuclei, :, :]  # Remaining object is T Z Y X
 
-    # Project axis Z
-    max_data = np.max(movie, axis=1)
+    # Project axis Z, if fixed we have 1 time axis less
+    if fixed:
+        max_data = np.max(movie, axis=0)
+    else:
+        max_data = np.max(movie, axis=1)
 
-    # Save the new file
-    name = os.path.basename(file).split(".")[0]
+    proj_XY_name = os.path.join(os.path.dirname(file), f"{name}_projXY.tif")
+    tifffile.imwrite(proj_XY_name, max_data)
 
     return max_data

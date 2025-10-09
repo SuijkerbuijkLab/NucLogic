@@ -49,15 +49,22 @@ def analyse_organoid(
 
     # Get metadata of the time interval of the movie
     if input_file.endswith(".ims"):
-        with tables.open_file(input_file, "r") as hf:
-            time_values = hf.root.DataSetTimes.Time.read()
-        timestamps = np.array([row[2] for row in time_values])
-        timestamps = timestamps // 3.6e9  # gets data in nanoseconds, calculate to hours
-        time_interval = timestamps[1] - timestamps[0]
-
         # Get the voxel size of the movie
         loaded_movie = ims(input_file)
         voxel_size = loaded_movie.resolution  # (Z, Y, X)
+
+        if loaded_movie.shape[0] == 1:
+            is_fixed = True
+        else:
+            is_fixed = False
+            with tables.open_file(input_file, "r") as hf:
+                time_values = hf.root.DataSetTimes.Time.read()
+            timestamps = np.array([row[2] for row in time_values])
+            timestamps = (
+                timestamps // 3.6e9
+            )  # gets data in nanoseconds, calculate to hours
+            time_interval = timestamps[1] - timestamps[0]
+
     else:
         time_interval = 1
         voxel_size = (1.0, 1.0, 1.0)  # Assume isotropic if not provided
@@ -65,17 +72,34 @@ def analyse_organoid(
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
     if not croped_existing:
-        proj_XY = utils.max_project(input_file, input_directory, nuclei=nuclei_channel)
-        proj_XY_name = os.path.join(os.path.dirname(input_file), f"{name}_projXY.tif")
-        tifffile.imwrite(proj_XY_name, proj_XY)
-        utils.crop(
-            proj_XY=proj_XY,
-            input_file=input_file,
-            model=organoid_model,
-            output_directory=output_directory_cropped,
-            nuclei=nuclei_channel,
-            name=name,
-        )
+
+        if is_fixed:
+            proj_XY = utils.max_project(
+                input_file,
+                input_directory,
+                nuclei=nuclei_channel,
+                name=name,
+                fixed=is_fixed,
+            )
+            utils.crop_fixed(
+                proj_XY=proj_XY,
+                input_file=input_file,
+                output_directory=output_directory_cropped,
+                nuclei=nuclei_channel,
+                name=name,
+            )
+        else:
+            proj_XY = utils.max_project(
+                input_file, input_directory, nuclei=nuclei_channel, name=name
+            )
+            utils.crop(
+                proj_XY=proj_XY,
+                input_file=input_file,
+                output_directory=output_directory_cropped,
+                model=organoid_model,
+                nuclei=nuclei_channel,
+                name=name,
+            )
 
     # Find all the created cropped tiff files, every file is a 1 frame of the movie
     files = sorted(
@@ -191,8 +215,8 @@ def analyse_organoid(
 
     # Calculate the cutoff value between WT and CRC cells based on the ratio between their signals
     cutoff = utils.calculate_cutoff(properties, f"log_ratio_wt_crc")
-    print(cutoff)
 
+    # Loop again over every frame to calculate the number of WT and CRC cells based on the cutoff
     summary_results = []
     for file in files:
         df = properties[properties["frame"] == int(re.search(r"\d+", file).group())]
@@ -228,23 +252,24 @@ def analyse_organoid(
         }
         summary_results.append(pd.DataFrame([results]))
 
-    summary_results = pd.concat(summary_results, ignore_index=True)
-    summary_results["relative_wt"] = (
-        summary_results["wt_count"] / summary_results["wt_count"][0]
-    )
-    summary_results["relative_crc"] = (
-        summary_results["crc_count"] / summary_results["crc_count"][0]
-    )
+    if not is_fixed:
+        summary_results = pd.concat(summary_results, ignore_index=True)
+        summary_results["relative_wt"] = (
+            summary_results["wt_count"] / summary_results["wt_count"][0]
+        )
+        summary_results["relative_crc"] = (
+            summary_results["crc_count"] / summary_results["crc_count"][0]
+        )
 
-    # Save summary of the whole movie as a csv
-    summary_txt = os.path.join(input_directory, "summary_results_organoid.csv")
-    summary_results.to_csv(summary_txt, index=False)
+        # Save summary of the whole movie as a csv
+        summary_txt = os.path.join(input_directory, "summary_results_organoid.csv")
+        summary_results.to_csv(summary_txt, index=False)
 
-    # Generate plots and save these as a report
-    report = os.path.join(input_directory, "result_report.pdf")
-    utils.generate_report(
-        summary_results, time_interval=time_interval, output_path=report
-    )
+        # Generate plots and save these as a report
+        report = os.path.join(input_directory, "result_report.pdf")
+        utils.generate_report(
+            summary_results, time_interval=time_interval, output_path=report
+        )
 
     # Pad all segmentation mask frames of the movie
     segmented_movie_padded = [
