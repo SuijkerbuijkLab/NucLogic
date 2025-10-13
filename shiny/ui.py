@@ -75,6 +75,9 @@ app_ui = ui.tags.html(
                                     "Delete tracked max projection",
                                     True,
                                 ),
+                                ui.input_checkbox(
+                                    "is_fixed", "Data is from fixed organoids", False
+                                ),
                                 style="font-size: 14px;",
                             ),
                             ui.input_action_button(

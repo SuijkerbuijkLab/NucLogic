@@ -27,6 +27,7 @@ def analyse_organoid(
     organoid_model,  # Model that is used to segment organoids for cropping
     channel_names,  # Names of the different channels
     croped_existing=False,  # Is there already a folder present that contains cropped tiffs, then we can skip cropping
+    is_fixed=False,  # Is the data from fixed organoids (single timepoint) or live (multiple timepoints)
 ):
     # Set some parameters for the rest of the scripped
     output_directory_cropped = os.path.join(str(input_directory), "cropped")
@@ -53,10 +54,7 @@ def analyse_organoid(
         loaded_movie = ims(input_file)
         voxel_size = loaded_movie.resolution  # (Z, Y, X)
 
-        if loaded_movie.shape[0] == 1:
-            is_fixed = True
-        else:
-            is_fixed = False
+        if not is_fixed:
             with tables.open_file(input_file, "r") as hf:
                 time_values = hf.root.DataSetTimes.Time.read()
             timestamps = np.array([row[2] for row in time_values])
@@ -87,6 +85,7 @@ def analyse_organoid(
                 output_directory=output_directory_cropped,
                 nuclei=nuclei_channel,
                 name=name,
+                voxel_size=voxel_size,
             )
         else:
             proj_XY = utils.max_project(
@@ -99,6 +98,7 @@ def analyse_organoid(
                 model=organoid_model,
                 nuclei=nuclei_channel,
                 name=name,
+                voxel_size=voxel_size,
             )
 
     # Find all the created cropped tiff files, every file is a 1 frame of the movie
@@ -127,7 +127,7 @@ def analyse_organoid(
         frame = tifffile.imread(frame_path)
 
         # Select the nuclei channel for segmentation
-        frame_nuclei = frame[nuclei_channel, :, :, :]
+        frame_nuclei = frame[:, nuclei_channel, :, :]
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
         # stdout silenced to stop printing random stuff
@@ -164,7 +164,7 @@ def analyse_organoid(
         for ch_name, ch_index in channel_indices.items():
             if ch_name == "nuclei":
                 continue  # Skip nuclei because we already got data from that via properties_mask
-            frame_ch = frame[ch_index, :, :, :]
+            frame_ch = frame[:, ch_index, :, :]
             # Do a background subtraction on the image
             offset_ch = utils.offset_image(frame_ch, type="median")
             # Get intensity data of this channel at the locations of the nuclei masks

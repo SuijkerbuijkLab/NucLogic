@@ -16,8 +16,17 @@ def recalculate_statistics(data):
     # Find the column that contains log_ratio using regex
     column_name = data.filter(regex="log_ratio_wt_crc").columns[0]
 
+    cutoffs = []
+    # Find all mixed samples and calculate their individual cutoffs
+    for _, df in data.groupby("sample"):
+        if df["phenotype"].nunique() > 1:  # Mixed sample
+            cutoff = calculate_cutoff(df, column=column_name)
+            cutoffs.append(cutoff)
+
+    print("found cutoffs from mixed samples:", cutoffs)
     # Calculate the cutoff based on all data
-    cutoff = calculate_cutoff(data, column=column_name)
+    if len(cutoffs) > 0:
+        cutoff = np.mean(cutoffs)
     print(f"New cutoff calculated: {cutoff}")
 
     # Loop over data of each sample and determine if it is WT or CRC based on the new cutoff
@@ -29,7 +38,7 @@ def recalculate_statistics(data):
         if percentage_cutoff < 3:
             df["phenotype"] = "wt"
         # If there are this many cells below the threshold, its likely a pure CRC sample
-        elif percentage_cutoff > 99:
+        elif percentage_cutoff > 97:
             df["phenotype"] = "crc"
         # Otherwise we have a mixed sample, where we use the cutoff to determine WT or CRC per cell
         else:

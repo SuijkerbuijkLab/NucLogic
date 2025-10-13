@@ -13,19 +13,26 @@ from libpysal.weights import KNN
 from .offset_image import offset_image
 
 
-def crop_fixed(proj_XY, input_file, output_directory, nuclei=2, name="projXY_tracked"):
+def crop_fixed(
+    proj_XY,
+    input_file,
+    output_directory,
+    nuclei=2,
+    name="projXY_tracked",
+    voxel_size=(1.0, 1.0, 1.0),
+):
     # Create the output directory to save the files
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
     # Apply gaussian filter to smooth the image and make thresholding more robust
-    frame = ndimage.gaussian_filter(proj_XY, sigma=(10, 10))
+    frame = ndimage.gaussian_filter(proj_XY, sigma=(3, 3))
 
     # Apply threshold (you can tweak the value)
     median = np.median(frame)
     _, binary_mask = cv2.threshold(frame, median + 5, 255, cv2.THRESH_BINARY)
 
-    binary_mask = ndimage.binary_dilation(binary_mask, iterations=10)
+    binary_mask = ndimage.binary_dilation(binary_mask, iterations=5)
 
     filled_mask = ndimage.binary_fill_holes(binary_mask).astype(np.uint8)
     num_labels, labels, stats_array, centroids = cv2.connectedComponentsWithStats(
@@ -157,8 +164,28 @@ def crop_fixed(proj_XY, input_file, output_directory, nuclei=2, name="projXY_tra
     # Apply the mask
     cropped_image_masked = np.where(mask_expanded, cropped_image, 0).astype(np.uint16)
 
+    cropped_image_masked = np.transpose(
+        cropped_image_masked, (1, 0, 2, 3)
+    )  # Z C Y X for tiff
+
     # Save this final cropped frame in the output folder
     tifffile.imwrite(
         os.path.join(output_directory, f"Frame-0.tif"),
         cropped_image_masked,
+        bigtiff=True,
+        resolution=(
+            (1 / voxel_size[1]) * 25400,
+            (1 / voxel_size[2]) * 25400,
+        ),
+        metadata={
+            "unit": "um",
+            "axes": "ZCYX",
+            "PhysicalSizeX": voxel_size[2],
+            "PhysicalSizeXUnit": "µm",
+            "PhysicalSizeY": voxel_size[1],
+            "PhysicalSizeYUnit": "µm",
+            "PhysicalSizeZ": voxel_size[0],
+            "PhysicalSizeZUnit": "µm",
+            "spacing": voxel_size[0],
+        },
     )
