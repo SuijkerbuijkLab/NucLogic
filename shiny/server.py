@@ -217,6 +217,7 @@ def server(input, output, session):
             "delete_cropped": input.delete_cropped(),
             "delete_max_proj": input.delete_max_proj(),
             "delete_max_proj_tracked": input.delete_max_proj_tracked(),
+            "is_fixed": input.is_fixed(),
         }
 
         summary_results = []
@@ -231,10 +232,14 @@ def server(input, output, session):
                     organoid_model=organoid_model,
                     channel_names=final_channel_names,
                     croped_existing=settings["cropped_exists"],
+                    is_fixed=settings["is_fixed"],
                 )
 
-                df = pd.read_csv(os.path.join(organoid, "summary_results_organoid.csv"))
-                summary_results.append(df)
+                if not settings["is_fixed"]:
+                    df = pd.read_csv(
+                        os.path.join(organoid, "summary_results_organoid.csv")
+                    )
+                    summary_results.append(df)
 
                 all_properties = []
                 files = [
