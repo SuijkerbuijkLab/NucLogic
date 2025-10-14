@@ -6,5 +6,5 @@
 .vscode/
 env/
 .venv/
-miscellaneous/napari_paths.json
-miscellaneous/selected_paths.txt
+*/napari_paths.json
+*/selected_paths.txt

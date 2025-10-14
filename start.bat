@@ -4,10 +4,11 @@ set SCRIPT_DIR=%~dp0
 set ENV_PATH=%SCRIPT_DIR%env
 set ENV_YML=%SCRIPT_DIR%miscellaneous\environment.yml
 set REQUIREMENTS=%SCRIPT_DIR%miscellaneous\requirements.txt
+set SAM2="C:\repos\sam2"
 
 REM Step 1: Activate Conda base (update this path to your actual Anaconda install)
 echo Activating conda
-call "C:\ProgramData\miniconda3\Scripts\activate.bat" "C:\ProgramData\miniconda3"
+call "C:\Users\6331823\AppData\Local\anaconda3\Scripts\activate.bat" "C:\Users\6331823\AppData\Local\anaconda3"
 
 REM Step 2: Check if environment exists
 IF NOT EXIST "%ENV_PATH%" (
@@ -22,12 +23,17 @@ IF NOT EXIST "%ENV_PATH%" (
     call conda activate "%ENV_PATH%"
 )
 
+REM Ensure parent folder for SAM2 exists
+if not exist "C:\repos\" (
+    mkdir "C:\repos"
+)
+
 REM Step 3: Clone and install sam2 in env if not already installed
 echo going to check if sam2 is installed
-IF NOT EXIST "%SCRIPT_DIR%env\sam2" (
+IF NOT EXIST "%SAM2%" (
     echo Cloning and installing sam2 into env...
-    git clone https://github.com/facebookresearch/sam2.git "%SCRIPT_DIR%env\sam2"
-    cd /d "%SCRIPT_DIR%env\sam2"
+    git clone https://github.com/facebookresearch/sam2.git "%SAM2%"
+    cd /d "%SAM2%"
     call pip install -e .
     cd /d "%SCRIPT_DIR%"
 ) ELSE (

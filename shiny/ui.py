@@ -275,13 +275,10 @@ app_ui = ui.tags.html(
             ),
             ui.tags.img(
                 src="organoid_segmenter.ico",
-                style=(
-                    "position: absolute; top: -4px; left: 1212px; height: 30px;"
-                    "z-index: 1000;"
-                ),
+                style="height: 25x; margin-left: 12px; margin-top: 4px",
                 title="Organoid Segmenter",
             ),
-            style="position: relative;",
+            style="display: flex; justify-content: space-between; align-items: center;",
         ),
     ),
 )
