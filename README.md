@@ -4,7 +4,8 @@ A program to segment and phenotype all cells in an organoid or generate cropped 
 
 ![alt text](miscellaneous/pipeline_overview.png)
 
-[![Watch the example video of a segmented and phenotyped timelapse](https://github.com/SebastianVanDijk/organoid_segmenter/main/miscellaneous/thumbnail_example.png)](https://github.com/SebastianVanDijk/organoid_segmenter/main/miscellaneous/example_movie.mp4)
+[![Watch the example video of a segmented and phenotyped timelapse](miscellaneous/thumbnail_example.png)](https://github.com/SebastianVanDijk/organoid_segmenter/tree/main/miscellaneous/example_movie.mp4)
+Click to watch the example video of a segmented and phenotyped timelapse
 
 # Installation instructions
 
