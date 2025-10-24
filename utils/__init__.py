@@ -13,5 +13,6 @@ from .dummy_callback import dummy_callback
 from .compute_knn_features import compute_knn_features
 from .compensate_voxel_size import compensate_voxel_size
 from .crop_fixed import crop_fixed
+from .find_mask_area import find_mask_area
 
 print("utils package loaded successfully")

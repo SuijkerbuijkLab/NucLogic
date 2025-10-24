@@ -78,7 +78,12 @@ app_ui = ui.tags.html(
                                 ui.input_checkbox(
                                     "is_fixed", "Data is from fixed organoids", False
                                 ),
+                                ui.output_ui("cropping_options"),
                                 style="font-size: 14px;",
+                            ),
+                            ui.input_file(
+                                "model_file",
+                                "Select a custom model file",
                             ),
                             ui.input_action_button(
                                 "run_segmenter", "Run Segmenter", width="200px"

@@ -20,48 +20,62 @@ def crop_fixed(
     nuclei=2,
     name="projXY_tracked",
     voxel_size=(1.0, 1.0, 1.0),
+    manual=False,
 ):
     # Create the output directory to save the files
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
-    # Apply gaussian filter to smooth the image and make thresholding more robust
-    frame = ndimage.gaussian_filter(proj_XY, sigma=(3, 3))
+    if not manual:
+        # Apply gaussian filter to smooth the image and make thresholding more robust
+        frame = ndimage.gaussian_filter(proj_XY, sigma=(3, 3))
 
-    # Apply threshold (you can tweak the value)
-    median = np.median(frame)
-    _, binary_mask = cv2.threshold(frame, median + 5, 255, cv2.THRESH_BINARY)
+        # Apply threshold (you can tweak the value)
+        median = np.median(frame)
+        _, binary_mask = cv2.threshold(frame, median + 5, 255, cv2.THRESH_BINARY)
 
-    binary_mask = ndimage.binary_dilation(binary_mask, iterations=5)
+        binary_mask = ndimage.binary_dilation(binary_mask, iterations=5)
 
-    filled_mask = ndimage.binary_fill_holes(binary_mask).astype(np.uint8)
-    num_labels, labels, stats_array, centroids = cv2.connectedComponentsWithStats(
-        filled_mask
-    )
+        filled_mask = ndimage.binary_fill_holes(binary_mask).astype(np.uint8)
+        num_labels, labels, stats_array, centroids = cv2.connectedComponentsWithStats(
+            filled_mask
+        )
 
-    center = np.array([frame.shape[0] // 2, frame.shape[1] // 2])
+        center = np.array([frame.shape[0] // 2, frame.shape[1] // 2])
 
-    df = {
-        "label": np.arange(1, num_labels),
-        "area": stats_array[1:, cv2.CC_STAT_AREA],
-        "centroid": [c for c in centroids[1:]],  # keep as array
-    }
+        df = {
+            "label": np.arange(1, num_labels),
+            "area": stats_array[1:, cv2.CC_STAT_AREA],
+            "centroid": [c for c in centroids[1:]],  # keep as array
+        }
 
-    df = pd.DataFrame(df)
-    # Compute distances to center
-    df["distance_to_center"] = df["centroid"].apply(
-        lambda c: np.linalg.norm(center - c)
-    )
+        df = pd.DataFrame(df)
+        # Compute distances to center
+        df["distance_to_center"] = df["centroid"].apply(
+            lambda c: np.linalg.norm(center - c)
+        )
 
-    # Filter and select
-    filtered_df = df[df["area"] > 3000]
-    closest = filtered_df.loc[filtered_df["distance_to_center"].idxmin()]
-    selected_label = closest["label"]
+        # Filter and select
+        filtered_df = df[df["area"] > 3000]
+        closest = filtered_df.loc[filtered_df["distance_to_center"].idxmin()]
+        selected_label = closest["label"]
 
-    # Create a binary mask for the selected label
-    selected_mask = (labels == selected_label).astype(np.uint8)
+        # Create a binary mask for the selected label
+        selected_mask = (labels == selected_label).astype(np.uint8)
 
-    organoid_only = np.where(selected_mask > 0, proj_XY, 0)
+        organoid_only = np.where(selected_mask > 0, proj_XY, 0)
+
+    else:
+        # Normalize for the CV2 roi selector
+        normalized_image = cv2.normalize(proj_XY, None, 0, 255, cv2.NORM_MINMAX).astype(
+            np.uint8
+        )
+
+        # Get polygon selection
+        selected_mask, _, _ = polygon_selection(normalized_image)
+
+        organoid_only = np.where(selected_mask > 0, proj_XY, 0)
+
     # Save this tracked movie to the output folder
     tifffile.imwrite(
         os.path.join(
@@ -189,3 +203,65 @@ def crop_fixed(
             "spacing": voxel_size[0],
         },
     )
+
+
+def polygon_selection(image):
+    """
+    Allow user to select a polygon region by clicking points.
+    Press 'c' to complete the selection.
+    """
+    # Make a copy of the image for drawing
+    draw_image = image.copy()
+    points = []
+
+    # Mouse callback function
+    def draw_polygon(event, x, y, flags, param):
+        nonlocal draw_image
+
+        # Left button click - add point
+        if event == cv2.EVENT_LBUTTONDOWN:
+            points.append((x, y))
+            # Draw a small circle at clicked point
+            cv2.circle(
+                draw_image, center=(x, y), radius=3, color=(255, 255, 0), thickness=-1
+            )
+
+            # Connect lines between points
+            if len(points) > 1:
+                cv2.line(
+                    draw_image, points[-2], points[-1], thickness=1, color=(255, 0, 0)
+                )
+
+            # Show the image with selected points
+            cv2.imshow("Select Polygon - Press C when done", draw_image)
+
+    # Create window and set mouse callback
+    cv2.imshow("Select Polygon - Press C when done", image)
+    cv2.setMouseCallback("Select Polygon - Press C when done", draw_polygon)
+
+    # Wait for key press
+    while True:
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("c"):  # Press 'c' to complete
+            break
+
+    # Close the window
+    cv2.destroyAllWindows()
+
+    # Create mask from polygon if we have enough points
+    if len(points) > 2:
+        mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        points_array = np.array([points], dtype=np.int32)
+        cv2.fillPoly(mask, points_array, 255)
+
+        # Apply mask to extract region
+        result = cv2.bitwise_and(image, image, mask=mask)
+
+        # Get bounding box of non-zero region (for cropping)
+        x, y, w, h = cv2.boundingRect(mask)
+        cropped = result[y : y + h, x : x + w]
+
+        return mask, result, cropped
+    else:
+        print("Not enough points selected for polygon")
+        return None, None, None

@@ -26,7 +26,7 @@ def analyse_organoid(
     cell_model,  # Model that is used to segment cells
     organoid_model,  # Model that is used to segment organoids for cropping
     channel_names,  # Names of the different channels
-    croped_existing=False,  # Is there already a folder present that contains cropped tiffs, then we can skip cropping
+    cropped_existing=False,  # Is there already a folder present that contains cropped tiffs, then we can skip cropping
     is_fixed=False,  # Is the data from fixed organoids (single timepoint) or live (multiple timepoints)
 ):
     # Set some parameters for the rest of the scripped
@@ -69,12 +69,11 @@ def analyse_organoid(
 
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
-    if not croped_existing:
+    if not cropped_existing:
 
         if is_fixed:
             proj_XY = utils.max_project(
                 input_file,
-                input_directory,
                 nuclei=nuclei_channel,
                 name=name,
                 fixed=is_fixed,

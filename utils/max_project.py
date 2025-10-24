@@ -7,7 +7,7 @@ import tifffile
 from imaris_ims_file_reader.ims import ims
 
 
-def max_project(file, output_directory, nuclei=2, name="nuclei", fixed=False):
+def max_project(file, nuclei=2, name="nuclei", fixed=False):
     # Load in either the ims or tif file
     if file.endswith(".ims"):
         movie = ims(file)  # T,C,Z,Y,X
