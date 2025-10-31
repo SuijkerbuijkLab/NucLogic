@@ -45,7 +45,12 @@ def crop_organoid(
     if not crop_existing:
         proj_XY = utils.max_project(ims_movie, input_directory, nuclei=nuclei_channel)
         proj_XY_name = os.path.join(os.path.dirname(ims_movie), f"{name}_projXY.tif")
-        tifffile.imwrite(proj_XY_name, proj_XY)
+        tifffile.imwrite(
+            proj_XY_name,
+            proj_XY,
+            compression="zlib",
+            compressionargs={"level": 8},
+        )
 
         try:
             utils.crop(

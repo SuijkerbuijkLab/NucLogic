@@ -79,11 +79,17 @@ app_ui = ui.tags.html(
                                     "is_fixed", "Data is from fixed organoids", False
                                 ),
                                 ui.output_ui("cropping_options"),
+                                ui.input_checkbox(
+                                    "specific_measurements",
+                                    "Calculate specific measurements",
+                                    False,
+                                ),
+                                ui.output_ui("specific_measurements_options"),
                                 style="font-size: 14px;",
                             ),
                             ui.input_file(
                                 "model_file",
-                                "Select a custom model file",
+                                "Select a custom model file for nuclei segmentation (optional)",
                             ),
                             ui.input_action_button(
                                 "run_segmenter", "Run Segmenter", width="200px"

@@ -52,6 +52,8 @@ def crop(
             f"{name}_projXY_tracked.tif",
         ),
         organoid_only,
+        compression="zlib",
+        compressionargs={"level": 8},
     )
 
     # Load in the input image, which is either a ims or tiff
@@ -188,6 +190,8 @@ def crop(
                     "PhysicalSizeZUnit": "µm",
                     "spacing": voxel_size[0],
                 },
+                compression="zlib",
+                compressionargs={"level": 8},
             )
             bar()
 

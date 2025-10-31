@@ -28,6 +28,11 @@ def max_project(file, nuclei=2, name="nuclei", fixed=False):
         max_data = np.max(movie, axis=1)
 
     proj_XY_name = os.path.join(os.path.dirname(file), f"{name}_projXY.tif")
-    tifffile.imwrite(proj_XY_name, max_data)
+    tifffile.imwrite(
+        proj_XY_name,
+        max_data,
+        compression="zlib",
+        compressionargs={"level": 8},
+    )
 
     return max_data

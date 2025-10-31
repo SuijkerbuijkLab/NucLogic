@@ -144,7 +144,12 @@ def analyse_organoid(
         segmented_tiff_file = os.path.join(
             input_directory, "segmented", f"{file.split('.')[0]}_masks.tif"
         )
-        tifffile.imwrite(segmented_tiff_file, segmented_stack)
+        tifffile.imwrite(
+            segmented_tiff_file,
+            segmented_stack,
+            compression="zlib",
+            compressionargs={"level": 8},
+        )
 
         # The segmentation mask is saved to generate a full movie later on, the XYZ dimensions of this frame are saved to calculate the padding needed for this movie
         segmented_movie.append(segmented_stack_stitched)
@@ -293,4 +298,6 @@ def analyse_organoid(
             "TimeIncrement": 1,
             "TimeIncrementUnit": "h",
         },
+        compression="zlib",
+        compressionargs={"level": 8},
     )

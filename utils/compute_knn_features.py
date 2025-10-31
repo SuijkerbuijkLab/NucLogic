@@ -4,9 +4,11 @@
 import sklearn.neighbors
 
 
-def compute_knn_features(data, k=5):
+def compute_knn_features(
+    data, k=5, position_columns=["x", "y", "z"], get_phenotype_score=True
+):
     # Get an array of the coordinates of every cell
-    coordinates = data[["x", "y", "z"]].to_numpy()
+    coordinates = data[position_columns].to_numpy()
 
     # Fit the k-nearest neighbors model and compute the k-nearest neighbors for each cell
     neighbours = sklearn.neighbors.NearestNeighbors(
@@ -25,6 +27,9 @@ def compute_knn_features(data, k=5):
 
     # This cell id is the same as the label-1, this is what you can compare the knn_neighbours column with
     data["cell_id"] = range(len(data))
+
+    if not get_phenotype_score:
+        return data
 
     # Here we calculate a phenotype similarity score
     # This means that each cell gets a score of 0 to 5 based on how many of its nearest neigbours have the same phenotype

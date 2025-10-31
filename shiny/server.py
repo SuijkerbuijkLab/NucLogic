@@ -13,6 +13,8 @@ import pandas as pd
 
 from shiny import reactive, render, ui
 
+from main_functions import count_cell_types
+
 
 def summarize_growth(data):
     filtered = data[data["phenotype"].isin(["wt", "crc"])].copy()
@@ -189,11 +191,38 @@ def server(input, output, session):
         else:
             return ui.tags.div()
 
+    @render.ui
+    def specific_measurements_options():
+        if input.specific_measurements():
+            return ui.tags.div(
+                ui.input_file(
+                    "specific_model_file",
+                    "Select a custom model file for specific segmentation",
+                ),
+                style="margin-left: 20px; border-left: 2px solid #ccc; padding-left: 10px;",
+            )
+        else:
+            return ui.tags.div()
+
+    @render.ui
+    def specific_measurements_options():
+        if input.specific_measurements():
+            return ui.tags.div(
+                ui.input_file(
+                    "specific_model_file",
+                    "Select a custom model file for specific segmentation",
+                ),
+                style="margin-left: 20px; border-left: 2px solid #ccc; padding-left: 10px;",
+            )
+        else:
+            return ui.tags.div()
+
     @reactive.effect
     @reactive.event(input.run_segmenter)
     def run_segmentation():
         from sam2.build_sam import build_sam2_video_predictor
 
+        from main_functions.count_cell_types import count_cell_types
         from main_functions.analyse_organoid import analyse_organoid
         from utils.load_model import load_model
         from utils.max_project import max_project
@@ -240,6 +269,12 @@ def server(input, output, session):
         else:
             cell_model = load_model(os.path.join(model_dir, "cell_segmentation_4"))
 
+        if input.specific_model_file():
+            uploaded_files = input.specific_model_file()
+            # Then access the first element from that list
+            print(f"Using custom specific model: {uploaded_files[0]['name']}")
+            specific_model = load_model(uploaded_files[0]["datapath"])
+
         organoid_model = build_sam2_video_predictor(
             os.path.join(model_dir, "sam2.1_hiera_s.yaml"),
             os.path.join(model_dir, "sam2.1_hiera_small.pt"),
@@ -260,6 +295,7 @@ def server(input, output, session):
             "automatic_cropping": input.automatic_cropping(),
             "semi_automatic_cropping": input.semi_automatic_cropping(),
             "manual_cropping": input.manual_cropping(),
+            "specific_measurements": input.specific_measurements(),
         }
 
         # If the samples are fixed, loop through all of them to see if cropping must be done manually or automatic
@@ -336,8 +372,42 @@ def server(input, output, session):
 
         for i, organoid in enumerate(organoids):
             print(f"Processing organoid: {os.path.basename(organoid)}")
+
             try:
                 if settings["semi_automatic_cropping"] or settings["manual_cropping"]:
+                    if settings["specific_measurements"]:
+                        count_dapi, count_lyz, count_aldob = count_cell_types(
+                            input_image_path=os.path.join(
+                                organoid, "cropped", "Frame-0.tif"
+                            ),
+                            model=cell_model,
+                            specific_model=specific_model,
+                            channel_names=final_channel_names,
+                        )
+                        cell_type_measurements = pd.DataFrame(
+                            [
+                                {
+                                    "sample": os.path.basename(organoid),
+                                    "count_nuclei": count_dapi,
+                                    "count_lyz": count_lyz,
+                                    "count_aldob": count_aldob,
+                                    "percentage_lyz": (
+                                        (count_lyz / count_dapi) * 100
+                                        if count_dapi > 0
+                                        else 0
+                                    ),
+                                    "percentage_aldob": (
+                                        (count_aldob / count_dapi) * 100
+                                        if count_dapi > 0
+                                        else 0
+                                    ),
+                                }
+                            ]
+                        )
+                        summary_results.append(cell_type_measurements)
+
+                        # Break out of try block
+                        break
                     analyse_organoid(
                         organoid,
                         cell_model=cell_model,

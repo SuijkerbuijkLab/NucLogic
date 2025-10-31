@@ -83,6 +83,8 @@ def crop_fixed(
             f"{name}_projXY_tracked.tif",
         ),
         organoid_only,
+        compression="zlib",
+        compressionargs={"level": 8},
     )
 
     # Find the XY coordinates of the mask
@@ -202,6 +204,8 @@ def crop_fixed(
             "PhysicalSizeZUnit": "µm",
             "spacing": voxel_size[0],
         },
+        compression="zlib",
+        compressionargs={"level": 8},
     )
 
 
