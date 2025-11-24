@@ -7,6 +7,8 @@ from alive_progress import alive_it
 import tables
 import itertools
 from imaris_ims_file_reader.ims import ims
+import warnings
+
 
 import os
 import re
@@ -18,6 +20,11 @@ import utils
 def extract_frame_number(filename):
     match = re.search(r"Frame-(\d+)", filename)
     return int(match.group(1)) if match else -1
+
+
+# Suppress specific histogram warnings
+warnings.filterwarnings("ignore", message=".*HistogramMin value is not present.*")
+warnings.filterwarnings("ignore", message=".*HistogramMax value is not present.*")
 
 
 # This is the function of the program that can analyse a single organoid
@@ -50,18 +57,9 @@ def analyse_organoid(
 
     # Get metadata of the time interval of the movie
     if input_file.endswith(".ims"):
-        # Get the voxel size of the movie
+        time_interval = utils.get_time_interval(input_file)
         loaded_movie = ims(input_file)
-        voxel_size = loaded_movie.resolution  # (Z, Y, X)
-
-        if not is_fixed:
-            with tables.open_file(input_file, "r") as hf:
-                time_values = hf.root.DataSetTimes.Time.read()
-            timestamps = np.array([row[2] for row in time_values])
-            timestamps = (
-                timestamps // 3.6e9
-            )  # gets data in nanoseconds, calculate to hours
-            time_interval = timestamps[1] - timestamps[0]
+        voxel_size = loaded_movie.resolution
 
     else:
         time_interval = 1
@@ -88,7 +86,7 @@ def analyse_organoid(
             )
         else:
             proj_XY = utils.max_project(
-                input_file, input_directory, nuclei=nuclei_channel, name=name
+                input_file, nuclei=nuclei_channel, name=name, fixed=is_fixed
             )
             utils.crop(
                 proj_XY=proj_XY,

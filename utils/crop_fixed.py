@@ -209,38 +209,70 @@ def crop_fixed(
     )
 
 
-def polygon_selection(image):
+def polygon_selection(image, display_size=1024):
     """
     Allow user to select a polygon region by clicking points.
     Press 'c' to complete the selection.
+    The image is resized for display, but the mask is created on the original resolution.
+
+    Args:
+        image: Original image (can be any size)
+        display_size: Target size for display (default 1024)
     """
-    # Make a copy of the image for drawing
+    # Store original dimensions
+    original_h, original_w = image.shape[:2]
+
+    # Calculate scaling factor to fit within display_size while maintaining aspect ratio
+    scale = min(display_size / original_w, display_size / original_h)
+    new_w = int(original_w * scale)
+    new_h = int(original_h * scale)
+
+    # Make a copy and normalize for display
     draw_image = image.copy()
+    p_low, p_high = np.percentile(draw_image, [0, 99])  # Clip top 1%
+    draw_image = np.clip(draw_image, p_low, p_high)
+    draw_image = cv2.normalize(draw_image, None, 0, 255, cv2.NORM_MINMAX).astype(
+        np.uint8
+    )
+
+    # Resize for display
+    draw_image_resized = cv2.resize(
+        draw_image, (new_w, new_h), interpolation=cv2.INTER_LINEAR
+    )
+
     points = []
 
     # Mouse callback function
     def draw_polygon(event, x, y, flags, param):
-        nonlocal draw_image
+        nonlocal draw_image_resized
 
         # Left button click - add point
         if event == cv2.EVENT_LBUTTONDOWN:
             points.append((x, y))
             # Draw a small circle at clicked point
             cv2.circle(
-                draw_image, center=(x, y), radius=3, color=(255, 255, 0), thickness=-1
+                draw_image_resized,
+                center=(x, y),
+                radius=3,
+                color=(255, 255, 0),
+                thickness=-1,
             )
 
             # Connect lines between points
             if len(points) > 1:
                 cv2.line(
-                    draw_image, points[-2], points[-1], thickness=1, color=(255, 0, 0)
+                    draw_image_resized,
+                    points[-2],
+                    points[-1],
+                    thickness=1,
+                    color=(255, 0, 0),
                 )
 
             # Show the image with selected points
-            cv2.imshow("Select Polygon - Press C when done", draw_image)
+            cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
 
     # Create window and set mouse callback
-    cv2.imshow("Select Polygon - Press C when done", image)
+    cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
     cv2.setMouseCallback("Select Polygon - Press C when done", draw_polygon)
 
     # Wait for key press
@@ -254,11 +286,15 @@ def polygon_selection(image):
 
     # Create mask from polygon if we have enough points
     if len(points) > 2:
-        mask = np.zeros(image.shape[:2], dtype=np.uint8)
-        points_array = np.array([points], dtype=np.int32)
+        # Scale points back to original image coordinates
+        points_original = [(int(x / scale), int(y / scale)) for x, y in points]
+
+        # Create mask on original image dimensions
+        mask = np.zeros((original_h, original_w), dtype=np.uint8)
+        points_array = np.array([points_original], dtype=np.int32)
         cv2.fillPoly(mask, points_array, 255)
 
-        # Apply mask to extract region
+        # Apply mask to extract region from original image
         result = cv2.bitwise_and(image, image, mask=mask)
 
         # Get bounding box of non-zero region (for cropping)

@@ -3,7 +3,7 @@
 import os
 import shutil
 
-input_directory = r"C:\Users\6331823\Local SSD\Data_Merel"
+input_directory = r"C:\Users\6331823\Local SSD\Data_Maria\Exp.ML.034_Staining_cJun_ZVAD_treated_uTs_slide3_251103"
 
 for file in os.listdir(input_directory):
     file_path = os.path.join(input_directory, file)

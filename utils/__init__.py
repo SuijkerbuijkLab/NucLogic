@@ -16,5 +16,6 @@ from .crop_fixed import crop_fixed
 from .find_mask_area import find_mask_area
 from .stitch_organoid import stitch_organoid
 from .measure_dilated import measure_dilated
+from .get_time_interval import get_time_interval
 
 print("utils package loaded successfully")

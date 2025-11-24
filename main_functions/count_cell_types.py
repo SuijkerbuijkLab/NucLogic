@@ -15,6 +15,8 @@ def count_cell_types(
     specific_model=None,
     output_directory=None,
     channel_names=None,
+    ratio_threshold=0,
+    filter_specific_size=0,
 ):
     if output_directory is None:
         output_directory = os.path.dirname(input_image_path)
@@ -117,8 +119,9 @@ def count_cell_types(
         )
     lyz_tracked = pd.DataFrame(lyz_tracked)
 
-    lyz_tracked_filtered = lyz_tracked[lyz_tracked["height"] > 1]
-    lyz_tracked_filtered = lyz_tracked_filtered[lyz_tracked_filtered["volume"] > 600]
+    lyz_tracked_filtered = lyz_tracked.copy()
+    lyz_tracked_filtered = lyz_tracked[lyz_tracked["height"] > filter_specific_size]
+    lyz_tracked_filtered = lyz_tracked_filtered[lyz_tracked_filtered["volume"] > 50]
 
     lyz_masks_filtered = np.zeros_like(lyz_masks, dtype=np.uint32)
     for _, row in lyz_tracked_filtered.iterrows():
@@ -147,7 +150,7 @@ def count_cell_types(
         channel_names=["mTmG", "DAPI", "AldoB", "Lyz"],
     )
 
-    aldob_filtered = stats[stats["log_ratio_aldob_dapi"] > -0.5]
+    aldob_filtered = stats[stats["log_ratio_aldob_dapi"] > ratio_threshold]
 
     aldob_masks = np.zeros_like(dapi_masks, dtype=np.uint32)
     for _, row in aldob_filtered.iterrows():
@@ -176,7 +179,64 @@ def count_cell_types(
 
     # rename particle to label in stats_df and merge with stats
     stats_df = stats_df.rename(columns={"particle": "label"})
-    final_stats = stats_df.merge(stats, on="label")
-    final_stats.to_csv(rf"{output_directory}\cell_stats.csv", index=False)
+    stats_measurements_only = stats.drop(
+        columns=[
+            "z_center",
+            "y_center",
+            "x_center",
+            "bounding_box",
+            "width_x",
+            "width_y",
+            "height_pixel",
+            "height",
+            "aspect_ratio",
+            "volume",
+        ]
+    )
+    final_stats = stats_df.merge(stats_measurements_only, on="label")
+    # Add column phenotype which is normal or aldob
+    final_stats["phenotype"] = np.where(
+        final_stats["label"].isin(aldob_filtered["label"]), "aldob", "normal"
+    )
+
+    # Get stats of lyz positive cells
+    props = regionprops(lyz_masks_filtered)
+    lyz_props = []
+    for prop in props:
+        label = prop.label
+        centroid = prop.centroid  # (z, y, x)
+        bounding_box = prop.bbox  # (min_z, min_y, min_x, max_z, max_y, max_x)
+        volume = prop.area
+
+        width_x = bounding_box[5] - bounding_box[2]
+        width_y = bounding_box[4] - bounding_box[1]
+        height_pixel = bounding_box[3] - bounding_box[0]
+        height = (bounding_box[3] - bounding_box[0]) * 8.125
+        aspect_ratio = height / np.mean([width_x, width_y])
+
+        lyz_props.append(
+            {
+                "label": label,
+                "z_center": centroid[0],
+                "y_center": centroid[1],
+                "x_center": centroid[2],
+                "bounding_box": bounding_box,
+                "width_x": width_x,
+                "width_y": width_y,
+                "height_pixel": height_pixel,
+                "height": height,
+                "aspect_ratio": aspect_ratio,
+                "volume": volume,
+            }
+        )
+    lyz_props = pd.DataFrame(lyz_props)
+    lyz_props["phenotype"] = "lyz"
+
+    # add lyz_props beneath final_stats and put NAN for columns that are not present in lyz_props
+    final_stats = pd.concat([final_stats, lyz_props], ignore_index=True, sort=False)
+
+    os.makedirs(os.path.join(output_directory, "properties"), exist_ok=True)
+    final_stats_path = rf"{output_directory}\properties\Frame-0_props.csv"
+    final_stats.to_csv(final_stats_path, index=False)
 
     return count_dapi, count_lyz, count_aldob

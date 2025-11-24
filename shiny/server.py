@@ -212,6 +212,22 @@ def server(input, output, session):
                     "specific_model_file",
                     "Select a custom model file for specific segmentation",
                 ),
+                ui.input_slider(
+                    "ratio_threshold",
+                    "Set the ratio threshold for specific segmentation",
+                    min=-2,
+                    max=2,
+                    value=0,
+                    step=0.1,
+                ),
+                ui.input_slider(
+                    "filter_specific_size",
+                    "Set the filter size for specific segmentation",
+                    min=0,
+                    max=5,
+                    value=0,
+                    step=1,
+                ),
                 style="margin-left: 20px; border-left: 2px solid #ccc; padding-left: 10px;",
             )
         else:
@@ -269,11 +285,14 @@ def server(input, output, session):
         else:
             cell_model = load_model(os.path.join(model_dir, "cell_segmentation_4"))
 
-        if input.specific_model_file():
+        if input.specific_measurements():
             uploaded_files = input.specific_model_file()
-            # Then access the first element from that list
-            print(f"Using custom specific model: {uploaded_files[0]['name']}")
-            specific_model = load_model(uploaded_files[0]["datapath"])
+            print(f"Specific model file input: {uploaded_files}")
+
+            if uploaded_files and len(uploaded_files) > 0:
+                print("Loading custom specific model")
+                print(f"Using custom specific model: {uploaded_files[0]['name']}")
+                specific_model = load_model(uploaded_files[0]["datapath"])
 
         organoid_model = build_sam2_video_predictor(
             os.path.join(model_dir, "sam2.1_hiera_s.yaml"),
@@ -282,6 +301,7 @@ def server(input, output, session):
 
         # Get organoid paths
         base_path = selected_path.get()
+        base_path = os.path.normpath(base_path)
         organoid_names = input.organoid_select_segmentation()
         organoids = [os.path.join(base_path, name) for name in organoid_names]
 
@@ -291,16 +311,24 @@ def server(input, output, session):
             "delete_cropped": input.delete_cropped(),
             "delete_max_proj": input.delete_max_proj(),
             "delete_max_proj_tracked": input.delete_max_proj_tracked(),
-            "is_fixed": input.is_fixed(),
-            "automatic_cropping": input.automatic_cropping(),
-            "semi_automatic_cropping": input.semi_automatic_cropping(),
-            "manual_cropping": input.manual_cropping(),
-            "specific_measurements": input.specific_measurements(),
+            "is_fixed": False,
+            "specific_measurements": False,
+            "automatic_cropping": True,
+            "manual_cropping": False,
+            "semi_automatic_cropping": False,
         }
 
-        # If the samples are fixed, loop through all of them to see if cropping must be done manually or automatic
-        if settings["is_fixed"] and settings["semi_automatic_cropping"]:
-            print("semi-automatic cropping selected")
+        if input.is_fixed():
+            settings["is_fixed"] = True
+            settings["automatic_cropping"] = input.automatic_cropping()
+            settings["manual_cropping"] = input.manual_cropping()
+            settings["semi_automatic_cropping"] = input.semi_automatic_cropping()
+        if input.specific_measurements():
+            settings["specific_measurements"] = input.specific_measurements()
+            settings["filter_specific_size"] = input.filter_specific_size()
+            settings["ratio_threshold"] = input.ratio_threshold()
+
+        if settings["is_fixed"] and not settings["cropped_exists"]:
             for organoid in organoids:
                 channel_indices = {
                     ch.lower(): i
@@ -316,7 +344,10 @@ def server(input, output, session):
                     name=os.path.basename(organoid),
                 )
                 area = find_mask_area(proj_XY=proj_XY)
-                if area > 200000:
+
+                if settings["manual_cropping"] or (
+                    settings["semi_automatic_cropping"] and area > 200000
+                ):
                     print(
                         f"Organoid {os.path.basename(organoid)} requires manual cropping (area: {area})"
                     )
@@ -339,34 +370,6 @@ def server(input, output, session):
                         manual=False,
                     )
 
-        if settings["is_fixed"] and settings["manual_cropping"]:
-            for organoid in organoids:
-                channel_indices = {
-                    ch.lower(): i
-                    for i, ch in enumerate(final_channel_names)
-                    if ch.strip()
-                }
-                nuclei_channel = channel_indices.get("nuclei", -1)
-                input_file = find_input_file(input_directory=organoid)
-                max_project(
-                    file=input_file,
-                    nuclei=nuclei_channel,
-                    fixed=True,
-                    name=os.path.basename(organoid),
-                )
-                crop_fixed(
-                    proj_XY=tifffile.imread(
-                        os.path.join(
-                            organoid, f"{os.path.basename(organoid)}_projXY.tif"
-                        )
-                    ),
-                    input_file=input_file,
-                    output_directory=os.path.join(organoid, "cropped"),
-                    nuclei=nuclei_channel,
-                    name=os.path.basename(organoid),
-                    manual=True,
-                )
-
         summary_results = []
         results = []
 
@@ -374,40 +377,43 @@ def server(input, output, session):
             print(f"Processing organoid: {os.path.basename(organoid)}")
 
             try:
-                if settings["semi_automatic_cropping"] or settings["manual_cropping"]:
-                    if settings["specific_measurements"]:
-                        count_dapi, count_lyz, count_aldob = count_cell_types(
-                            input_image_path=os.path.join(
-                                organoid, "cropped", "Frame-0.tif"
-                            ),
-                            model=cell_model,
-                            specific_model=specific_model,
-                            channel_names=final_channel_names,
-                        )
-                        cell_type_measurements = pd.DataFrame(
-                            [
-                                {
-                                    "sample": os.path.basename(organoid),
-                                    "count_nuclei": count_dapi,
-                                    "count_lyz": count_lyz,
-                                    "count_aldob": count_aldob,
-                                    "percentage_lyz": (
-                                        (count_lyz / count_dapi) * 100
-                                        if count_dapi > 0
-                                        else 0
-                                    ),
-                                    "percentage_aldob": (
-                                        (count_aldob / count_dapi) * 100
-                                        if count_dapi > 0
-                                        else 0
-                                    ),
-                                }
-                            ]
-                        )
-                        summary_results.append(cell_type_measurements)
+                if settings["specific_measurements"]:
+                    count_dapi, count_lyz, count_aldob = count_cell_types(
+                        input_image_path=os.path.join(
+                            organoid, "cropped", "Frame-0.tif"
+                        ),
+                        model=cell_model,
+                        specific_model=specific_model,
+                        channel_names=final_channel_names,
+                        output_directory=organoid,
+                        ratio_threshold=settings["ratio_threshold"],
+                        filter_specific_size=settings["filter_specific_size"],
+                    )
+                    cell_type_measurements = pd.DataFrame(
+                        [
+                            {
+                                "sample": os.path.basename(organoid),
+                                "count_nuclei": count_dapi,
+                                "count_lyz": count_lyz,
+                                "count_aldob": count_aldob,
+                                "percentage_lyz": (
+                                    (count_lyz / count_dapi) * 100
+                                    if count_dapi > 0
+                                    else 0
+                                ),
+                                "percentage_aldob": (
+                                    (count_aldob / count_dapi) * 100
+                                    if count_dapi > 0
+                                    else 0
+                                ),
+                            }
+                        ]
+                    )
+                    summary_results.append(cell_type_measurements)
 
-                        # Break out of try block
-                        break
+                if (
+                    settings["semi_automatic_cropping"] or settings["manual_cropping"]
+                ) and not settings["specific_measurements"]:
                     analyse_organoid(
                         organoid,
                         cell_model=cell_model,
@@ -416,7 +422,13 @@ def server(input, output, session):
                         cropped_existing=True,
                         is_fixed=settings["is_fixed"],
                     )
-                else:
+                if (
+                    not (
+                        settings["semi_automatic_cropping"]
+                        or settings["manual_cropping"]
+                    )
+                    and not settings["specific_measurements"]
+                ):
                     analyse_organoid(
                         organoid,
                         cell_model=cell_model,
@@ -532,6 +544,8 @@ def server(input, output, session):
 
         # Get organoid paths
         base_path = selected_path.get()
+        # Make path normal in case of different OS
+        base_path = os.path.normpath(base_path)
         organoid_names = input.organoid_select_segmentation()
         organoids_props = [
             os.path.join(base_path, name, "properties") for name in organoid_names

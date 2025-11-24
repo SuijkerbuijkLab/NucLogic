@@ -5,7 +5,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 
 def generate_report(df, time_interval=1, output_path="report.pdf"):
-    times = list(df.index.values) * time_interval
+    times = [i * time_interval for i in df.index.values]
 
     with PdfPages(output_path) as pdf:
         # Plot % of cells over time
