@@ -5,7 +5,7 @@ import numpy as np
 
 def segment(image, model):
     # Get the shape of the image to find amount of Z slices
-    depthIm, _, _ = image.shape
+    depthIm = image.shape[0]
 
     # Keep track of mask of every z slice
     masks_list = []

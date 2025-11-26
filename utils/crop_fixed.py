@@ -21,6 +21,7 @@ def crop_fixed(
     name="projXY_tracked",
     voxel_size=(1.0, 1.0, 1.0),
     manual=False,
+    dual_nuclei=False,
 ):
     # Create the output directory to save the files
     if not os.path.exists(output_directory):
@@ -110,7 +111,12 @@ def crop_fixed(
         movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
 
     # Get a bounding box cropped version of the organoid
-    ref = movie[:, nuclei, :, row_min:row_max, col_min:col_max]
+    if not dual_nuclei:
+        ref = movie[:, nuclei, :, row_min:row_max, col_min:col_max]
+    else:
+        ref = movie[:, nuclei, :, row_min:row_max, col_min:col_max]
+        ref = np.max(ref, axis=1)  # Combine multiple nuclei channels by max projection
+
     ref_crop = selected_mask[row_min:row_max, col_min:col_max]
 
     # In this bounding box image, create the Z axis of the same dimensions of the original movie

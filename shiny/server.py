@@ -15,6 +15,13 @@ from shiny import reactive, render, ui
 
 from main_functions import count_cell_types
 
+from server_helpers import (
+    process_fixed_cropping,
+    process_organoid,
+    cleanup_organoid_files,
+    save_results,
+)
+
 
 def summarize_growth(data):
     filtered = data[data["phenotype"].isin(["wt", "crc"])].copy()
@@ -168,41 +175,73 @@ def server(input, output, session):
         )
 
     @render.ui
-    def cropping_options():
-        if input.is_fixed():
-            return ui.tags.div(
-                ui.input_checkbox(
-                    "automatic_cropping",
-                    "Fixed organoids are cropped automatically, often fails when organoids touch each other",
-                    True,
-                ),
-                ui.input_checkbox(
-                    "semi_automatic_cropping",
-                    "Organoids that are predicted to touch will be prompted for manual cropping",
-                    False,
-                ),
-                ui.input_checkbox(
-                    "manual_cropping",
-                    "All organoids must be manually cropped",
-                    False,
-                ),
-                style="margin-left: 20px; border-left: 2px solid #ccc; padding-left: 10px;",
-            )
-        else:
-            return ui.tags.div()
+    def channel_inputs():
+        mode = input.segmentation_mode()
+
+        # Define choices based on mode
+        if "single nuclei marker" in mode.lower():
+            choices = ["Nuclei", "WT", "CRC", "Different", "Empty"]
+        elif "dual nuclei marker" in mode.lower():
+            choices = ["Nuclei WT", "Nuclei CRC", "Different", "Empty"]
+
+        # Generate channel inputs
+        return ui.div(
+            *[
+                ui.div(
+                    ui.tags.span(
+                        f"{i+1}:",
+                        style="width: 30px; display: inline-block; margin-top: 5.5px;",
+                    ),
+                    ui.input_select(
+                        f"channel_name_{i}",
+                        "",
+                        choices=choices,
+                        selected="Empty",
+                        width="150px",
+                    ),
+                    ui.input_text(
+                        f"channel_name_alternative_{i}",
+                        "",
+                        value="Alternative name",
+                        width="200px",
+                    ),
+                    style="margin-bottom: 0px; display: flex; align-items: right;",
+                )
+                for i in range(5)
+            ]
+        )
 
     @render.ui
-    def specific_measurements_options():
-        if input.specific_measurements():
-            return ui.tags.div(
-                ui.input_file(
-                    "specific_model_file",
-                    "Select a custom model file for specific segmentation",
+    def fixed_mode():
+        mode = input.segmentation_mode()
+
+        # Define choices based on mode
+        if "fixed sample" in mode.lower():
+            return ui.div(
+                ui.h6(
+                    "Advanced settings for fixed samples:",
                 ),
+                ui.input_radio_buttons(
+                    "cropping_mode",
+                    "Cropping Mode:",
+                    choices={
+                        "automatic_cropping": "Automatic - Crops organoids automatically (may fail when organoids touch)",
+                        "semi_automatic_cropping": "Semi-automatic - Manual cropping prompted when organoids are predicted to touch",
+                        "manual_cropping": "Manual - All organoids must be manually cropped",
+                    },
+                    selected="automatic_cropping",
+                ),
+                ui.input_checkbox(
+                    "specific_measurements",
+                    "Calculate specific measurements",
+                    False,
+                ),
+                ui.output_ui("specific_measurements_options"),
                 style="margin-left: 20px; border-left: 2px solid #ccc; padding-left: 10px;",
             )
-        else:
-            return ui.tags.div()
+        elif "live cell" in mode.lower():
+            # return emtpy div
+            return ui.div()
 
     @render.ui
     def specific_measurements_options():
@@ -233,6 +272,16 @@ def server(input, output, session):
         else:
             return ui.tags.div()
 
+    @render.ui
+    def custom_model_ui():
+        if input.custom_model():
+            return ui.input_file(
+                "model_file",
+                "Select a custom model file for nuclei segmentation",
+            )
+        else:
+            return ui.tags.div()
+
     @reactive.effect
     @reactive.event(input.run_segmenter)
     def run_segmentation():
@@ -247,11 +296,8 @@ def server(input, output, session):
         from utils.crop_fixed import crop_fixed
         import tifffile
 
+        print("Starting segmentation...")
         progress_count.set(0)  # Reset progress at start
-
-        def extract_frame_number(filename):
-            match = re.search(r"Frame-(\d+)", filename)
-            return int(match.group(1)) if match else -1
 
         # Get channel names
         channel_names = [
@@ -274,10 +320,11 @@ def server(input, output, session):
                 final_channel_names.append(channel_names[i])
 
         # Load models once
+        print("Loading models...")
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         model_dir = os.path.join(base_dir, "models")
 
-        if input.model_file():
+        if input.custom_model() and input.model_file():
             uploaded_files = input.model_file()
             # Then access the first element from that list
             print(f"Using custom model: {uploaded_files[0]['name']}")
@@ -285,19 +332,27 @@ def server(input, output, session):
         else:
             cell_model = load_model(os.path.join(model_dir, "cell_segmentation_4"))
 
-        if input.specific_measurements():
-            uploaded_files = input.specific_model_file()
-            print(f"Specific model file input: {uploaded_files}")
+        specific_model = None
+        try:
+            if input.specific_measurements():
+                uploaded_files = input.specific_model_file()
 
-            if uploaded_files and len(uploaded_files) > 0:
-                print("Loading custom specific model")
-                print(f"Using custom specific model: {uploaded_files[0]['name']}")
-                specific_model = load_model(uploaded_files[0]["datapath"])
+                if uploaded_files and len(uploaded_files) > 0:
+                    print(f"Using custom specific model: {uploaded_files[0]['name']}")
+                    specific_model = load_model(uploaded_files[0]["datapath"])
+                else:
+                    print(
+                        "Warning: Specific measurements enabled but no model file provided"
+                    )
+        except Exception as e:
+            print(f"No specific model loaded")
+            specific_model = None
 
         organoid_model = build_sam2_video_predictor(
             os.path.join(model_dir, "sam2.1_hiera_s.yaml"),
             os.path.join(model_dir, "sam2.1_hiera_small.pt"),
         )
+        print("Models loaded.")
 
         # Get organoid paths
         base_path = selected_path.get()
@@ -307,6 +362,7 @@ def server(input, output, session):
 
         # Get advanced settings
         settings = {
+            "segmentation_mode": input.segmentation_mode(),
             "cropped_exists": input.cropped_exists(),
             "delete_cropped": input.delete_cropped(),
             "delete_max_proj": input.delete_max_proj(),
@@ -316,187 +372,63 @@ def server(input, output, session):
             "automatic_cropping": True,
             "manual_cropping": False,
             "semi_automatic_cropping": False,
+            "dual_nuclei": "dual nuclei marker" in input.segmentation_mode().lower(),
         }
 
-        if input.is_fixed():
+        # Check if fixed mode based on segmentation mode
+        if "fixed sample" in input.segmentation_mode().lower():
             settings["is_fixed"] = True
-            settings["automatic_cropping"] = input.automatic_cropping()
-            settings["manual_cropping"] = input.manual_cropping()
-            settings["semi_automatic_cropping"] = input.semi_automatic_cropping()
-        if input.specific_measurements():
-            settings["specific_measurements"] = input.specific_measurements()
-            settings["filter_specific_size"] = input.filter_specific_size()
-            settings["ratio_threshold"] = input.ratio_threshold()
 
-        if settings["is_fixed"] and not settings["cropped_exists"]:
-            for organoid in organoids:
-                channel_indices = {
-                    ch.lower(): i
-                    for i, ch in enumerate(final_channel_names)
-                    if ch.strip()
-                }
-                nuclei_channel = channel_indices.get("nuclei", -1)
-                input_file = find_input_file(input_directory=organoid)
-                proj_XY = max_project(
-                    input_file,
-                    nuclei=nuclei_channel,
-                    fixed=True,
-                    name=os.path.basename(organoid),
-                )
-                area = find_mask_area(proj_XY=proj_XY)
+            # Get the selected cropping mode
+            cropping_mode = input.cropping_mode()
+            settings["automatic_cropping"] = cropping_mode == "automatic_cropping"
+            settings["manual_cropping"] = cropping_mode == "manual_cropping"
+            settings["semi_automatic_cropping"] = (
+                cropping_mode == "semi_automatic_cropping"
+            )
 
-                if settings["manual_cropping"] or (
-                    settings["semi_automatic_cropping"] and area > 200000
-                ):
-                    print(
-                        f"Organoid {os.path.basename(organoid)} requires manual cropping (area: {area})"
-                    )
-                    crop_fixed(
-                        proj_XY=proj_XY,
-                        input_file=input_file,
-                        output_directory=os.path.join(organoid, "cropped"),
-                        nuclei=nuclei_channel,
-                        name=os.path.basename(organoid),
-                        manual=True,
-                    )
+            # Check if specific measurements is enabled
+            try:
+                if input.specific_measurements():
+                    settings["specific_measurements"] = True
+                    settings["filter_specific_size"] = input.filter_specific_size()
+                    settings["ratio_threshold"] = input.ratio_threshold()
+            except:
+                pass  # specific_measurements checkbox doesn't exist yet
 
-                else:
-                    crop_fixed(
-                        proj_XY=proj_XY,
-                        input_file=input_file,
-                        output_directory=os.path.join(organoid, "cropped"),
-                        nuclei=nuclei_channel,
-                        name=os.path.basename(organoid),
-                        manual=False,
-                    )
+        # Step 1: Pre-process fixed cropping if needed, will skip for non-fixed or pre-cropped data
+        process_fixed_cropping(organoids, settings, final_channel_names)
 
+        # Step 2: Process each organoid
         summary_results = []
         results = []
+
+        models = {
+            "cell": cell_model,
+            "organoid": organoid_model,
+            "specific": specific_model if settings["specific_measurements"] else None,
+        }
 
         for i, organoid in enumerate(organoids):
             print(f"Processing organoid: {os.path.basename(organoid)}")
 
-            try:
-                if settings["specific_measurements"]:
-                    count_dapi, count_lyz, count_aldob = count_cell_types(
-                        input_image_path=os.path.join(
-                            organoid, "cropped", "Frame-0.tif"
-                        ),
-                        model=cell_model,
-                        specific_model=specific_model,
-                        channel_names=final_channel_names,
-                        output_directory=organoid,
-                        ratio_threshold=settings["ratio_threshold"],
-                        filter_specific_size=settings["filter_specific_size"],
-                    )
-                    cell_type_measurements = pd.DataFrame(
-                        [
-                            {
-                                "sample": os.path.basename(organoid),
-                                "count_nuclei": count_dapi,
-                                "count_lyz": count_lyz,
-                                "count_aldob": count_aldob,
-                                "percentage_lyz": (
-                                    (count_lyz / count_dapi) * 100
-                                    if count_dapi > 0
-                                    else 0
-                                ),
-                                "percentage_aldob": (
-                                    (count_aldob / count_dapi) * 100
-                                    if count_dapi > 0
-                                    else 0
-                                ),
-                            }
-                        ]
-                    )
-                    summary_results.append(cell_type_measurements)
+            summary_result, all_properties = process_organoid(
+                organoid, settings, models, final_channel_names
+            )
 
-                if (
-                    settings["semi_automatic_cropping"] or settings["manual_cropping"]
-                ) and not settings["specific_measurements"]:
-                    analyse_organoid(
-                        organoid,
-                        cell_model=cell_model,
-                        organoid_model=organoid_model,
-                        channel_names=final_channel_names,
-                        cropped_existing=True,
-                        is_fixed=settings["is_fixed"],
-                    )
-                if (
-                    not (
-                        settings["semi_automatic_cropping"]
-                        or settings["manual_cropping"]
-                    )
-                    and not settings["specific_measurements"]
-                ):
-                    analyse_organoid(
-                        organoid,
-                        cell_model=cell_model,
-                        organoid_model=organoid_model,
-                        channel_names=final_channel_names,
-                        cropped_existing=settings["cropped_exists"],
-                        is_fixed=settings["is_fixed"],
-                    )
-
-                if not settings["is_fixed"]:
-                    df = pd.read_csv(
-                        os.path.join(organoid, "summary_results_organoid.csv")
-                    )
-                    summary_results.append(df)
-
-                all_properties = []
-                files = [
-                    f
-                    for f in os.listdir(os.path.join(organoid, "properties"))
-                    if f.endswith(".csv")
-                ]
-                files = sorted(files, key=extract_frame_number)
-                for file in files:
-                    df = pd.read_csv(os.path.join(organoid, "properties", file))
-                    df.insert(0, "organoid", os.path.basename(organoid))
-                    all_properties.append(df)
-                all_properties = pd.concat(all_properties, ignore_index=True)
+            if summary_result is not None:
+                summary_results.append(summary_result)
+            if all_properties is not None:
                 results.append(all_properties)
 
-            except Exception as e:
-                print(f"Skipped organoid due to error: {e}")
-                traceback.print_exc()
-
             # Cleanup
-            if settings["delete_cropped"]:
-                cropped_path = os.path.join(organoid, "cropped")
-                if os.path.exists(cropped_path):
-                    shutil.rmtree(cropped_path)
-
-            max_proj = [f for f in os.listdir(organoid) if f.endswith("projXY.tif")]
-            max_proj_tracked = [
-                f for f in os.listdir(organoid) if f.endswith("projXY_tracked.tif")
-            ]
-
-            if settings["delete_max_proj"] and max_proj:
-                path = os.path.join(organoid, max_proj[0])
-                if os.path.exists(path):
-                    os.remove(path)
-
-            if settings["delete_max_proj_tracked"] and max_proj_tracked:
-                path = os.path.join(organoid, max_proj_tracked[0])
-                if os.path.exists(path):
-                    os.remove(path)
+            cleanup_organoid_files(organoid, settings)
 
             print(f"Finished processing organoid: {organoid}")
             progress_count.set(i + 1)
 
         # Save results
-        if summary_results:
-            summary_df = pd.concat(summary_results, ignore_index=True)
-            summary_df.to_csv(
-                os.path.join(base_path, "summary_results.csv"), index=False
-            )
-
-        if results:
-            full_df = pd.concat(results, ignore_index=True)
-            full_df.to_csv(os.path.join(base_path, "full_results.csv"), index=False)
-
+        save_results(base_path, summary_results, results)
         print("✅ Segmentation complete.")
 
     progress_count = reactive.Value(0)
@@ -597,6 +529,59 @@ def server(input, output, session):
             )
         )
 
+    @render.ui
+    def channel_inputs_cropper():
+        mode = input.segmentation_mode_cropper()
+        if "single nuclei marker" in mode.lower():
+            choices = ["Nuclei", "Different", "Empty"]
+        elif "dual nuclei marker" in mode.lower():
+            choices = ["Nuclei WT", "Nuclei CRC", "Different", "Empty"]
+
+        return ui.div(
+            *[
+                ui.div(
+                    ui.tags.span(
+                        f"{i+1}:",
+                        style="width: 30px; display: inline-block; margin-top: 5.5px;",
+                    ),
+                    ui.input_text(f"channel_cropper_{i}", "", width="200px"),
+                    ui.tags.span(
+                        "Channel type:",
+                        style="margin-left: 10px;margin-right: 5px; display: inline-block; margin-top: 5.5px;",
+                    ),
+                    ui.input_select(
+                        f"channel_type_cropper_{i}",
+                        "",
+                        choices=choices,
+                        selected="Empty",
+                        width="150px",
+                    ),
+                    ui.tags.span(
+                        "Color:",
+                        style="margin-left: 10px;margin-right: 5px; display: inline-block; margin-top: 5.5px;",
+                    ),
+                    ui.input_select(
+                        f"channel_color_cropper_{i}",
+                        "",
+                        choices=[
+                            "white",
+                            "red",
+                            "green",
+                            "blue",
+                            "cyan",
+                            "magenta",
+                            "yellow",
+                            "gray",
+                            "lime",
+                        ],
+                        width="150px",
+                    ),
+                    style="margin-bottom: 0px; display: flex; align-items: right;",
+                )
+                for i in range(5)
+            ],
+        )
+
     @reactive.effect
     @reactive.event(input.run_cropper)
     def run_cropper():
@@ -606,9 +591,12 @@ def server(input, output, session):
         from main_functions.crop_organoid import crop_organoid
 
         # Load models once
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model_dir = os.path.join(base_dir, "models")
+
         organoid_model = build_sam2_video_predictor(
-            r"models\sam2.1_hiera_s.yaml",
-            r"models\sam2.1_hiera_small.pt",
+            os.path.join(model_dir, "sam2.1_hiera_s.yaml"),
+            os.path.join(model_dir, "sam2.1_hiera_small.pt"),
         )
 
         # Get organoid paths
@@ -621,6 +609,10 @@ def server(input, output, session):
             getattr(input, f"channel_cropper_{i}")().strip() for i in range(5)
         ]
         channel_names = [name for name in channel_names if name]
+
+        channel_types = [
+            getattr(input, f"channel_type_cropper_{i}")().strip() for i in range(5)
+        ]
 
         channel_colors = [
             getattr(input, f"channel_color_cropper_{i}")() for i in range(5)
@@ -637,6 +629,8 @@ def server(input, output, session):
             "delete_cropped": input.delete_cropped_cropper(),
             "delete_max_proj": input.delete_max_proj_cropper(),
             "delete_max_proj_tracked": input.delete_max_proj_tracked_cropper(),
+            "dual_nuclei": "dual nuclei marker"
+            in input.segmentation_mode_cropper().lower(),
         }
 
         # Loop through organoids and run cropping
@@ -647,34 +641,17 @@ def server(input, output, session):
                     input_directory=organoid,
                     organoid_model=organoid_model,
                     channel_names=channel_names,
+                    channel_types=channel_types,
                     channel_colors=channel_colors,
                     crop_existing=settings["cropped_exists"],
+                    dual_nuclei=settings["dual_nuclei"],
                 )
+                print(f"Finished cropping: {organoid}")
             except Exception as e:
                 print(f"Failed to crop {organoid}: {e}")
-            else:
-                print(f"Finished cropping: {organoid}")
 
             # Cleanup
-            if settings["delete_cropped"]:
-                cropped_path = os.path.join(organoid, "cropped")
-                if os.path.exists(cropped_path):
-                    shutil.rmtree(cropped_path)
-
-            max_proj = [f for f in os.listdir(organoid) if f.endswith("projXY.tif")]
-            max_proj_tracked = [
-                f for f in os.listdir(organoid) if f.endswith("projXY_tracked.tif")
-            ]
-
-            if settings["delete_max_proj"] and max_proj:
-                path = os.path.join(organoid, max_proj[0])
-                if os.path.exists(path):
-                    os.remove(path)
-
-            if settings["delete_max_proj_tracked"] and max_proj_tracked:
-                path = os.path.join(organoid, max_proj_tracked[0])
-                if os.path.exists(path):
-                    os.remove(path)
+            cleanup_organoid_files(organoid, settings)
 
             progress_count_cropper.set(i + 1)
             is_cropping.set(False)  # Hide spinner

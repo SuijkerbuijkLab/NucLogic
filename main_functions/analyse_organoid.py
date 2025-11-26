@@ -35,6 +35,7 @@ def analyse_organoid(
     channel_names,  # Names of the different channels
     cropped_existing=False,  # Is there already a folder present that contains cropped tiffs, then we can skip cropping
     is_fixed=False,  # Is the data from fixed organoids (single timepoint) or live (multiple timepoints)
+    dual_nuclei=False,  # Whether dual nuclei marker is used
 ):
     # Set some parameters for the rest of the scripped
     output_directory_cropped = os.path.join(str(input_directory), "cropped")
@@ -45,9 +46,19 @@ def analyse_organoid(
     }
 
     # Always process the nuclei channel
-    nuclei_channel = channel_indices.get("nuclei", -1)
-    if nuclei_channel == -1:
-        raise ValueError("Nuclei channel is required.")
+    if not dual_nuclei:
+        nuclei_channel = channel_indices.get("nuclei", -1)
+        if nuclei_channel == -1:
+            raise ValueError("Nuclei channel is required.")
+    else:
+        nuclei_channel = [
+            channel_indices.get("nuclei wt", -1),
+            channel_indices.get("nuclei crc", -1),
+        ]
+        if -1 in nuclei_channel:
+            raise ValueError(
+                "Both nuclei channels are required for dual nuclei marker."
+            )
 
     # Find the biggest existing IMS or Tiff file in this folder and use it as the input
     input_file = utils.find_input_file(input_directory=input_directory)
@@ -68,14 +79,13 @@ def analyse_organoid(
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
     if not cropped_existing:
+        proj_XY = utils.max_project(
+            input_file,
+            name=name,
+            fixed=is_fixed,
+        )
 
         if is_fixed:
-            proj_XY = utils.max_project(
-                input_file,
-                nuclei=nuclei_channel,
-                name=name,
-                fixed=is_fixed,
-            )
             utils.crop_fixed(
                 proj_XY=proj_XY,
                 input_file=input_file,
@@ -83,11 +93,10 @@ def analyse_organoid(
                 nuclei=nuclei_channel,
                 name=name,
                 voxel_size=voxel_size,
+                dual_nuclei=dual_nuclei,
             )
+
         else:
-            proj_XY = utils.max_project(
-                input_file, nuclei=nuclei_channel, name=name, fixed=is_fixed
-            )
             utils.crop(
                 proj_XY=proj_XY,
                 input_file=input_file,
@@ -96,6 +105,7 @@ def analyse_organoid(
                 nuclei=nuclei_channel,
                 name=name,
                 voxel_size=voxel_size,
+                dual_nuclei=dual_nuclei,
             )
 
     # Find all the created cropped tiff files, every file is a 1 frame of the movie
@@ -125,6 +135,8 @@ def analyse_organoid(
 
         # Select the nuclei channel for segmentation
         frame_nuclei = frame[:, nuclei_channel, :, :]
+        if dual_nuclei:
+            frame_nuclei = np.max(frame_nuclei, axis=1)
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
         # stdout silenced to stop printing random stuff
@@ -164,7 +176,7 @@ def analyse_organoid(
         # We do this on an image where the median value (background) is subtracted from the signal
         channel_dfs = {}  # Store channel dataframes during for loop
         for ch_name, ch_index in channel_indices.items():
-            if ch_name == "nuclei":
+            if ch_name == "nuclei" and not dual_nuclei:
                 continue  # Skip nuclei because we already got data from that via properties_mask
             frame_ch = frame[:, ch_index, :, :]
             # Do a background subtraction on the image
@@ -216,14 +228,20 @@ def analyse_organoid(
     properties = pd.concat(properties, ignore_index=True)
 
     # Calculate the cutoff value between WT and CRC cells based on the ratio between their signals
-    cutoff = utils.calculate_cutoff(properties, f"log_ratio_wt_crc")
+    if dual_nuclei:
+        cutoff = 0
+    else:
+        cutoff = utils.calculate_cutoff(properties, f"log_ratio_wt_crc")
 
     # Loop again over every frame to calculate the number of WT and CRC cells based on the cutoff
     summary_results = []
     for file in files:
         df = properties[properties["frame"] == int(re.search(r"\d+", file).group())]
         for ch_a, ch_b in itertools.combinations(channels, 2):
-            log_col = f"log_ratio_wt_crc"
+            if dual_nuclei:
+                log_col = f"log_ratio_nuclei wt_nuclei crc"
+            else:
+                log_col = f"log_ratio_wt_crc"
             crc_count = np.sum(df[log_col] < cutoff)
             wt_count = np.sum(df[log_col] >= cutoff)
 
@@ -280,8 +298,44 @@ def analyse_organoid(
 
     # Stack all segmentation mask frames of the movie across time
     segmented_movie_array = np.stack(segmented_movie_padded, axis=0)
-    # Add a singleton channel axis → shape becomes TZCYX
-    segmented_movie_array = np.expand_dims(segmented_movie_array, axis=2)
+
+    # based on the phenotype of each cell, split the segmented cells into the two channels
+    if dual_nuclei:
+        wt_frames = []
+        crc_frames = []
+
+        for frame_idx in range(segmented_movie_array.shape[0]):
+            # open the properties file of this frame
+            props = pd.read_csv(
+                os.path.join(
+                    input_directory, "properties", f"Frame-{frame_idx}_props.csv"
+                )
+            )
+            wt_labels = props[props["phenotype"] == "wt"]["label"].values
+            crc_labels = props[props["phenotype"] == "crc"]["label"].values
+
+            # Create masks containing only WT or CRC cells
+            wt_segmentation = np.where(
+                np.isin(segmented_movie_array[frame_idx], wt_labels),
+                segmented_movie_array[frame_idx],
+                0,
+            )
+            crc_segmentation = np.where(
+                np.isin(segmented_movie_array[frame_idx], crc_labels),
+                segmented_movie_array[frame_idx],
+                0,
+            )
+
+            wt_frames.append(wt_segmentation)
+            crc_frames.append(crc_segmentation)
+
+        # Stack into TZCYX format: (time, z, channel, y, x)
+        segmented_movie_array = np.stack(
+            [np.stack(wt_frames, axis=0), np.stack(crc_frames, axis=0)], axis=2
+        )
+    else:
+        # Add a singleton channel axis → shape becomes TZCYX
+        segmented_movie_array = np.expand_dims(segmented_movie_array, axis=2)
 
     # Save this segmentation movie
     segmented_movie_tiff = os.path.join(input_directory, "segmented_movie.tif")

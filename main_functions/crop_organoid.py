@@ -17,14 +17,17 @@ def crop_organoid(
     input_directory,
     organoid_model,
     channel_names,
+    channel_types,
     channel_colors,
     crop_existing=False,
+    dual_nuclei=False,
 ):
+    print("Starting making the new file")
     # Setting stuff for the output
     output_directory_cropped = os.path.join(str(input_directory), "cropped")
-    nuclei_channel = next(
-        (i for i, ch in enumerate(channel_names) if ch.lower() == "nuclei"),
-    )
+
+    # Always process the nuclei channel
+    nuclei_channel = [i for i, ch in enumerate(channel_types) if "nuclei" in ch.lower()]
 
     ims_movie = utils.find_input_file(input_directory, types=[".ims"])
     loaded_movie = ims(ims_movie)
@@ -43,7 +46,8 @@ def crop_organoid(
     )
 
     if not crop_existing:
-        proj_XY = utils.max_project(ims_movie, input_directory, nuclei=nuclei_channel)
+        print("No cropped data found, starting cropping process...")
+        proj_XY = utils.max_project(file=ims_movie, name=name, fixed=False)
         proj_XY_name = os.path.join(os.path.dirname(ims_movie), f"{name}_projXY.tif")
         tifffile.imwrite(
             proj_XY_name,
@@ -60,12 +64,16 @@ def crop_organoid(
                 model=organoid_model,
                 nuclei=nuclei_channel,
                 name=name,
+                voxel_size=voxel_size,
+                dual_nuclei=dual_nuclei,
             )
         except Exception as e:
             tb = traceback.format_exc()
             raise RuntimeError(
                 f"❌ ERROR during cropping of organoid. Possibly too few nuclei marker-positive cells.\n\n{e}\n\nTraceback:\n{tb}"
             )
+    else:
+        print("Cropped data found, skipping cropping process...")
 
     max_dims = [0, 0, 0, 0]
     movie = []
@@ -73,7 +81,6 @@ def crop_organoid(
         image = tifffile.imread(
             os.path.join(output_directory_cropped, f"Frame-{frame}.tif")
         )
-
         movie.append(image)
         for i in range(4):
             max_dims[i] = max(max_dims[i], image.shape[i])
@@ -83,9 +90,10 @@ def crop_organoid(
 
     # Stack across time
     movie = np.stack(movie_padded, axis=0)
+    print("Created movie shape (T, Z, C, Y, X):", movie.shape)
 
-    # Reorder movie from (T, C, Z, Y, X) to (Z, Y, X, C, T)
-    movie_reordered = np.transpose(movie, (2, 3, 4, 1, 0))
+    # Reorder movie from (T, Z, C, Y, X) to (Z, Y, X, C, T)
+    movie_reordered = np.transpose(movie, (1, 3, 4, 2, 0))
     movie_reordered = np.ascontiguousarray(movie_reordered)
     Z, Y, X, C, T = movie_reordered.shape
 
@@ -100,7 +108,7 @@ def crop_organoid(
 
     # Compression
     options = PW.Options()
-    options.mCompressionAlgorithmType = PW.eCompressionAlgorithmLZ4
+    options.mCompressionAlgorithmType = PW.eCompressionAlgorithmShuffleGzipLevel2
     options.mEnableLogProgress = True
 
     # Dummy progress callback

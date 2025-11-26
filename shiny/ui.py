@@ -24,39 +24,27 @@ app_ui = ui.tags.html(
                     ui.layout_columns(
                         ui.div(
                             ui.h4("Run single cell segmentation:"),
+                            ui.h5("Mode:"),
+                            ui.h6("Please select what kind of sample this is"),
+                            ui.input_select(
+                                "segmentation_mode",
+                                "",
+                                choices=[
+                                    "Single nuclei marker - Live Cell Imaging",
+                                    "Dual nuclei marker - Live Cell Imaging",
+                                    "Single nuclei marker - Fixed sample",
+                                    "Dual nuclei marker - Fixed Sample",
+                                ],
+                                width="350px",
+                                selected="Single nuclei marker - Live Cell Imaging",
+                            ),
                             ui.h5("Channel names:"),
                             ui.h6(
                                 "Please select what each channel is and fill in a name for 'different' channels"
                             ),
-                            *[
-                                ui.div(
-                                    ui.tags.span(
-                                        f"{i+1}:",
-                                        style="width: 30px; display: inline-block; margin-top: 5.5px;",
-                                    ),
-                                    ui.input_select(
-                                        f"channel_name_{i}",
-                                        "",
-                                        choices=[
-                                            "Nuclei",
-                                            "WT",
-                                            "CRC",
-                                            "Different",
-                                            "Empty",
-                                        ],
-                                        selected="Empty",
-                                        width="150px",
-                                    ),
-                                    ui.input_text(
-                                        f"channel_name_alternative_{i}",
-                                        "",
-                                        value="Alternative name",
-                                        width="200px",
-                                    ),
-                                    style="margin-bottom: 0px; display: flex; align-items: right;",
-                                )
-                                for i in range(5)
-                            ],
+                            ui.output_ui(
+                                "channel_inputs"
+                            ),  # the channel names overview
                             ui.h5("Advanced Settings"),
                             ui.tags.div(
                                 ui.input_checkbox(
@@ -65,31 +53,24 @@ app_ui = ui.tags.html(
                                     False,
                                 ),
                                 ui.input_checkbox(
-                                    "delete_cropped", "Delete split cropped files", True
+                                    "delete_cropped",
+                                    "Delete split cropped files",
+                                    False,
                                 ),
                                 ui.input_checkbox(
-                                    "delete_max_proj", "Delete max projection", True
+                                    "delete_max_proj", "Delete max projection", False
                                 ),
                                 ui.input_checkbox(
                                     "delete_max_proj_tracked",
                                     "Delete tracked max projection",
-                                    True,
-                                ),
-                                ui.input_checkbox(
-                                    "is_fixed", "Data is from fixed organoids", False
-                                ),
-                                ui.output_ui("cropping_options"),
-                                ui.input_checkbox(
-                                    "specific_measurements",
-                                    "Calculate specific measurements",
                                     False,
                                 ),
-                                ui.output_ui("specific_measurements_options"),
+                                ui.input_checkbox(
+                                    "custom_model", "Use custom model", False
+                                ),
+                                ui.output_ui("custom_model_ui"),
+                                ui.output_ui("fixed_mode"),
                                 style="font-size: 14px;",
-                            ),
-                            ui.input_file(
-                                "model_file",
-                                "Select a custom model file for nuclei segmentation (optional)",
                             ),
                             ui.input_action_button(
                                 "run_segmenter", "Run Segmenter", width="200px"
@@ -136,45 +117,27 @@ app_ui = ui.tags.html(
                     ),
                     ui.div(
                         ui.h4("Crop organoids into new IMS files:"),
+                        ui.h5("Mode:"),
+                        ui.h6("Please select what kind of sample this is"),
+                        ui.input_select(
+                            "segmentation_mode_cropper",
+                            "",
+                            choices=[
+                                "Single nuclei marker",
+                                "Dual nuclei marker",
+                            ],
+                            width="350px",
+                            selected="Single nuclei marker",
+                        ),
                         ui.h6(
                             "Uses your exisiting IMS files to crop out the most center organoid and generate a new IMS file with similair metadata",
                             style="margin-top: 5px; margin-bottom: 15px;",
                         ),
                         ui.h5("Channel names:"),
                         ui.h6("Please name the channel containing nuclei 'Nuclei'"),
-                        *[
-                            ui.div(
-                                ui.tags.span(
-                                    f"{i+1}:",
-                                    style="width: 30px; display: inline-block; margin-top: 5.5px;",
-                                ),
-                                ui.input_text(
-                                    f"channel_cropper_{i}", "", width="200px"
-                                ),
-                                ui.tags.span(
-                                    "Color:",
-                                    style="margin-left: 10px;margin-right: 5px; display: inline-block; margin-top: 5.5px;",
-                                ),
-                                ui.input_select(
-                                    f"channel_color_cropper_{i}",
-                                    "",
-                                    choices=[
-                                        "white",
-                                        "red",
-                                        "green",
-                                        "blue",
-                                        "cyan",
-                                        "magenta",
-                                        "yellow",
-                                        "gray",
-                                        "lime",
-                                    ],
-                                    width="150px",
-                                ),
-                                style="margin-bottom: 0px; display: flex; align-items: right;",
-                            )
-                            for i in range(5)
-                        ],
+                        ui.output_ui(
+                            "channel_inputs_cropper"
+                        ),  # the channel names overview
                         ui.h4("Advanced Settings"),
                         ui.input_checkbox(
                             "cropped_exists_cropper",

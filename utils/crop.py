@@ -25,13 +25,21 @@ def crop(
     nuclei=2,
     name="projXY_tracked",
     voxel_size=(1.0, 1.0, 1.0),
+    dual_nuclei=False,
 ):
     # Create the output directory to save the files
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
     # Convert movie to 8 bit for meta SAM
-    proj_XY_8bit = ((proj_XY / proj_XY.max()) * 255).astype(np.uint8)
+    if not dual_nuclei:
+        proj_XY_nuclei = proj_XY[:, nuclei, :, :]
+    else:
+        proj_XY_nuclei = proj_XY[:, nuclei, :, :]
+        proj_XY_nuclei = np.max(
+            proj_XY_nuclei, axis=1
+        )  # conbine both nuclei channels for cropping
+    proj_XY_8bit = ((proj_XY_nuclei / proj_XY_nuclei.max()) * 255).astype(np.uint8)
 
     all_masks = segment_organoid(proj_XY_8bit, model)
 
@@ -41,6 +49,10 @@ def crop(
         mask = ndimage.binary_dilation(mask, iterations=12)
         new_masks.append(mask)
     new_masks = np.stack(new_masks, axis=0).astype(np.uint16)
+
+    # Expand masks to match channel dimension: (T, Y, X) -> (T, C, Y, X)
+    new_masks = new_masks[:, np.newaxis, :, :]  # Add channel axis
+    new_masks = np.repeat(new_masks, proj_XY.shape[1], axis=1)
 
     # Create new movie that only has the tracked organoid
     organoid_only = np.where(new_masks, proj_XY, 0)
@@ -52,6 +64,8 @@ def crop(
             f"{name}_projXY_tracked.tif",
         ),
         organoid_only,
+        imagej=True,
+        metadata={"axes": "TCYX"},
         compression="zlib",
         compressionargs={"level": 8},
     )
@@ -63,14 +77,13 @@ def crop(
         movie = tifffile.imread(input_file)  # T,Z,C,Y,X
         movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
 
-    timepoints, y, x = proj_XY.shape
+    timepoints = proj_XY.shape[0]
 
     # Loop over every frame in the movie to crop that frame.
     with alive_bar(timepoints, title="Cropping frames") as bar:
         for frame in range(timepoints):
 
-            # Find the XY coordinates of the mask
-            maskXY = organoid_only[frame] > 0
+            maskXY = np.max(organoid_only[frame, nuclei], axis=0) > 0
             coordsXY = np.where(maskXY)
 
             # Adjust cropping limits based on XY projection, creating a bounding box around the organoid
@@ -85,7 +98,16 @@ def crop(
                 )
 
             # Get the frame of the movie
-            ref = movie[frame, nuclei, :, row_min:row_max, col_min:col_max]
+            if not dual_nuclei:
+                ref = movie[frame, nuclei, :, row_min:row_max, col_min:col_max]
+            else:
+                ref = np.stack(
+                    [
+                        movie[frame, ch, :, row_min:row_max, col_min:col_max]
+                        for ch in nuclei
+                    ]
+                )
+                ref = np.max(ref, axis=0)  # combine both nuclei channels for cropping
 
             # Get a bounding box cropped version of the organoid
             ref_crop = maskXY[row_min:row_max, col_min:col_max]
