@@ -5,6 +5,11 @@ import scipy.ndimage as ndimage
 
 
 def find_mask_area(proj_XY):
+    while proj_XY.ndim > 2:
+        proj_XY = np.max(
+            proj_XY, axis=0
+        )  # Collapse channel and or time dimensions if present
+
     # Apply gaussian filter to smooth the image and make thresholding more robust
     frame = ndimage.gaussian_filter(proj_XY, sigma=(3, 3))
 

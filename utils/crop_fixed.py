@@ -27,6 +27,13 @@ def crop_fixed(
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
+    original_projXY = proj_XY.copy()
+
+    while proj_XY.ndim > 2:
+        proj_XY = np.max(
+            proj_XY, axis=0
+        )  # Collapse channel and or time dimensions if present
+
     if not manual:
         # Apply gaussian filter to smooth the image and make thresholding more robust
         frame = ndimage.gaussian_filter(proj_XY, sigma=(3, 3))
@@ -64,7 +71,10 @@ def crop_fixed(
         # Create a binary mask for the selected label
         selected_mask = (labels == selected_label).astype(np.uint8)
 
-        organoid_only = np.where(selected_mask > 0, proj_XY, 0)
+        while selected_mask.ndim < original_projXY.ndim:
+            selected_mask = np.expand_dims(selected_mask, axis=0)
+        # Apply mask to original projXY
+        organoid_only = np.where(selected_mask > 0, original_projXY, 0)
 
     else:
         # Normalize for the CV2 roi selector
@@ -75,7 +85,10 @@ def crop_fixed(
         # Get polygon selection
         selected_mask, _, _ = polygon_selection(normalized_image)
 
-        organoid_only = np.where(selected_mask > 0, proj_XY, 0)
+        while selected_mask.ndim < original_projXY.ndim:
+            selected_mask = np.expand_dims(selected_mask, axis=0)
+        # Apply mask to original projXY
+        organoid_only = np.where(selected_mask > 0, original_projXY, 0)
 
     # Save this tracked movie to the output folder
     tifffile.imwrite(
@@ -84,6 +97,8 @@ def crop_fixed(
             f"{name}_projXY_tracked.tif",
         ),
         organoid_only,
+        imagej=True,
+        metadata={"axes": "TCYX"},
         compression="zlib",
         compressionargs={"level": 8},
     )

@@ -1,14 +1,16 @@
 @echo off
 REM Set paths relative to the batch file location
 set SCRIPT_DIR=%~dp0
-set ENV_PATH=%SCRIPT_DIR%env
+set CONDA=C:\ProgramData\miniconda3
+set ENV_PATH=%CONDA%\envs\organoid_segmenter
 set ENV_YML=%SCRIPT_DIR%miscellaneous\environment.yml
 set REQUIREMENTS=%SCRIPT_DIR%miscellaneous\requirements.txt
-set SAM2="C:\repos\sam2"
+set SAM2=C:\repos\sam2
 
-REM Step 1: Activate Conda base (update this path to your actual Anaconda install)
+REM Step 1: Activate Conda base
 echo Activating conda
-call "C:\Users\6331823\AppData\Local\anaconda3\Scripts\activate.bat" "C:\Users\6331823\AppData\Local\anaconda3"
+echo "%CONDA%\Scripts\activate.bat" "%CONDA%"
+call "%CONDA%\Scripts\activate.bat" "%CONDA%"
 
 REM Step 2: Check if environment exists
 IF NOT EXIST "%ENV_PATH%" (
@@ -20,6 +22,7 @@ IF NOT EXIST "%ENV_PATH%" (
     echo Finished pip install
 ) ELSE (
     echo Environment already exists. Starting now...
+    echo Starting environment "%ENV_PATH%"
     call conda activate "%ENV_PATH%"
 )
 
@@ -46,6 +49,8 @@ cd /d "%SCRIPT_DIR%"
 REM Step 5: Run the script
 echo running shiny
 call python -m shiny run --reload --launch-browser "shiny\app.py"
+
+
 
 REM Step 6: Keep window open
 cmd /k

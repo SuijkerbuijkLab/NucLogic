@@ -12,17 +12,20 @@ def max_project(file, name="nuclei", fixed=False):
     if file.endswith(".ims"):
         movie = ims(file)  # T,C,Z,Y,X
         movie = movie[:]
+        print(f"the movie shape is: {movie.shape}")
     elif file.endswith(".tif"):
         movie = tifffile.imread(file)  # T,Z,C,Y,X
+        movie = np.moveaxis(movie, 2, 1)  # T,C,Z,Y,X
+        print(f"the movie shape is: {movie.shape}")
+
+    # Ensure movie has 5 dimensions
+    while movie.ndim < 5:
+        movie = np.expand_dims(movie, axis=0)  # add new dimension at the front
+        print(f"added dimension, new shape: {movie.shape}")
 
     # Project axis Z, if fixed we have 1 time axis less
-    if fixed:
-        max_data = np.max(movie, axis=1)
-    else:
-        max_data = []
-        for t in range(movie.shape[0]):
-            max_data.append(np.max(movie[t], axis=1))
-        max_data = np.array(max_data)
+    max_data = np.max(movie, axis=2)  # T,C,Y,X
+    print(f"the projected data shape is: {max_data.shape}")
 
     proj_XY_name = os.path.join(os.path.dirname(file), f"{name}_projXY.tif")
     tifffile.imwrite(
