@@ -104,6 +104,7 @@ def crop_fixed(
     )
 
     # Find the XY coordinates of the mask
+    selected_mask = np.squeeze(selected_mask)  # Should be (Y, X)
     maskXY = selected_mask > 0
     coordsXY = np.where(maskXY)
 
@@ -121,22 +122,34 @@ def crop_fixed(
     # Load in the input image, which is either a ims or tiff
     if input_file.endswith(".ims"):
         movie = ims(input_file)  # T,C,Z,Y,X
+        while len(movie.shape) < 5:
+            movie = np.expand_dims(movie, axis=0)  # Add time dimension if missing
+        print(f"Original movie shape: {movie.shape}")
     elif input_file.endswith(".tif"):
         movie = tifffile.imread(input_file)  # T,Z,C,Y,X
         movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
 
     # Get a bounding box cropped version of the organoid
     if not dual_nuclei:
+        print(nuclei, row_min, row_max, col_min, col_max)
         ref = movie[:, nuclei, :, row_min:row_max, col_min:col_max]
+        print(f"Single nuclei ref shape: {ref.shape}")
     else:
         ref = movie[:, nuclei, :, row_min:row_max, col_min:col_max]
+        print(f"Dual nuclei ref shape before max: {ref.shape}")
         ref = np.max(ref, axis=1)  # Combine multiple nuclei channels by max projection
+        print(f"Dual nuclei ref shape after max: {ref.shape}")
 
-    ref_crop = selected_mask[row_min:row_max, col_min:col_max]
+    ref_crop = selected_mask[
+        row_min:row_max, col_min:col_max
+    ]  # Should be (Y, X) or (1, 1, Y, X)
+    print(f"ref crop shape: {ref_crop.shape}")
 
-    # In this bounding box image, create the Z axis of the same dimensions of the original movie
     ref_expanded = ref_crop[np.newaxis, :, :]
+    print(f"ref expanded shape before repeat: {ref_expanded.shape}")
     ref_expanded = np.repeat(ref_expanded, ref.shape[0], axis=0)
+
+    print(f"ref expanded shape: {ref_expanded.shape}, ref shape {ref.shape}")
 
     # Use the this XYZ mask on the original movie to crop as both a bounding box and to make all pixels (corners) where there is no organoid actually black
     ref_masked = np.where(ref_expanded > 0, ref, 0).astype(np.uint16)

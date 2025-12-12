@@ -32,7 +32,6 @@ def process_fixed_cropping(organoids, settings, final_channel_names):
         input_file = find_input_file(input_directory=organoid)
         proj_XY = max_project(
             input_file,
-            nuclei=nuclei_channel,
             fixed=True,
             name=os.path.basename(organoid),
         )

@@ -150,6 +150,65 @@ def server(input, output, session):
         else:
             return ui.markdown("**Invalid or empty path.**")
 
+    def file_to_folder_button_core(path, selection_state_value):
+        """Core logic for showing file-to-folder button"""
+        if path and os.path.isdir(path):
+            try:
+                files = os.listdir(path)
+                newfiles = [
+                    file for file in files if os.path.isdir(os.path.join(path, file))
+                ]
+                image_files = [
+                    file for file in files if file.endswith((".tif", ".ims"))
+                ]
+                # Show button only if there are image files in root but no folders containing them
+                if image_files and not newfiles:
+                    return ui.div(
+                        ui.h6(
+                            "It seems like your Ims or Tiff files are not in individual folders yet. Do you want to fix this?"
+                        ),
+                        ui.input_action_button(
+                            "move_files_button", "Move files to folders"
+                        ),
+                    )
+                else:
+                    return ui.div()
+            except Exception as e:
+                return ui.div()
+        else:
+            return ui.div()
+
+    @render.ui
+    def file_to_folder_button():
+        """For segmentation tab"""
+        path = selected_path.get()
+        _ = selection_state.get()
+        return file_to_folder_button_core(path, selection_state.get())
+
+    @render.ui
+    def file_to_folder_button_cropper():
+        """For cropper tab"""
+        path = selected_path.get()
+        _ = selection_state.get()
+        return file_to_folder_button_core(path, selection_state.get())
+
+    @reactive.effect
+    @reactive.event(input.move_files_button)
+    def move_files_to_folder():
+        from help_functions.file_to_folder import file_to_folder
+
+        path = selected_path.get()
+
+        if path and os.path.isdir(path):
+            try:
+                file_to_folder(path)
+                print("✅ Files moved to folders successfully.")
+                # Trigger UI refresh by toggling selection state twice (keeps same state)
+                selection_state.set(not selection_state.get())
+                selection_state.set(not selection_state.get())
+            except Exception as e:
+                print(f"❌ Error moving files to folders: {e}")
+
     @render.ui
     def organoid_list_plotting():
         return organoid_list_core(
@@ -586,6 +645,8 @@ def server(input, output, session):
     @reactive.event(input.run_cropper)
     def run_cropper():
         is_cropping.set(True)  # Show spinner
+        progress_count_cropper.set(0)  # Reset progress at start
+
         from sam2.build_sam import build_sam2_video_predictor
 
         from main_functions.crop_organoid import crop_organoid
@@ -654,7 +715,7 @@ def server(input, output, session):
             cleanup_organoid_files(organoid, settings)
 
             progress_count_cropper.set(i + 1)
-            is_cropping.set(False)  # Hide spinner
+        is_cropping.set(False)  # Hide spinner
 
     is_cropping = reactive.Value(False)
 

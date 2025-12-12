@@ -19,6 +19,7 @@ app_ui = ui.tags.html(
                             "toggle_select_segmentation", "Select/Deselect All"
                         ),
                         ui.output_ui("organoid_list_segmentation"),
+                        ui.output_ui("file_to_folder_button"),
                         bg="#f8f8f8",
                     ),
                     ui.layout_columns(
@@ -113,6 +114,7 @@ app_ui = ui.tags.html(
                             "toggle_select_cropper", "Select/Deselect All"
                         ),
                         ui.output_ui("organoid_list_cropper"),
+                        ui.output_ui("file_to_folder_button_cropper"),
                         bg="#f8f8f8",
                     ),
                     ui.div(

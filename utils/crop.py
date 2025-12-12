@@ -196,22 +196,8 @@ def crop(
             tifffile.imwrite(
                 os.path.join(output_directory, f"Frame-{frame}.tif"),
                 cropped_image_masked,
-                bigtiff=True,
-                resolution=(
-                    (1 / voxel_size[1]) * 25400,
-                    (1 / voxel_size[2]) * 25400,
-                ),
-                metadata={
-                    "unit": "um",
-                    "axes": "ZCYX",
-                    "PhysicalSizeX": voxel_size[2],
-                    "PhysicalSizeXUnit": "µm",
-                    "PhysicalSizeY": voxel_size[1],
-                    "PhysicalSizeYUnit": "µm",
-                    "PhysicalSizeZ": voxel_size[0],
-                    "PhysicalSizeZUnit": "µm",
-                    "spacing": voxel_size[0],
-                },
+                imagej=True,
+                metadata={"axes": "ZCYX"},
                 compression="zlib",
                 compressionargs={"level": 8},
             )
