@@ -27,4 +27,4 @@ def stitch_3D(image, min_z=4, med_z=6, max_z=9, label_ellipses=True):
         summary_df, dims=image.shape, label_ellipses=label_ellipses
     )
 
-    return result
+    return result, object3D, summary_df

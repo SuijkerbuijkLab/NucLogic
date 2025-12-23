@@ -1,5 +1,18 @@
 """
 OSCAR_stitching - A package for stitching 3D objects in organoid segmentation
+
+Input:
+    Binarized images with segmented objects
+
+Output:
+    results = Labeled 3D images with stitched objects
+    object3D = Object3D dataclass containing object properties
+    summary_df = DataFrame summarizing stitched objects
+
+usage:
+    from OSCAR_stitching import stitch_3D
+
+    result, object3D, summary_df = stitch_3D(image, min_z=4, med_z=6, max_z=9, label_ellipses=True)
 """
 
 __version__ = "1.0.0"
@@ -31,31 +44,3 @@ from .info_preobj_dist_z import info_preobj_dist_z
 from .ellipses_connector import ellipses_connector
 from .terminator_returns import terminator_returns
 from .stitch_3D import stitch_3D
-
-
-# # Define public API
-# __all__ = [
-#     # Main functions
-#     "OSCAR_stitch",
-#     "stitch_3D",
-#     "object_splitter_3D",
-#     "Objects3D",
-#     "create_summary_from_objects",
-#     "draw_3D_ellipses",
-#     # Utility functions
-#     "generate_ellipse_coordinates",
-#     "generate_points",
-#     "get_covariance",
-#     "linear_regression",
-#     "fit_3D_line",
-#     "sort_points_ascending",
-#     "sort_points_ascending_map_to_z",
-#     "outliers_detection",
-#     "data_2D_chunking",
-#     # Advanced functions
-#     "ellipses_connector",
-#     "overlapped_ellipses",
-#     "pre_obj_elongation",
-#     "info_preobj_dist_z",
-#     "terminator_returns",
-# ]
