@@ -17,5 +17,6 @@ from .find_mask_area import find_mask_area
 from .stitch_organoid import stitch_organoid
 from .measure_dilated import measure_dilated
 from .get_time_interval import get_time_interval
+from .stitch_3d import stitch_3d
 
 print("utils package loaded successfully")

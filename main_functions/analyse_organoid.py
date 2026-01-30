@@ -1,6 +1,7 @@
 import tifffile
 from scipy.ndimage import zoom
-from cellpose.utils import stitch3D
+
+# from cellpose.utils import stitch3D
 import numpy as np
 import pandas as pd
 from alive_progress import alive_it
@@ -137,6 +138,8 @@ def analyse_organoid(
         frame_nuclei = frame[:, nuclei_channel, :, :]
         if dual_nuclei:
             frame_nuclei = np.max(frame_nuclei, axis=1)
+            frame_nuclei_wt = frame[:, nuclei_channel[0], :, :]
+            frame_nuclei_crc = frame[:, nuclei_channel[1], :, :]
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
         # stdout silenced to stop printing random stuff
@@ -146,7 +149,14 @@ def analyse_organoid(
 
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
-        segmented_stack_stitched = stitch3D(segmented_stack)
+        segmented_stack_stitched, organoid = utils.stitch_3d(
+            segmented_stack,
+            image1=frame_nuclei_wt,
+            image_type_1="wt",
+            image2=frame_nuclei_crc,
+            image_type_2="crc",
+            breaking_threshold=2.5,
+        )
         sys.stdout = old_stdout  # reset old stdout
 
         # Save segmentation mask tiffile
@@ -156,7 +166,7 @@ def analyse_organoid(
         )
         tifffile.imwrite(
             segmented_tiff_file,
-            segmented_stack,
+            segmented_stack_stitched,
             compression="zlib",
             compressionargs={"level": 8},
         )
@@ -164,10 +174,10 @@ def analyse_organoid(
         # The segmentation mask is saved to generate a full movie later on, the XYZ dimensions of this frame are saved to calculate the padding needed for this movie
         segmented_movie.append(segmented_stack_stitched)
         for i in range(3):
-            max_dims[i] = max(max_dims[i], segmented_stack.shape[i])
+            max_dims[i] = max(max_dims[i], segmented_stack_stitched.shape[i])
 
         # Get properties of the masked nuclei, such as volume and location of every cell
-        props = utils.properties_mask(segmented_stack)
+        props = utils.properties_mask(segmented_stack_stitched)
 
         # Compensate for voxel size to get real world xyz distance values instead of pixel values
         props = utils.compensate_voxel_size(props, voxel_size)
@@ -183,7 +193,7 @@ def analyse_organoid(
             offset_ch = utils.offset_image(frame_ch, type="median")
             # Get intensity data of this channel at the locations of the nuclei masks
             df_ch = utils.properties_channel(
-                segmented_stack, offset_ch, channel_names[ch_index].lower()
+                segmented_stack_stitched, offset_ch, channel_names[ch_index].lower()
             )
             channel_dfs[channel_names[ch_index]] = df_ch
 
@@ -252,7 +262,23 @@ def analyse_organoid(
                 input_directory, "properties", f"{file.split('.')[0]}_props.csv"
             )
         )
-        old_df["phenotype"] = np.where(old_df[log_col] < cutoff, "crc", "wt")
+
+        # Check if one phenotype dominates >97%, if so assign all cells to that phenotype
+        wt_percentage = wt_count / total * 100
+        crc_percentage = crc_count / total * 100
+
+        # if more than 97% of the cells are of one phenotype, assign all cells to that phenotype to avoid misclassification due to noise
+        if wt_percentage > 97:
+            old_df["phenotype"] = "wt"
+            wt_count = len(old_df)
+            crc_count = 0
+        elif crc_percentage > 97:
+            old_df["phenotype"] = "crc"
+            crc_count = len(old_df)
+            wt_count = 0
+        else:
+            old_df["phenotype"] = np.where(old_df[log_col] < cutoff, "crc", "wt")
+
         old_df = utils.compute_knn_features(old_df, k=5)
 
         old_df.to_csv(

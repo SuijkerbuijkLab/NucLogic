@@ -19,3 +19,10 @@ def file_to_folder(input_directory):
             # Move the file into the new folder
             shutil.move(file_path, os.path.join(new_folder_path, file))
     return
+
+
+if __name__ == "__main__":
+    input_directory = (
+        r"C:\Users\6331823\Local SSD\Data_Merel\MvL_Exp139_positions_WT_SI"
+    )
+    file_to_folder(input_directory)

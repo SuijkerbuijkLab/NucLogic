@@ -15,10 +15,10 @@ import utils
 
 def crop_organoid(
     input_directory,
-    organoid_model,
     channel_names,
     channel_types,
     channel_colors,
+    organoid_model=None,
     crop_existing=False,
     dual_nuclei=False,
 ):
@@ -46,6 +46,9 @@ def crop_organoid(
     )
 
     if not crop_existing:
+        if organoid_model is None:
+            raise ValueError("organoid_model must be provided when crop_existing=False")
+
         print("No cropped data found, starting cropping process...")
         proj_XY = utils.max_project(file=ims_movie, name=name, fixed=False)
         proj_XY_name = os.path.join(os.path.dirname(ims_movie), f"{name}_projXY.tif")

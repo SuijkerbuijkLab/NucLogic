@@ -3,6 +3,8 @@ import re
 import shutil
 import pandas as pd
 
+from main_functions.crop_organoid import crop_organoid
+
 
 def needs_manual_cropping(settings, area):
     """Determine if manual cropping is required."""
@@ -19,6 +21,7 @@ def process_fixed_cropping(organoids, settings, final_channel_names):
     from utils.max_project import max_project
     from utils.find_mask_area import find_mask_area
     from utils.crop_fixed import crop_fixed
+    from main_functions.crop_organoid import crop_organoid
 
     if not (settings["is_fixed"] and not settings["cropped_exists"]):
         return
@@ -167,6 +170,26 @@ def process_organoid(organoid, settings, models, final_channel_names):
                 summary_result = pd.read_csv(
                     os.path.join(organoid, "summary_results_organoid.csv")
                 )
+
+        # Make a cropped IMS if requested
+        if settings["cropped_ims"]:
+            channel_types = [
+                "Channel_1",
+                "Channel_2",
+                "Channel_3",
+                "Channel_4",
+                "Channel_5",
+            ]
+            channel_types = channel_types[: len(final_channel_names)]
+            channel_colors = ["white"] * len(final_channel_names)
+            crop_organoid(
+                input_directory=organoid,
+                channel_names=final_channel_names,
+                channel_types=channel_types,
+                channel_colors=channel_colors,
+                crop_existing=True,
+                dual_nuclei=settings["dual_nuclei"],
+            )
 
         # Load all properties
         all_properties = load_all_properties(organoid)

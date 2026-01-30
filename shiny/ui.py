@@ -49,6 +49,9 @@ app_ui = ui.tags.html(
                             ui.h5("Advanced Settings"),
                             ui.tags.div(
                                 ui.input_checkbox(
+                                    "cropped_ims", "Create a cropped IMS file", False
+                                ),
+                                ui.input_checkbox(
                                     "cropped_exists",
                                     "Folders already contain cropped tiff files",
                                     False,

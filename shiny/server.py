@@ -348,6 +348,7 @@ def server(input, output, session):
 
         from main_functions.count_cell_types import count_cell_types
         from main_functions.analyse_organoid import analyse_organoid
+        from main_functions.crop_organoid import crop_organoid
         from utils.load_model import load_model
         from utils.max_project import max_project
         from utils.find_input_file import find_input_file
@@ -421,6 +422,7 @@ def server(input, output, session):
 
         # Get advanced settings
         settings = {
+            "cropped_ims": input.cropped_ims(),
             "segmentation_mode": input.segmentation_mode(),
             "cropped_exists": input.cropped_exists(),
             "delete_cropped": input.delete_cropped(),
