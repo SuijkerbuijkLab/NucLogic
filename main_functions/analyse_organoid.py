@@ -149,14 +149,22 @@ def analyse_organoid(
 
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
-        segmented_stack_stitched, organoid = utils.stitch_3d(
-            segmented_stack,
-            image1=frame_nuclei_wt,
-            image_type_1="wt",
-            image2=frame_nuclei_crc,
-            image_type_2="crc",
-            breaking_threshold=2.5,
-        )
+        if dual_nuclei:
+            segmented_stack_stitched, organoid = utils.stitch_3d(
+                segmented_stack,
+                image1=frame_nuclei_wt,
+                image_type_1="wt",
+                image2=frame_nuclei_crc,
+                image_type_2="crc",
+                breaking_threshold=2.5,
+            )
+        else:
+            segmented_stack_stitched, organoid = utils.stitch_3d(
+                segmented_stack,
+                image1=frame_nuclei,
+                image_type_1="nuclei",
+                breaking_threshold=2.5,
+            )
         sys.stdout = old_stdout  # reset old stdout
 
         # Save segmentation mask tiffile

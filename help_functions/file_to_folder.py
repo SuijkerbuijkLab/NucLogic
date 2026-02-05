@@ -22,7 +22,6 @@ def file_to_folder(input_directory):
 
 
 if __name__ == "__main__":
-    input_directory = (
-        r"C:\Users\6331823\Local SSD\Data_Merel\MvL_Exp139_positions_WT_SI"
-    )
+    input_directory = r"C:\Users\6331823\Local SSD\Data_Miriam\20240312"
+
     file_to_folder(input_directory)
