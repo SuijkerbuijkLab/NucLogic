@@ -252,77 +252,82 @@ def analyse_organoid(
         cutoff = utils.calculate_cutoff(properties, f"log_ratio_wt_crc")
 
     # Loop again over every frame to calculate the number of WT and CRC cells based on the cutoff
-    summary_results = []
-    for file in files:
-        df = properties[properties["frame"] == int(re.search(r"\d+", file).group())]
-        for ch_a, ch_b in itertools.combinations(channels, 2):
-            if dual_nuclei:
-                log_col = f"log_ratio_nuclei wt_nuclei crc"
-            else:
-                log_col = f"log_ratio_wt_crc"
-            crc_count = np.sum(df[log_col] < cutoff)
-            wt_count = np.sum(df[log_col] >= cutoff)
+    try:
+        summary_results = []
+        for file in files:
+            df = properties[properties["frame"] == int(re.search(r"\d+", file).group())]
+            for ch_a, ch_b in itertools.combinations(channels, 2):
+                if dual_nuclei:
+                    log_col = f"log_ratio_nuclei wt_nuclei crc"
+                else:
+                    log_col = f"log_ratio_wt_crc"
+                crc_count = np.sum(df[log_col] < cutoff)
+                wt_count = np.sum(df[log_col] >= cutoff)
 
-        total = crc_count + wt_count
+            total = crc_count + wt_count
 
-        old_df = pd.read_csv(
-            os.path.join(
-                input_directory, "properties", f"{file.split('.')[0]}_props.csv"
+            old_df = pd.read_csv(
+                os.path.join(
+                    input_directory, "properties", f"{file.split('.')[0]}_props.csv"
+                )
             )
-        )
 
-        # Check if one phenotype dominates >97%, if so assign all cells to that phenotype
-        wt_percentage = wt_count / total * 100
-        crc_percentage = crc_count / total * 100
+            # Check if one phenotype dominates >97%, if so assign all cells to that phenotype
+            wt_percentage = wt_count / total * 100
+            crc_percentage = crc_count / total * 100
 
-        # if more than 97% of the cells are of one phenotype, assign all cells to that phenotype to avoid misclassification due to noise
-        if wt_percentage > 97:
-            old_df["phenotype"] = "wt"
-            wt_count = len(old_df)
-            crc_count = 0
-        elif crc_percentage > 97:
-            old_df["phenotype"] = "crc"
-            crc_count = len(old_df)
-            wt_count = 0
-        else:
-            old_df["phenotype"] = np.where(old_df[log_col] < cutoff, "crc", "wt")
+            # if more than 97% of the cells are of one phenotype, assign all cells to that phenotype to avoid misclassification due to noise
+            if wt_percentage > 97:
+                old_df["phenotype"] = "wt"
+                wt_count = len(old_df)
+                crc_count = 0
+            elif crc_percentage > 97:
+                old_df["phenotype"] = "crc"
+                crc_count = len(old_df)
+                wt_count = 0
+            else:
+                old_df["phenotype"] = np.where(old_df[log_col] < cutoff, "crc", "wt")
 
-        old_df = utils.compute_knn_features(old_df, k=5)
+            old_df = utils.compute_knn_features(old_df, k=5)
 
-        old_df.to_csv(
-            os.path.join(
-                input_directory, "properties", f"{file.split('.')[0]}_props.csv"
-            ),
-            index=False,
-        )
+            old_df.to_csv(
+                os.path.join(
+                    input_directory, "properties", f"{file.split('.')[0]}_props.csv"
+                ),
+                index=False,
+            )
 
-        results = {
-            "organoid": name,
-            "file": file,
-            "wt_count": wt_count,
-            "crc_count": crc_count,
-            "%wt": wt_count / total * 100,
-            "%crc": crc_count / total * 100,
-        }
-        summary_results.append(pd.DataFrame([results]))
+            results = {
+                "organoid": name,
+                "file": file,
+                "wt_count": wt_count,
+                "crc_count": crc_count,
+                "%wt": wt_count / total * 100,
+                "%crc": crc_count / total * 100,
+            }
+            summary_results.append(pd.DataFrame([results]))
 
-    if not is_fixed:
-        summary_results = pd.concat(summary_results, ignore_index=True)
-        summary_results["relative_wt"] = (
-            summary_results["wt_count"] / summary_results["wt_count"][0]
-        )
-        summary_results["relative_crc"] = (
-            summary_results["crc_count"] / summary_results["crc_count"][0]
-        )
+        if not is_fixed:
+            summary_results = pd.concat(summary_results, ignore_index=True)
+            summary_results["relative_wt"] = (
+                summary_results["wt_count"] / summary_results["wt_count"][0]
+            )
+            summary_results["relative_crc"] = (
+                summary_results["crc_count"] / summary_results["crc_count"][0]
+            )
 
-        # Save summary of the whole movie as a csv
-        summary_txt = os.path.join(input_directory, "summary_results_organoid.csv")
-        summary_results.to_csv(summary_txt, index=False)
+            # Save summary of the whole movie as a csv
+            summary_txt = os.path.join(input_directory, "summary_results_organoid.csv")
+            summary_results.to_csv(summary_txt, index=False)
 
-        # Generate plots and save these as a report
-        report = os.path.join(input_directory, "result_report.pdf")
-        utils.generate_report(
-            summary_results, time_interval=time_interval, output_path=report
+            # Generate plots and save these as a report
+            report = os.path.join(input_directory, "result_report.pdf")
+            utils.generate_report(
+                summary_results, time_interval=time_interval, output_path=report
+            )
+    except Exception as e:
+        print(
+            f"Ignore this message if you intended to only analyse segmentation and intensities without phenotype calling. Failed to generate a phenotype summary and report, likely because no WT and CRC channel are specified: {e}"
         )
 
     # Pad all segmentation mask frames of the movie
