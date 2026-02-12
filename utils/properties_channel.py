@@ -15,7 +15,7 @@ def properties_channel(mask, image, type=None):
     props_channel = pd.DataFrame(props_channel).rename(
         columns={
             "label": "label",
-            "mean_intensity": f"raw_{type}",
+            "mean_intensity": f"{type}_mean_intensity",
         }
     )
 

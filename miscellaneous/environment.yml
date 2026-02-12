@@ -1,10 +1,31 @@
-# This file contains a yml description of the environment that conda can make to run this python program
-
-name: organoid_segmenter_env
+name: organoid_segmenter
 channels:
-  - defaults
+  - pytorch
+  - nvidia
   - conda-forge
-dependencies:
-  - python=3.11
-  - pip
+  - defaults
 
+dependencies:
+  # Core Python
+  - python=3.10
+
+  # GPU stack (CUDA 11.8)
+  - pytorch
+  - torchvision
+  - pytorch-cuda=11.8
+
+  # Scientific stack
+  - scipy
+  - pandas
+  - tifffile
+
+  # UI framework
+  - pyside2
+
+  # Napari with PySide2 backend
+  - pip
+  - pip:
+      - "napari[pyside2]"
+      - cellpose
+      - imaris-ims-file-reader
+      - alive-progress

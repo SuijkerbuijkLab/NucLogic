@@ -8,7 +8,7 @@ def file_to_folder(input_directory):
     for file in os.listdir(input_directory):
         file_path = os.path.join(input_directory, file)
 
-        if os.path.isfile(file_path) and file.endswith((".tif", ".ims")):
+        if os.path.isfile(file_path) and file.endswith((".tif", ".tiff", ".ims")):
             # Remove the file extension to create the folder name
             folder_name = os.path.splitext(file)[0]
             new_folder_path = os.path.join(input_directory, folder_name)
