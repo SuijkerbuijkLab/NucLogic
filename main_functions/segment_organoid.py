@@ -24,7 +24,6 @@ def segment_organoid(
     cell_model,  # Model that is used to segment cells
     channel_types,
     channel_names,  # Names of the different channels
-    is_fixed=False,  # Is the data from fixed organoids (single timepoint) or live (multiple timepoints)
     breaking_threshold=2.5,  # Threshold for breaking cells in the stitch_3d function
 ):
     nuclei_channels = []
@@ -60,7 +59,13 @@ def segment_organoid(
         range(loaded_movie.shape[0]), title="Segmenting organoid"
     ):
         frame = loaded_movie[timepoint]
-        frame_nuclei = frame[:, nuclei_channels]
+        if len(nuclei_channels) == 2:
+            frame_nuclei = frame[:, nuclei_channels, :, :]
+            frame_nuclei = np.max(frame_nuclei, axis=1)
+            frame_nuclei_1 = frame[:, nuclei_channels[0], :, :]
+            frame_nuclei_2 = frame[:, nuclei_channels[1], :, :]
+        else:
+            frame_nuclei = frame[:, nuclei_channels]
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
         # stdout silenced to stop printing random stuff
@@ -70,12 +75,22 @@ def segment_organoid(
 
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
-        segmented_stack_stitched, organoid = utils.stitch_3d(
-            segmented_stack,
-            image1=frame_nuclei,
-            image_type_1="nuclei",
-            breaking_threshold=breaking_threshold,
-        )
+        if len(nuclei_channels) == 2:
+            segmented_stack_stitched, organoid = utils.stitch_3d(
+                segmented_stack,
+                image1=frame_nuclei_1,
+                image_type_1="nuclei_1",
+                image2=frame_nuclei_2,
+                image_type_2="nuclei_2",
+                breaking_threshold=breaking_threshold,
+            )
+        else:
+            segmented_stack_stitched, organoid = utils.stitch_3d(
+                segmented_stack,
+                image1=frame_nuclei,
+                image_type_1="nuclei",
+                breaking_threshold=breaking_threshold,
+            )
         sys.stdout = old_stdout  # reset old stdout
 
         segmented_movie.append(segmented_stack_stitched)
@@ -87,10 +102,12 @@ def segment_organoid(
 
         channel_dfs = {}  # Store channel dataframes during for loop
         for i, channel in enumerate(channel_names):
-            df_ch = utils.properties_channel(props, frame[:, i], f"{channel}_raw")
+            df_ch = utils.properties_channel(
+                segmented_stack_stitched, frame[:, i], f"{channel}_raw"
+            )
             offset_ch = utils.offset_image(frame[:, i], "median")
             df_ch_offset = utils.properties_channel(
-                props, offset_ch, f"{channel}_background_subtracted"
+                segmented_stack_stitched, offset_ch, f"{channel}_background_subtracted"
             )
             channel_dfs[channel] = pd.merge(df_ch, df_ch_offset, on="label")
 
@@ -105,6 +122,11 @@ def segment_organoid(
         properties.append(df_timepoint)
 
     segmented_movie = np.stack(segmented_movie, axis=0)
+    print(segmented_movie.shape)
+    segmented_movie = np.expand_dims(
+        segmented_movie, axis=2
+    )  # add channel dimension back for saving in tiff format as TZCXY
+    print(segmented_movie.shape)
 
     tifffile.imwrite(
         os.path.join(input_directory, f"{name}_segmented.tif"),

@@ -3,6 +3,7 @@ import sys
 import os
 from pathlib import Path
 from time import time
+import winreg
 
 
 parent_dir = Path(__file__).parent.parent
@@ -10,7 +11,7 @@ sys.path.insert(0, str(parent_dir))
 from help_functions.file_to_folder import file_to_folder
 
 from PySide2.QtCore import Qt, QThread, Signal
-from PySide2.QtGui import QIcon
+from PySide2.QtGui import QIcon, QPalette, QColor
 from PySide2.QtWidgets import (
     QApplication,
     QLabel,
@@ -30,6 +31,7 @@ from PySide2.QtWidgets import (
     QCheckBox,
     QSizePolicy,
 )
+from theme import set_theme
 
 
 class MainWindow(QMainWindow):
@@ -186,7 +188,6 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignTop)
         layout.setSpacing(30)
 
-        layout.addLayout(self._create_image_type_selection())
         layout.addLayout(self._create_channel_settings_menu())
         layout.addLayout(self._create_advanced_settings_layout())
 
@@ -233,15 +234,6 @@ class MainWindow(QMainWindow):
     def _toggle_advanced_settings(self, checked):
         """Toggle visibility of advanced settings"""
         self.advanced_settings_widget.setVisible(checked)
-
-    def _create_image_type_selection(self):
-        """Add dropdown or buttons for image type selection here"""
-        layout = QHBoxLayout()
-        layout.addWidget(QLabel("Select data type:"))
-        self.sample_type = QComboBox()
-        self.sample_type.addItems(["3D image", "4D timelapse"])
-        layout.addWidget(self.sample_type)
-        return layout
 
     def _create_channel_settings_menu(self):
         """Add UI elements for channel settings here"""
@@ -425,12 +417,6 @@ class MainWindow(QMainWindow):
             else:
                 return None  # No custom model selected
 
-    def get_is_fixed(self):
-        if self.sample_type.currentText() == "3D image":
-            return True
-        else:
-            return False
-
     def get_sample_path_list(self):
         """Get list of selected samples"""
         samples = self.get_selected_samples()
@@ -447,24 +433,25 @@ class MainWindow(QMainWindow):
         """Start segmentation in a separate thread"""
         self.progressbar.setVisible(True)
         self.progressbar.setValue(0)
-        self.run_segmentation_btn.setEnabled(False)  # Disable button while running
-        self.segmentation_summary_label.setVisible(False)  # Hide previous summary
+        self.run_segmentation_btn.setEnabled(False)
+        self.segmentation_summary_label.setVisible(False)
 
         sample_path_list = self.get_sample_path_list()
         model_path = self.get_model_path()
         channel_names, channel_types = self.get_channel_settings()
-        is_fixed = self.get_is_fixed()
         breaking_threshold = self.get_breaking_threshold()
         self.worker = SegmentationWorker(
             sample_path_list,
             model_path,
             channel_names,
             channel_types,
-            is_fixed,
             breaking_threshold,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
         self.worker.finished.connect(self.segmentation_finished)
+        self.worker.error_occurred.connect(
+            self.segmentation_error
+        )  # Connect error signal
         self.worker.start()
 
     def segmentation_finished(self, elapsed_time):
@@ -482,6 +469,14 @@ class MainWindow(QMainWindow):
         self.segmentation_summary_label.setText(summary_text)
         self.segmentation_summary_label.setVisible(True)
 
+    def segmentation_error(self, error_message):
+        """Called when an error occurs during segmentation"""
+        self.run_segmentation_btn.setEnabled(True)
+        self.progressbar.setVisible(False)
+
+        self.segmentation_summary_label.setText(f"Error: {error_message}")
+        self.segmentation_summary_label.setVisible(True)
+
     def _create_view_data_tab(self):
         widget = QWidget()
         return widget
@@ -494,6 +489,7 @@ class MainWindow(QMainWindow):
 class SegmentationWorker(QThread):
     progress_updated = Signal(int)
     finished = Signal(float)
+    error_occurred = Signal(str)  # Add error signal
 
     def __init__(
         self,
@@ -501,7 +497,6 @@ class SegmentationWorker(QThread):
         cell_model_path,
         channel_names,
         channel_types,
-        is_fixed,
         breaking_threshold,
     ):
         super().__init__()
@@ -509,36 +504,57 @@ class SegmentationWorker(QThread):
         self.cell_model_path = cell_model_path
         self.channel_names = channel_names
         self.channel_types = channel_types
-        self.is_fixed = is_fixed
         self.breaking_threshold = breaking_threshold
 
     def run(self):
-        from main_functions.segment_organoid import segment_organoid
-        from utils.load_model import load_model
+        try:
+            from main_functions.segment_organoid import segment_organoid
+            from utils.load_model import load_model
 
-        start_time = datetime.now()
-        loaded_cell_model = load_model(self.cell_model_path)
-        for i in self.sample_path_list:
-            segment_organoid(
-                i,
-                loaded_cell_model,
-                self.channel_types,
-                self.channel_names,
-                self.is_fixed,
-                self.breaking_threshold,
-            )
-            progress = int(
-                ((self.sample_path_list.index(i) + 1) / len(self.sample_path_list))
-                * 100
-            )
-            self.progress_updated.emit(progress)
+            start_time = datetime.now()
+            loaded_cell_model = load_model(self.cell_model_path)
+            for i in self.sample_path_list:
+                segment_organoid(
+                    i,
+                    loaded_cell_model,
+                    self.channel_types,
+                    self.channel_names,
+                    self.breaking_threshold,
+                )
+                progress = int(
+                    ((self.sample_path_list.index(i) + 1) / len(self.sample_path_list))
+                    * 100
+                )
+                self.progress_updated.emit(progress)
 
-        elapsed_time = (datetime.now() - start_time).total_seconds()
-        self.finished.emit(elapsed_time)
+            elapsed_time = (datetime.now() - start_time).total_seconds()
+            self.finished.emit(elapsed_time)
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()  # Print full traceback
+            self.error_occurred.emit(str(e))
+
+
+def get_windows_theme():
+    """Detect if Windows is in dark mode"""
+    try:
+        registry_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path)
+        value, regtype = winreg.QueryValueEx(registry_key, "AppsUseLightTheme")
+        winreg.CloseKey(registry_key)
+        return value == 0  # 0 = dark mode, 1 = light mode
+    except Exception as e:
+        print(f"Could not detect Windows theme: {e}")
+        return False  # Default to light mode
 
 
 if __name__ == "__main__":
     app = QApplication([])
+
+    if get_windows_theme():
+        set_theme(app, "dark")
+
     window = MainWindow()
     window.show()
-    app.exec()
+    app.exec_()

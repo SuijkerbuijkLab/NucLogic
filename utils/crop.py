@@ -4,7 +4,6 @@ import tifffile
 from skimage.measure import regionprops
 import pandas as pd
 import numpy as np
-import trackpy as tp
 from libpysal.weights import KNN
 from esda.moran import Moran
 from alive_progress import alive_bar
