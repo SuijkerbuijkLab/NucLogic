@@ -5,13 +5,13 @@ from pathlib import Path
 from time import time
 import winreg
 
-
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 from help_functions.file_to_folder import file_to_folder
 
+# Import PySide2 FIRST
 from PySide2.QtCore import Qt, QThread, Signal
-from PySide2.QtGui import QIcon, QPalette, QColor
+from PySide2.QtGui import QIcon, QFont
 from PySide2.QtWidgets import (
     QApplication,
     QLabel,
@@ -31,7 +31,7 @@ from PySide2.QtWidgets import (
     QCheckBox,
     QSizePolicy,
 )
-from theme import set_theme
+import qdarktheme
 
 
 class MainWindow(QMainWindow):
@@ -39,6 +39,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Nuclei Segmenter")
         self.resize(960, 540)
+        self.sample_list = None
+        self.view_data_sample_list = None  # Separate list for View Data tab
+        self.samples_data = []  # Data structure holding samples
         self._set_icon()
         self._setup_ui()
 
@@ -49,11 +52,19 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         tabs = QTabWidget()
-        tabs.addTab(self._create_load_data_tab(), "Load Data")
-        tabs.addTab(self._create_segment_tab(), "Segment")
-        tabs.addTab(self._create_view_data_tab(), "View Data")
-        tabs.addTab(self._create_export_data_tab(), "Export Data")
-        tabs.setStyleSheet("QTabBar::tab { font-size: 14px; padding: 5px 10px; }")
+        tabs.addTab(self._create_load_data_tab(), "  Load Data  ")
+        tabs.addTab(self._create_segment_tab(), "  Segment  ")
+
+        # Create view data tab
+        self.view_data_widget = QWidget()
+        self.view_data_layout = QVBoxLayout()
+        self.view_data_layout.setAlignment(Qt.AlignTop)
+        self.view_data_layout.setSpacing(30)
+        self.view_data_widget.setLayout(self.view_data_layout)
+        tabs.addTab(self.view_data_widget, "  View Data  ")
+
+        tabs.addTab(self._create_export_data_tab(), "  Export Data  ")
+        tabs.setStyleSheet("QTabBar::tab { padding: 10px 20px; }")
         self.setCentralWidget(tabs)
 
     def _create_load_data_tab(self):
@@ -82,7 +93,9 @@ class MainWindow(QMainWindow):
 
     def _create_path_layout(self):
         layout = QHBoxLayout()
-        self.path_text = QLabel("No path selected")
+        self.path_text = QLineEdit()
+        self.path_text.setReadOnly(True)
+        self.path_text.setPlaceholderText("No path selected")
         browse_button = QPushButton("Browse")
         browse_button.clicked.connect(self.browse_folder)
         layout.addWidget(self.path_text)
@@ -107,23 +120,61 @@ class MainWindow(QMainWindow):
     def update_file_info(self, dir_name):
         self._clear_layout(self.load_data_layout_2)
         self._clear_layout(self.load_data_layout_3)
+        self._clear_layout(self.view_data_layout)
 
         if not Path(dir_name).exists():
             return
 
-        # Get samples and image files
-        samples = self._get_samples(dir_name)
+        # Store samples in data structure
+        self.samples_data = self._get_samples(dir_name)
         image_files = self._get_image_files(dir_name)
 
         # Display samples count
-        self.load_data_layout_2.addWidget(QLabel(f"Found {len(samples)} samples"))
+        self.load_data_layout_2.addWidget(
+            QLabel(f"Found {len(self.samples_data)} samples")
+        )
 
         # Handle loose image files
         if image_files:
             self._add_loose_files_section(dir_name, image_files)
 
-        # Add sample selection
-        self._add_sample_selection(samples)
+        # Create list widgets (only first time)
+        if self.sample_list is None:
+            self._create_sample_list_widgets()
+
+        # Populate both lists with current samples data
+        self._update_sample_lists()
+
+    def _create_sample_list_widgets(self):
+        """Create the list widgets for Load Data and View Data tabs (first time only)"""
+        # Load Data tab list
+        self.sample_list = self._create_single_sample_list()
+        self.load_data_layout_3.addWidget(self.sample_list)
+
+    def _create_single_sample_list(self):
+        """Create a single sample selection widget"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(5)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        select_all_btn = QPushButton("Select all")
+        deselect_all_btn = QPushButton("Deselect all")
+        select_all_btn.clicked.connect(self.select_all_samples)
+        deselect_all_btn.clicked.connect(self.deselect_all_samples)
+        button_layout.addWidget(select_all_btn)
+        button_layout.addWidget(deselect_all_btn)
+        layout.addLayout(button_layout)
+
+        # List widget
+        sample_list = QListWidget()
+        sample_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        sample_list.itemSelectionChanged.connect(self._update_segment_label)
+        layout.addWidget(sample_list)
+
+        widget.setLayout(layout)
+        return widget
 
     def _get_samples(self, dir_name):
         """Get list of subdirectories (samples)"""
@@ -154,33 +205,60 @@ class MainWindow(QMainWindow):
         file_to_folder(dir_name)
         self.update_file_info(dir_name)
 
-    def _add_sample_selection(self, samples):
-        """Add sample selection UI"""
-        # Buttons
-        button_layout = QHBoxLayout()
-        select_all_btn = QPushButton("Select all")
-        deselect_all_btn = QPushButton("Deselect all")
-        select_all_btn.clicked.connect(self.select_all_samples)
-        deselect_all_btn.clicked.connect(self.deselect_all_samples)
-        button_layout.addWidget(select_all_btn)
-        button_layout.addWidget(deselect_all_btn)
-        self.load_data_layout_3.addLayout(button_layout)
+    def _update_sample_lists(self):
+        """Update both sample lists with data from self.samples_data"""
+        # Get the list widget from Load Data tab
+        load_data_list = self._get_list_widget(self.sample_list)
+        load_data_list.clear()
+        load_data_list.addItems(self.samples_data)
 
-        # List widget
-        self.sample_list = QListWidget()
-        self.sample_list.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.sample_list.addItems(samples)
-        self.load_data_layout_3.addWidget(self.sample_list)
+        # Create/update View Data tab list (only first time)
+        if self.view_data_sample_list is None:
+            self._setup_view_data_widgets()
+
+        # Populate View Data list
+        view_data_list = self._get_list_widget(self.view_data_sample_list)
+        view_data_list.clear()
+        view_data_list.addItems(self.samples_data)
+
+        # Sync selections between lists
+        self._sync_selections()
+
+    def _get_list_widget(self, parent_widget):
+        """Extract the QListWidget from a parent widget"""
+        layout = parent_widget.layout()
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if isinstance(widget, QListWidget):
+                return widget
+        return None
+
+    def _sync_selections(self):
+        """Keep selections in sync between both lists"""
+        load_data_list = self._get_list_widget(self.sample_list)
+        view_data_list = self._get_list_widget(self.view_data_sample_list)
+
+        # Clear view_data selections and set them to match load_data
+        view_data_list.blockSignals(True)
+        view_data_list.clearSelection()
+        for item in load_data_list.selectedItems():
+            matching_items = view_data_list.findItems(item.text(), Qt.MatchExactly)
+            if matching_items:
+                matching_items[0].setSelected(True)
+        view_data_list.blockSignals(False)
 
     def select_all_samples(self):
-        self.sample_list.selectAll()
+        self.sample_list.findChild(QListWidget).selectAll()
+        self._sync_selections()
 
     def deselect_all_samples(self):
-        self.sample_list.clearSelection()
+        self.sample_list.findChild(QListWidget).clearSelection()
+        self._sync_selections()
 
     def get_selected_samples(self):
         """Get list of selected sample names"""
-        return [item.text() for item in self.sample_list.selectedItems()]
+        list_widget = self._get_list_widget(self.sample_list)
+        return [item.text() for item in list_widget.selectedItems()]
 
     def _create_segment_tab(self):
         widget = QWidget()
@@ -190,15 +268,27 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(self._create_channel_settings_menu())
         layout.addLayout(self._create_advanced_settings_layout())
-
-        self.run_segmentation_btn = QPushButton("Run segmentation")
-        self.run_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.run_segmentation_btn.clicked.connect(self.start_segmentation)
-        layout.addWidget(self.run_segmentation_btn)
+        layout.addLayout(self._create_run_segmentation_layout())
         layout.addLayout(self._create_progress_bar())
 
         widget.setLayout(layout)
         return widget
+
+    def _create_run_segmentation_layout(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(5)
+        self.segment_tab_label = QLabel("Selected 0 samples for segmentation")
+        layout.addWidget(self.segment_tab_label)
+        self.run_segmentation_btn = QPushButton("Run segmentation")
+        self.run_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.run_segmentation_btn.clicked.connect(self.start_segmentation)
+        layout.addWidget(self.run_segmentation_btn)
+        return layout
+
+    def _update_segment_label(self):
+        """Update the segment tab label with selected samples count"""
+        count = len(self.get_selected_samples())
+        self.segment_tab_label.setText(f"Selected {count} samples for segmentation")
 
     def _create_progress_bar(self):
         layout = QVBoxLayout()
@@ -463,9 +553,7 @@ class MainWindow(QMainWindow):
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
 
-        summary_text = (
-            f"Segmentation completed at {finish_time} (took {minutes}m {seconds}s)"
-        )
+        summary_text = f"Segmented {len(self.get_selected_samples())} samples.\nSegmentation completed at {finish_time} (took {minutes}m {seconds}s)"
         self.segmentation_summary_label.setText(summary_text)
         self.segmentation_summary_label.setVisible(True)
 
@@ -477,12 +565,71 @@ class MainWindow(QMainWindow):
         self.segmentation_summary_label.setText(f"Error: {error_message}")
         self.segmentation_summary_label.setVisible(True)
 
-    def _create_view_data_tab(self):
-        widget = QWidget()
-        return widget
+    def _setup_view_data_widgets(self):
+        """Setup all widgets for View Data tab"""
+        # Sample selection section
+        sample_section = QVBoxLayout()
+        sample_section.setSpacing(5)
+        sample_section.addWidget(QLabel("Select samples:"))
+        self.view_data_sample_list = self._create_single_sample_list()
+        sample_section.addWidget(self.view_data_sample_list)
+        self.view_data_layout.addLayout(sample_section)
+
+        # Analysis Options section
+        analysis_section = QVBoxLayout()
+        analysis_section.setSpacing(5)
+        analysis_section.addWidget(QLabel("Analysis Options:"))
+
+        # Channel selector
+        channel_layout = QHBoxLayout()
+        channel_layout.setSpacing(10)
+        channel_layout.addWidget(QLabel("Channel:"))
+        self.channel_selector = QComboBox()
+        self.channel_selector.addItems(["Channel 1", "Channel 2", "Channel 3"])
+        channel_layout.addWidget(self.channel_selector)
+        analysis_section.addLayout(channel_layout)
+
+        self.view_data_layout.addLayout(analysis_section)
+
+        # Buttons section
+        button_section = QVBoxLayout()
+        button_section.setSpacing(5)
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        view_button = QPushButton("View Selected")
+        export_button = QPushButton("Export Images")
+        view_button.clicked.connect(self.view_selected_samples)
+        export_button.clicked.connect(self.export_images)
+        button_layout.addWidget(view_button)
+        button_layout.addWidget(export_button)
+        button_section.addLayout(button_layout)
+        self.view_data_layout.addLayout(button_section)
+
+        self.view_data_layout.addStretch()
+
+    def view_selected_samples(self):
+        """Handle view button"""
+        selected = self.get_selected_samples()
+        overlay = self.overlay_checkbox.isChecked()
+        channel = self.channel_selector.currentText()
+        print(f"Viewing {selected} with {channel}, overlay={overlay}")
+
+    def export_images(self):
+        """Handle export button"""
+        selected = self.get_selected_samples()
+        print(f"Exporting {selected}")
 
     def _create_export_data_tab(self):
         widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setAlignment(Qt.AlignTop)
+        layout.setSpacing(30)
+
+        export_button = QPushButton("Export all data to CSV")
+        # export_button.clicked.connect(self.export_data)
+        layout.addWidget(export_button)
+
+        widget.setLayout(layout)
         return widget
 
 
@@ -549,11 +696,47 @@ def get_windows_theme():
         return False  # Default to light mode
 
 
+def get_additional_qss(size=12):
+    """Generate stylesheet with customizable font size"""
+    additional_qss = f"""
+        QLabel {{
+            font-size: {size}pt;
+        }}
+        QPushButton {{
+            font-size: {size}pt;
+        }}
+        QLineEdit {{
+            font-size: {size}pt;
+        }}
+        QComboBox {{
+            font-size: {size}pt;
+        }}
+        QCheckBox {{
+            font-size: {size}pt;
+        }}
+        QListWidget {{
+            font-size: {size}pt;
+        }}
+        QProgressBar {{
+            font-size: {size}pt;
+        }}
+        QTabBar {{
+            font-size: {size}pt;
+        }}
+    """
+    return additional_qss
+
+
 if __name__ == "__main__":
     app = QApplication([])
 
+    # Set desired font size here
+    additional_qss = get_additional_qss(size=10)
+
     if get_windows_theme():
-        set_theme(app, "dark")
+        qdarktheme.setup_theme(additional_qss=additional_qss)
+    else:
+        qdarktheme.setup_theme(theme="light", additional_qss=additional_qss)
 
     window = MainWindow()
     window.show()
