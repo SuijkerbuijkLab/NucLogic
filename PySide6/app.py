@@ -85,9 +85,8 @@ class MainWindow(QMainWindow):
         # Sample selection section
         self.load_data_layout_3 = QVBoxLayout()
         self.load_data_layout_3.setSpacing(5)
-        layout.addLayout(self.load_data_layout_3)
+        layout.addLayout(self.load_data_layout_3, 1)
 
-        layout.addStretch()
         widget.setLayout(layout)
         return widget
 
