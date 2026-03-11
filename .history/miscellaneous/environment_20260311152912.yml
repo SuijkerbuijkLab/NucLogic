@@ -15,6 +15,9 @@ dependencies:
   - scikit-learn
   - scikit-image
 
+  # Image processing
+  - pillow
+
   # UI framework
   - pyside2
 

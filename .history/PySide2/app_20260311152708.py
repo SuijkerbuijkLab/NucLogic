@@ -11,7 +11,7 @@ matplotlib.use("Qt5Agg")
 
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
-from utils.file_to_folder import file_to_folder
+from help_functions.file_to_folder import file_to_folder
 
 # Import PySide2 FIRST
 from PySide2.QtCore import Qt, QThread, Signal

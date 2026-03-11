@@ -1,4 +1,4 @@
-name: NucLogic
+name: nuclei_segmenter
 channels:
   - conda-forge
   - defaults
@@ -14,6 +14,9 @@ dependencies:
   - tifffile
   - scikit-learn
   - scikit-image
+
+  # Image processing
+  - pillow
 
   # UI framework
   - pyside2
@@ -32,5 +35,11 @@ dependencies:
       - seaborn
       - tables
       - qdarktheme
+      # Image processing
       - opencv-python-headless
+      - czifile
+      # Imaris file writing
       - PyImarisWriter
+      # SAM2 organoid cropping (install from source if this fails):
+      # pip install git+https://github.com/facebookresearch/sam2.git
+      - sam2

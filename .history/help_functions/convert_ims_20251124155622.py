@@ -7,8 +7,6 @@ from utils import dummy_callback
 import imaris_ims_file_reader.ims as ims
 import numpy as np
 import tifffile
-import hdf5plugin
-import h5py
 
 file = r"C:\Users\6331823\Local SSD\Maria\250620_Imaging_20x_F08\250620_Imaging_20x_F08.ims"
 new_movie = tifffile.imread(

@@ -7,11 +7,12 @@ import winreg
 
 import tifffile
 import matplotlib
+
 matplotlib.use("Qt5Agg")
 
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
-from help_functions.file_to_folder import file_to_folder
+from utils.file_to_folder import file_to_folder
 
 # Import PySide2 FIRST
 from PySide2.QtCore import Qt, QThread, Signal
@@ -533,7 +534,6 @@ class MainWindow(QMainWindow):
             del self.channel_widgets[self.channel_count]
             self.channel_count -= 1
             self._update_phenotype_combos()
-
 
     def _create_model_settings(self):
         model_setting_layout = QHBoxLayout()
@@ -1084,7 +1084,7 @@ class MainWindow(QMainWindow):
         legend = ax.get_legend()
         if legend:
             legend.set_frame_on(False)
-            legend.remove() 
+            legend.remove()
         ax.spines[["right", "top"]].set_visible(False)
         ax.set_xlabel("Frame")
         ax.set_ylabel("Cell count")
