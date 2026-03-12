@@ -710,6 +710,7 @@ class MainWindow(QMainWindow):
             phenotype_2,
             cutoff_method,
             raw_or_background_subtracted,
+            phenotype_calling_only,
         ) = self.get_phenotype_calling_settings()
         do_crop_sample = self.do_crop_sample.isChecked()
         save_crop_as = self.save_crop_as.currentText()
@@ -722,6 +723,7 @@ class MainWindow(QMainWindow):
             channel_types,
             breaking_threshold,
             do_phenotype_calling,
+            phenotype_calling_only,
             phenotype_1,
             phenotype_2,
             cutoff_method,
@@ -1200,7 +1202,6 @@ class ViewerWorker(QThread):
     def run(self):
         try:
             import numpy as np
-            from utils import pad_to_shape
             from imaris_ims_file_reader.ims import ims
 
             samples_data = []

@@ -1,4 +1,4 @@
-from utils import calculate_cutoff
+from utils.calculate_cutoff import calculate_cutoff
 import os
 import pandas as pd
 import numpy as np

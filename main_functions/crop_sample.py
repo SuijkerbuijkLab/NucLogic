@@ -1,14 +1,12 @@
 import os
 import tifffile
 from imaris_ims_file_reader import ims
-from utils import (
-    find_input_file,
-    get_time_interval,
-    max_project,
-    crop_fixed,
-    crop,
-    save_as_ims,
-)
+from utils.find_input_file import find_input_file
+from utils.get_time_interval import get_time_interval
+from utils.max_project import max_project
+from utils.crop_fixed import crop_fixed
+from utils.crop import crop
+from utils.save_as_ims import save_as_ims
 import numpy as np
 
 

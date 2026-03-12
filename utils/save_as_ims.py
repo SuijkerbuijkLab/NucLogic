@@ -2,7 +2,7 @@ from PyImarisWriter import PyImarisWriter as PW
 from alive_progress import alive_bar
 from matplotlib.colors import to_rgba
 from datetime import datetime
-from utils import dummy_callback
+from utils.dummy_callback import dummy_callback
 import numpy as np
 
 
