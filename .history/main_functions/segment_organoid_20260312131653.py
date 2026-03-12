@@ -100,9 +100,7 @@ def segment_organoid(
             frame_nuclei_1 = frame[nuclei_channels[0]]
             frame_nuclei_2 = frame[nuclei_channels[1]]
         else:
-            frame_nuclei = frame[
-                nuclei_channels[0]
-            ]  # (Z, Y, X) — avoid extra leading dim
+            frame_nuclei = frame[nuclei_channels[0]]  # (Z, Y, X) — avoid extra leading dim
         # print(f"frame shape {frame.shape}")
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
@@ -133,7 +131,7 @@ def segment_organoid(
         sys.stdout = old_stdout  # reset old stdout
 
         print(
-            f"Found {len(np.unique(segmented_stack_stitched)) - 1} cells at timepoint {timepoint}"
+            f"Found {len(np.unique(segmented_stack_stitched))} cells at timepoint {timepoint}"
         )
 
         segmented_movie.append(segmented_stack_stitched)

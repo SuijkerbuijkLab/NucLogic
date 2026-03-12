@@ -23,6 +23,7 @@ def crop(
     model,
     nuclei=2,
     name="projXY_tracked",
+    dual_nuclei=False,
 ):
 
     # Convert movie to 8 bit for meta SAM
@@ -93,12 +94,7 @@ def crop(
             # Get the frame of the movie — always max-project over nuclei channels (handles 1 or 2)
             nuclei_list = nuclei if isinstance(nuclei, list) else [nuclei]
             ref = np.max(
-                np.stack(
-                    [
-                        movie[frame, ch, :, row_min:row_max, col_min:col_max]
-                        for ch in nuclei_list
-                    ]
-                ),
+                np.stack([movie[frame, ch, :, row_min:row_max, col_min:col_max] for ch in nuclei_list]),
                 axis=0,
             )
 

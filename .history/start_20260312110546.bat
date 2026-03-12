@@ -46,7 +46,7 @@ IF NOT EXIST "%ENV_PATH%" (
     call conda env create --prefix "%ENV_PATH%" --file "%ENV_YML%"
     call conda activate "%ENV_PATH%"
     echo Installing PyTorch with CUDA 12.8 support...
-    call pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+    call pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
     echo Installing cellpose...
     call pip install cellpose
     echo Environment setup complete.
@@ -61,26 +61,15 @@ if not exist "C:\repos\" (
     mkdir "C:\repos"
 )
 
-REM Step 3: Clone sam2 if not present, then install if sam2 or its dependencies are missing
+REM Step 3: Clone sam2 if not present, then always ensure it is installed correctly
 IF NOT EXIST "%SAM2%" (
     echo Cloning sam2...
     git clone https://github.com/facebookresearch/sam2.git "%SAM2%"
 )
-python -m pip show SAM-2 >nul 2>&1
-set SAM2_INSTALLED=%ERRORLEVEL%
-python -m pip show hydra-core >nul 2>&1
-set HYDRA_INSTALLED=%ERRORLEVEL%
-set NEED_INSTALL=0
-IF %SAM2_INSTALLED% NEQ 0 set NEED_INSTALL=1
-IF %HYDRA_INSTALLED% NEQ 0 set NEED_INSTALL=1
-IF %NEED_INSTALL%==1 (
-    echo sam2 or dependencies not fully installed. Installing...
-    cd /d "%SAM2%"
-    call pip install -e .
-    cd /d "%SCRIPT_DIR%"
-) ELSE (
-    echo sam2 already installed. Skipping.
-)
+echo Installing/verifying sam2 and its dependencies...
+cd /d "%SAM2%"
+call pip install -e .
+cd /d "%SCRIPT_DIR%"
 
 REM Step 4: Change to project folder
 cd /d "%SCRIPT_DIR%"

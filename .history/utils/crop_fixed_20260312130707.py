@@ -19,6 +19,7 @@ def crop_fixed(
     nuclei=2,
     name="projXY_tracked",
     manual=False,
+    dual_nuclei=False,
 ):
     original_projXY = proj_XY.copy()
 

@@ -18,6 +18,7 @@ def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
     for i, channel_type in enumerate(channel_types):
         if "nuclei" in channel_type.lower():
             nuclei_channels.append(i)
+    dual_nuclei = len(nuclei_channels) == 2
 
     # Find the biggest existing IMS or Tiff file in this folder and use it as the input
     input_file = find_input_file(input_directory=input_directory)
@@ -66,6 +67,7 @@ def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
             input_file=input_file,
             nuclei=nuclei_channels,
             name=name,
+            dual_nuclei=dual_nuclei,
         )
         cropped_movie = np.expand_dims(
             cropped_movie, axis=0
@@ -78,6 +80,7 @@ def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
             model=organoid_model,
             nuclei=nuclei_channels,
             name=name,
+            dual_nuclei=dual_nuclei,
         )
 
     if save_as == ".ims":

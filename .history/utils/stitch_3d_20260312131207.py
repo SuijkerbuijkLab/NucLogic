@@ -62,20 +62,16 @@ def get_cell_properties_2d(image):
 
 
 def properties_channel(organoid, mask, image, channel_type=None):
-    try:  # SCIkit changed the name of this property at some point, so we try both just in case
+    try:
         props_channel = regionprops_table(
             mask, intensity_image=image, properties=["label", "intensity_mean"]
         )
-        intensity_dict = dict(
-            zip(props_channel["label"], props_channel["intensity_mean"])
-        )
+        intensity_dict = dict(zip(props_channel["label"], props_channel["intensity_mean"]))
     except KeyError:
         props_channel = regionprops_table(
             mask, intensity_image=image, properties=["label", "mean_intensity"]
         )
-        intensity_dict = dict(
-            zip(props_channel["label"], props_channel["mean_intensity"])
-        )
+        intensity_dict = dict(zip(props_channel["label"], props_channel["mean_intensity"]))
 
     for cell in organoid:
         attr_name = f"intensity_{channel_type}" if channel_type else "intensity"

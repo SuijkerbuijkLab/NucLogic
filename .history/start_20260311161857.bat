@@ -45,11 +45,9 @@ IF NOT EXIST "%ENV_PATH%" (
     echo Environment not found. Creating it now... This might take a few minutes
     call conda env create --prefix "%ENV_PATH%" --file "%ENV_YML%"
     call conda activate "%ENV_PATH%"
-    echo Installing PyTorch with CUDA 12.8 support...
-    call pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-    echo Installing cellpose...
-    call pip install cellpose
-    echo Environment setup complete.
+    echo Installing PyTorch with CUDA support...
+    call pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    echo activated environment
 ) ELSE (
     echo Environment already exists. Starting now...
     echo Starting environment "%ENV_PATH%"
@@ -61,32 +59,20 @@ if not exist "C:\repos\" (
     mkdir "C:\repos"
 )
 
-REM Step 3: Clone sam2 if not present, then install if sam2 or its dependencies are missing
+REM Step 3: Clone and install sam2 in env if not already installed
+echo going to check if sam2 is installed
 IF NOT EXIST "%SAM2%" (
-    echo Cloning sam2...
+    echo Cloning and installing sam2 into env...
     git clone https://github.com/facebookresearch/sam2.git "%SAM2%"
-)
-python -m pip show SAM-2 >nul 2>&1
-set SAM2_INSTALLED=%ERRORLEVEL%
-python -m pip show hydra-core >nul 2>&1
-set HYDRA_INSTALLED=%ERRORLEVEL%
-set NEED_INSTALL=0
-IF %SAM2_INSTALLED% NEQ 0 set NEED_INSTALL=1
-IF %HYDRA_INSTALLED% NEQ 0 set NEED_INSTALL=1
-IF %NEED_INSTALL%==1 (
-    echo sam2 or dependencies not fully installed. Installing...
     cd /d "%SAM2%"
     call pip install -e .
     cd /d "%SCRIPT_DIR%"
 ) ELSE (
-    echo sam2 already installed. Skipping.
+    echo sam2 already exists in env. Skipping installation.
 )
 
 REM Step 4: Change to project folder
 cd /d "%SCRIPT_DIR%"
-
-REM Suppress OpenMP conflict between numpy and torch bundled runtimes
-set KMP_DUPLICATE_LIB_OK=TRUE
 
 REM Step 5: Run the app
 echo Starting NucLogic

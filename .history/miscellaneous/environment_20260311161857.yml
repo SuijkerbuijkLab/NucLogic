@@ -22,6 +22,7 @@ dependencies:
   - pip
   - pip:
       - "napari[pyside2]"
+      - cellpose
       - imaris-ims-file-reader
       - alive-progress
       - libpysal
@@ -29,6 +30,6 @@ dependencies:
       - matplotlib
       - seaborn
       - tables
-      - pyqtdarktheme
+      - qdarktheme
       - opencv-python-headless
       - PyImarisWriter

@@ -23,12 +23,17 @@ def crop(
     model,
     nuclei=2,
     name="projXY_tracked",
+    dual_nuclei=False,
 ):
 
     # Convert movie to 8 bit for meta SAM
-    # nuclei may be a list (single or dual); always max-project over channel axis -> (T, H, W)
-    nuclei_list = nuclei if isinstance(nuclei, list) else [nuclei]
-    proj_XY_nuclei = np.max(proj_XY[:, nuclei_list, :, :], axis=1)
+    if not dual_nuclei:
+        proj_XY_nuclei = proj_XY[:, nuclei, :, :]
+    else:
+        proj_XY_nuclei = proj_XY[:, nuclei, :, :]
+        proj_XY_nuclei = np.max(
+            proj_XY_nuclei, axis=1
+        )  # conbine both nuclei channels for cropping
     proj_XY_8bit = ((proj_XY_nuclei / proj_XY_nuclei.max()) * 255).astype(np.uint8)
 
     all_masks = segment_organoid(proj_XY_8bit, model)
@@ -90,17 +95,17 @@ def crop(
                     np.max(coordsXY[1]) + 1,
                 )
 
-            # Get the frame of the movie — always max-project over nuclei channels (handles 1 or 2)
-            nuclei_list = nuclei if isinstance(nuclei, list) else [nuclei]
-            ref = np.max(
-                np.stack(
+            # Get the frame of the movie
+            if not dual_nuclei:
+                ref = movie[frame, nuclei, :, row_min:row_max, col_min:col_max]
+            else:
+                ref = np.stack(
                     [
                         movie[frame, ch, :, row_min:row_max, col_min:col_max]
-                        for ch in nuclei_list
+                        for ch in nuclei
                     ]
-                ),
-                axis=0,
-            )
+                )
+                ref = np.max(ref, axis=0)  # combine both nuclei channels for cropping
 
             # Get a bounding box cropped version of the organoid
             ref_crop = maskXY[row_min:row_max, col_min:col_max]
@@ -259,6 +264,7 @@ def segment_organoid(proj_XY_8bit, model):
     # Itterate over movie frames
     for i, frame in enumerate(proj_XY_8bit):
         # Convert image to RGB grayscale image
+        frame = np.squeeze(frame)  # remove any length-1 dimensions (e.g. (1, H, W) -> (H, W))
         if frame.ndim == 2:
             frame = np.stack([frame] * 3, axis=-1)
 

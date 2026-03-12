@@ -133,7 +133,7 @@ def segment_organoid(
         sys.stdout = old_stdout  # reset old stdout
 
         print(
-            f"Found {len(np.unique(segmented_stack_stitched)) - 1} cells at timepoint {timepoint}"
+            f"Found {len(np.unique(segmented_stack_stitched))} cells at timepoint {timepoint}"
         )
 
         segmented_movie.append(segmented_stack_stitched)

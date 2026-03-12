@@ -23,6 +23,7 @@ def crop(
     model,
     nuclei=2,
     name="projXY_tracked",
+    dual_nuclei=False,
 ):
 
     # Convert movie to 8 bit for meta SAM
@@ -90,17 +91,17 @@ def crop(
                     np.max(coordsXY[1]) + 1,
                 )
 
-            # Get the frame of the movie — always max-project over nuclei channels (handles 1 or 2)
-            nuclei_list = nuclei if isinstance(nuclei, list) else [nuclei]
-            ref = np.max(
-                np.stack(
+            # Get the frame of the movie
+            if not dual_nuclei:
+                ref = movie[frame, nuclei, :, row_min:row_max, col_min:col_max]
+            else:
+                ref = np.stack(
                     [
                         movie[frame, ch, :, row_min:row_max, col_min:col_max]
-                        for ch in nuclei_list
+                        for ch in nuclei
                     ]
-                ),
-                axis=0,
-            )
+                )
+                ref = np.max(ref, axis=0)  # combine both nuclei channels for cropping
 
             # Get a bounding box cropped version of the organoid
             ref_crop = maskXY[row_min:row_max, col_min:col_max]

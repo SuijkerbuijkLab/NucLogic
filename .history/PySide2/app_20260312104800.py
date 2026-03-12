@@ -1,9 +1,15 @@
 from datetime import datetime
 import sys
 import os
-import torch
+import threading
 from pathlib import Path
 import winreg
+
+# Pre-load torch on a background thread to avoid DLL conflicts with Qt/matplotlib
+# while keeping startup fast. By the time the user runs segmentation it'll be ready.
+def _preload_torch():
+    import torch  # noqa: F401
+threading.Thread(target=_preload_torch, daemon=True).start()
 
 import tifffile
 import matplotlib
@@ -323,8 +329,8 @@ class MainWindow(QMainWindow):
         layout2.addWidget(QLabel("Save cropped files as:"))
         self.save_crop_as = QComboBox()
         self.save_crop_as.addItems([".ims", ".tif"])
-        layout2.addWidget(self.save_crop_as)
         layout2.addStretch()  # Push everything to the left
+        layout2.addWidget(self.save_crop_as)
         layout.addLayout(layout2)
 
         return layout
@@ -364,11 +370,6 @@ class MainWindow(QMainWindow):
         )
         # self.do_phenotype_calling_checkbox.setChecked(False)
         layout.addWidget(self.do_phenotype_calling_checkbox)
-
-        self.phenotype_calling_only_checkbox = QCheckBox(
-            "Only add extra phenotype/cell-type calling data, skipping cropping & segmentation (only usefull for already segmented samples)"
-        )
-        layout.addWidget(self.phenotype_calling_only_checkbox)
 
         layout2 = QHBoxLayout()
         layout2.addWidget(QLabel("Calculating phenotype/cell-type based on"))
@@ -626,15 +627,13 @@ class MainWindow(QMainWindow):
 
     def _create_save_individual_files(self):
         layout = QVBoxLayout()
-        self.save_frames_checkbox = QCheckBox(
-            "Save individual frames per timepoint (optional)"
-        )
-        self.save_frames_checkbox.setChecked(False)
+        self.save_frames_checkbox = QCheckBox("Save individual frames")
+        self.save_frames_checkbox.setChecked(True)
         layout.addWidget(self.save_frames_checkbox)
         self.save_segmentation_checkbox = QCheckBox(
-            "Save individual segmentation masks per timepoint (optional)"
+            "Save individual segmentation masks"
         )
-        self.save_segmentation_checkbox.setChecked(False)
+        self.save_segmentation_checkbox.setChecked(True)
         layout.addWidget(self.save_segmentation_checkbox)
         return layout
 
@@ -683,14 +682,12 @@ class MainWindow(QMainWindow):
         channel_2 = self.phenotype_2.currentText()
         cutoff_method = self.calculate_cutoff.currentText()
         raw_or_background_subtracted = self.raw_or_background_subtracted.currentText()
-        phenotype_calling_only = self.phenotype_calling_only_checkbox.isChecked()
         return (
             do_calling,
             channel_1,
             channel_2,
             cutoff_method,
             raw_or_background_subtracted,
-            phenotype_calling_only,
         )
 
     def start_segmentation(self):
@@ -1305,7 +1302,6 @@ class SegmentationWorker(QThread):
         channel_types,
         breaking_threshold,
         do_phenotype_calling,
-        phenotype_calling_only,
         phenotype_1,
         phenotype_2,
         cutoff_method,
@@ -1322,7 +1318,6 @@ class SegmentationWorker(QThread):
         self.channel_types = channel_types
         self.breaking_threshold = breaking_threshold
         self.do_phenotype_calling = do_phenotype_calling
-        self.phenotype_calling_only = phenotype_calling_only
         self.phenotype_1 = phenotype_1
         self.phenotype_2 = phenotype_2
         self.cutoff_method = cutoff_method
@@ -1354,24 +1349,21 @@ class SegmentationWorker(QThread):
                 )
 
             for idx, i in enumerate(self.sample_path_list):
-                if not self.phenotype_calling_only:
-                    if self.do_crop_sample:
-                        crop_sample(
-                            i,
-                            self.channel_types,
-                            organoid_model,
-                            save_as=self.save_crop_as,
-                        )
-                    segment_organoid(
-                        i,
-                        loaded_cell_model,
-                        self.channel_types,
-                        self.channel_names,
-                        self.breaking_threshold,
-                        self.do_crop_sample,
-                        save_frames=self.save_frames,
-                        save_segmentation=self.save_segmentation,
+                if self.do_crop_sample:
+                    crop_sample(
+                        i, self.channel_types, organoid_model, save_as=self.save_crop_as
                     )
+                segment_organoid(
+                    i,
+                    loaded_cell_model,
+                    self.channel_types,
+                    self.channel_names,
+                    self.breaking_threshold,
+                    self.do_crop_sample,
+                    save_frames=self.save_frames,
+                    save_segmentation=self.save_segmentation,
+                )
+                print(self.do_phenotype_calling)
                 if self.do_phenotype_calling:
                     print("Calculating phenotypes...")
                     calculate_phenotypes(
