@@ -370,6 +370,11 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.phenotype_calling_only_checkbox)
 
+        self.create_split_phenotype_mask = QCheckBox(
+            "Create an additional segmentation mask file that splits the called phenotypes/cell-types into different channels"
+        )
+        layout.addWidget(self.create_split_phenotype_mask)
+
         layout2 = QHBoxLayout()
         layout2.addWidget(QLabel("Calculating phenotype/cell-type based on"))
         self.phenotype_1 = QComboBox()
@@ -684,6 +689,7 @@ class MainWindow(QMainWindow):
         cutoff_method = self.calculate_cutoff.currentText()
         raw_or_background_subtracted = self.raw_or_background_subtracted.currentText()
         phenotype_calling_only = self.phenotype_calling_only_checkbox.isChecked()
+        create_split_phenotype_mask = self.create_split_phenotype_mask.isChecked()
         return (
             do_calling,
             channel_1,
@@ -691,6 +697,7 @@ class MainWindow(QMainWindow):
             cutoff_method,
             raw_or_background_subtracted,
             phenotype_calling_only,
+            create_split_phenotype_mask,
         )
 
     def start_segmentation(self):
@@ -711,6 +718,7 @@ class MainWindow(QMainWindow):
             cutoff_method,
             raw_or_background_subtracted,
             phenotype_calling_only,
+            create_split_phenotype_mask,
         ) = self.get_phenotype_calling_settings()
         do_crop_sample = self.do_crop_sample.isChecked()
         save_crop_as = self.save_crop_as.currentText()
@@ -724,6 +732,7 @@ class MainWindow(QMainWindow):
             breaking_threshold,
             do_phenotype_calling,
             phenotype_calling_only,
+            create_split_phenotype_mask,
             phenotype_1,
             phenotype_2,
             cutoff_method,
@@ -1307,6 +1316,7 @@ class SegmentationWorker(QThread):
         breaking_threshold,
         do_phenotype_calling,
         phenotype_calling_only,
+        create_split_phenotype_mask,
         phenotype_1,
         phenotype_2,
         cutoff_method,
@@ -1324,6 +1334,7 @@ class SegmentationWorker(QThread):
         self.breaking_threshold = breaking_threshold
         self.do_phenotype_calling = do_phenotype_calling
         self.phenotype_calling_only = phenotype_calling_only
+        self.create_split_phenotype_mask = create_split_phenotype_mask
         self.phenotype_1 = phenotype_1
         self.phenotype_2 = phenotype_2
         self.cutoff_method = cutoff_method
@@ -1339,6 +1350,7 @@ class SegmentationWorker(QThread):
             from utils.load_model import load_model
             from main_functions.calculate_phenotypes import calculate_phenotypes
             from main_functions.crop_sample import crop_sample
+            from main_functions.split_phenotype_mask import split_phenotype_mask
 
             start_time = datetime.now()
             loaded_cell_model = load_model(self.cell_model_path)
@@ -1382,6 +1394,9 @@ class SegmentationWorker(QThread):
                         self.cutoff_method,
                         self.raw_or_background_subtracted,
                     )
+                if self.do_phenotype_calling and self.create_split_phenotype_mask:
+                    print("Creating split phenotype mask...")
+                    split_phenotype_mask(i, self.phenotype_1, self.phenotype_2)
                 print(
                     f"Finished processing sample {i}\n{idx + 1}/{len(self.sample_path_list)}"
                 )
