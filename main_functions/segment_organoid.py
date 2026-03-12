@@ -165,11 +165,11 @@ def segment_organoid(
                     "unit": "um",
                     "axes": "TZCYX",
                     "PhysicalSizeX": voxel_size[2],
-                    "PhysicalSizeXUnit": "µm",
+                    "PhysicalSizeXUnit": "um",
                     "PhysicalSizeY": voxel_size[1],
-                    "PhysicalSizeYUnit": "µm",
+                    "PhysicalSizeYUnit": "um",
                     "PhysicalSizeZ": voxel_size[0],
-                    "PhysicalSizeZUnit": "µm",
+                    "PhysicalSizeZUnit": "um",
                     "spacing": voxel_size[0],
                 },
                 compression="zlib",
@@ -193,11 +193,11 @@ def segment_organoid(
                     "unit": "um",
                     "axes": "TZCYX",
                     "PhysicalSizeX": voxel_size[2],
-                    "PhysicalSizeXUnit": "µm",
+                    "PhysicalSizeXUnit": "um",
                     "PhysicalSizeY": voxel_size[1],
-                    "PhysicalSizeYUnit": "µm",
+                    "PhysicalSizeYUnit": "um",
                     "PhysicalSizeZ": voxel_size[0],
-                    "PhysicalSizeZUnit": "µm",
+                    "PhysicalSizeZUnit": "um",
                     "spacing": voxel_size[0],
                 },
                 compression="zlib",
@@ -233,27 +233,23 @@ def segment_organoid(
         properties.append(df_timepoint)
 
     segmented_movie = np.stack(segmented_movie, axis=0)
-    print(segmented_movie.shape)
-    segmented_movie = np.expand_dims(
-        segmented_movie, axis=2
-    )  # add channel dimension back for saving in tiff format
-    segmented_movie = np.transpose(segmented_movie, (0, 2, 1, 3, 4))  # convert to TZCXY
-    print(segmented_movie.shape)
+    print("Segmented movie shape (T, Z, Y, X):", segmented_movie.shape)
 
     tifffile.imwrite(
         os.path.join(input_directory, f"{name}_segmented.tif"),
         segmented_movie,
         bigtiff=True,
+        imagej=True,
         resolution=((1 / voxel_size[0]) * 25400, (1 / voxel_size[1]) * 25400),
         metadata={
             "unit": "um",
-            "axes": "TZCYX",
+            "axes": "TZYX",
             "PhysicalSizeX": voxel_size[2],
-            "PhysicalSizeXUnit": "µm",
+            "PhysicalSizeXUnit": "um",
             "PhysicalSizeY": voxel_size[1],
-            "PhysicalSizeYUnit": "µm",
+            "PhysicalSizeYUnit": "um",
             "PhysicalSizeZ": voxel_size[0],
-            "PhysicalSizeZUnit": "µm",
+            "PhysicalSizeZUnit": "um",
             "spacing": voxel_size[0],
             "TimeIncrement": 1 * time_interval,
             "TimeIncrementUnit": "h",

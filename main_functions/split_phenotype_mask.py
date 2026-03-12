@@ -25,19 +25,20 @@ def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
         )
     )
 
-    while segmentation.ndim < 5:
-        segmentation = np.expand_dims(segmentation, axis=0)
-    # segmentation is TZCYX with C=1; squeeze out the channel dim for easy indexing
-    # shape: (T, Z, 1, Y, X) -> work on (T, Z, Y, X)
-    seg = segmentation[:, :, 0, :, :]  # T, Z, Y, X
+    print(segmentation.shape)
 
-    T, Z, Y, X = seg.shape
+    while segmentation.ndim < 4:
+        segmentation = np.expand_dims(
+            segmentation, axis=0
+        )  # add time dimension if missing because its a fixed sample
+
+    T, Z, Y, X = segmentation.shape
     # Output: T, Z, 2, Y, X  — channel 0 = phenotype_1 labels, channel 1 = phenotype_2 labels
     new_segmentation = np.zeros((T, Z, 2, Y, X), dtype=segmentation.dtype)
 
     for timepoint in range(T):
         time_properties = properties[properties["timepoint"] == timepoint]
-        time_mask = seg[timepoint]  # Z, Y, X
+        time_mask = segmentation[timepoint]  # Z, Y, X
 
         labels_1 = time_properties[
             time_properties[phenotype_column_name] == phenotype_1
@@ -65,6 +66,7 @@ def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
         ),
         new_segmentation,
         bigtiff=True,
+        imagej=True,
         metadata={
             "unit": "um",
             "axes": "TZCYX",
