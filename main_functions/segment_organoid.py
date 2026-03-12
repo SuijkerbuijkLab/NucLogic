@@ -10,8 +10,15 @@ from imaris_ims_file_reader.ims import ims
 import os
 import re
 import sys
-
-import utils
+from utils.segment import segment
+from utils.stitch_3d import stitch_3d
+from utils.properties_mask import properties_mask
+from utils.get_time_interval import get_time_interval
+from utils.find_input_file import find_input_file
+from utils.max_project import max_project
+from utils.compensate_voxel_size import compensate_voxel_size
+from utils.properties_channel import properties_channel
+from utils.offset_image import offset_image
 
 
 def extract_frame_number(filename):
@@ -50,12 +57,12 @@ def segment_organoid(
             )
             return
     else:
-        input_file = utils.find_input_file(input_directory)
+        input_file = find_input_file(input_directory)
         name = os.path.basename(input_file).split(".")[0]
 
     # Get metadata of the time interval of the movie
     if input_file.endswith(".ims"):
-        time_interval = utils.get_time_interval(input_file)
+        time_interval = get_time_interval(input_file)
         loaded_movie = ims(input_file)  # TCZXY
         while loaded_movie.ndim < 5:
             loaded_movie = np.expand_dims(loaded_movie, axis=0)
@@ -109,13 +116,13 @@ def segment_organoid(
         # stdout silenced to stop printing random stuff
         old_stdout = sys.stdout  # backup current stdout
         sys.stdout = open(os.devnull, "w")
-        segmented_stack = utils.segment(frame_nuclei, cell_model)
+        segmented_stack = segment(frame_nuclei, cell_model)
         # print(segmented_stack.shape, np.unique(segmented_stack))
 
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
         if len(nuclei_channels) == 2:
-            segmented_stack_stitched, organoid = utils.stitch_3d(
+            segmented_stack_stitched, organoid = stitch_3d(
                 segmented_stack,
                 image1=frame_nuclei_1,
                 image_type_1="nuclei_1",
@@ -124,7 +131,7 @@ def segment_organoid(
                 breaking_threshold=breaking_threshold,
             )
         else:
-            segmented_stack_stitched, organoid = utils.stitch_3d(
+            segmented_stack_stitched, organoid = stitch_3d(
                 segmented_stack,
                 image1=frame_nuclei,
                 image_type_1="nuclei",
@@ -198,17 +205,17 @@ def segment_organoid(
             )
 
         # Get properties of the masked nuclei, such as volume and location of every cell
-        props = utils.properties_mask(segmented_stack_stitched)
+        props = properties_mask(segmented_stack_stitched)
         # Compensate for voxel size to get real world xyz distance values instead of pixel values
-        props = utils.compensate_voxel_size(props, voxel_size)
+        props = compensate_voxel_size(props, voxel_size)
 
         channel_dfs = {}  # Store channel dataframes during for loop
         for i, channel in enumerate(channel_names):
-            df_ch = utils.properties_channel(
+            df_ch = properties_channel(
                 segmented_stack_stitched, frame[i], f"{channel.lower()}_raw"
             )
-            offset_ch = utils.offset_image(frame[i], "median")
-            df_ch_offset = utils.properties_channel(
+            offset_ch = offset_image(frame[i], "median")
+            df_ch_offset = properties_channel(
                 segmented_stack_stitched,
                 offset_ch,
                 f"{channel.lower()}_background_subtracted",
