@@ -38,15 +38,19 @@ def max_project(file, name="nuclei", fixed=False):
                     max_data[t, c, :, :] = np.max(z_stack, axis=0)
                     bar()
 
-    elif file.endswith(".tif"):
-        # For TIFF files, use memmap to avoid loading everything at once
-        movie = tifffile.memmap(file, mode="r")  # T,Z,C,Y,X
+    elif file.endswith((".tif", ".tiff")):
+        # For TIFF files, prefer memmap to avoid loading everything at once.
+        # Some TIFFs (e.g. compressed/non-contiguous layouts) are not mappable.
+        try:
+            movie = tifffile.memmap(file, mode="r")  # T,Z,C,Y,X
+        except ValueError:
+            movie = tifffile.imread(file)  # fallback for non-memory-mappable TIFFs
 
         # Ensure movie has 5 dimensions by padding at the front
         shape = movie.shape
         while len(shape) < 5:
             shape = (1,) + shape
-            # Reshape the memmap array to match
+            # Reshape the array to match the padded dimensions
             movie = movie.reshape(shape)
 
         # For TIF: T,Z,C,Y,X -> need to project Z (axis 1)

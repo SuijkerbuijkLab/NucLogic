@@ -28,6 +28,7 @@ from PySide2.QtWidgets import (
     QTabWidget,
     QFileDialog,
     QListWidget,
+    QListWidgetItem,
     QAbstractItemView,
     QComboBox,
     QLineEdit,
@@ -300,12 +301,102 @@ class MainWindow(QMainWindow):
         layout.addLayout(self._create_channel_settings_menu())
         layout.addLayout(self._create_cropping_settings_layout())
         layout.addLayout(self._create_phenotype_settings_layout())
+        layout.addLayout(self._create_advanced_statistics_layout())
         layout.addLayout(self._create_advanced_settings_layout())
         layout.addLayout(self._create_run_segmentation_layout())
         layout.addLayout(self._create_progress_bar())
 
         widget.setLayout(layout)
         return widget
+
+    def _create_advanced_statistics_layout(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(0)
+        adv_stats_btn = QPushButton("Show advanced statistics settings")
+        adv_stats_btn.setCheckable(True)
+        adv_stats_btn.toggled.connect(self._toggle_advanced_statistics)
+        adv_stats_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(adv_stats_btn)
+
+        # Create advanced statistics settings widget
+        self.advanced_statistics_widget = QWidget()
+        self.advanced_statistics_widget.setLayout(self._create_advanced_statistics())
+        self.advanced_statistics_widget.setVisible(False)
+        layout.addWidget(self.advanced_statistics_widget)
+        return layout
+
+    def _toggle_advanced_statistics(self, checked):
+        """Toggle visibility of advanced statistics settings"""
+        self.advanced_statistics_widget.setVisible(checked)
+
+    def _create_advanced_statistics(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(0)
+
+        layout.addWidget(
+            QLabel(
+                "Calculate extra statistics (Centroid, Bounding box, Volume, and Mean intensities are calculated by default."
+            )
+        )
+        self.advanced_statistics_only_checkbox = QCheckBox(
+            "Only add extra statistics data, skipping cropping & segmentation (only usefull for already segmented samples)"
+        )
+        layout.addWidget(self.advanced_statistics_only_checkbox)
+        layout.addWidget(QLabel("Additional properties to calculate (multi-select):"))
+        self.calculate_advanced_statistics_list = QListWidget()
+        self.calculate_advanced_statistics_list.setSelectionMode(
+            QAbstractItemView.MultiSelection
+        )
+        self.calculate_advanced_statistics_list.setMaximumHeight(180)
+
+        advanced_property_items = [
+            "area_bbox",
+            "area_convex",
+            "area_filled",
+            "axis_major_length",
+            "axis_minor_length",
+            "centroid_local",
+            "centroid_weighted",
+            "centroid_weighted_local",
+            "coords_scaled",
+            "coords",
+            "equivalent_diameter_area",
+            "euler_number",
+            "extent",
+            "feret_diameter_max",
+            "image",
+            "image_convex",
+            "image_filled",
+            "image_intensity",
+            "inertia_tensor",
+            "inertia_tensor_eigvals",
+            "intensity_max",
+            "intensity_mean",
+            "intensity_min",
+            "intensity_std",
+            "moments",
+            "moments_central",
+            "moments_normalized",
+            "moments_weighted",
+            "moments_weighted_central",
+            "moments_weighted_normalized",
+            "num_pixels",
+            "slice",
+            "solidity",
+        ]
+
+        for item in advanced_property_items:
+            self.calculate_advanced_statistics_list.addItem(QListWidgetItem(item))
+
+        layout.addWidget(self.calculate_advanced_statistics_list)
+
+        return layout
+
+    def get_selected_advanced_statistics(self):
+        return [
+            item.text()
+            for item in self.calculate_advanced_statistics_list.selectedItems()
+        ]
 
     def _create_cropping_settings_layout(self):
         layout = QVBoxLayout()
@@ -724,6 +815,8 @@ class MainWindow(QMainWindow):
         save_crop_as = self.save_crop_as.currentText()
         save_frames = self.save_frames_checkbox.isChecked()
         save_segmentation = self.save_segmentation_checkbox.isChecked()
+        extra_props = self.get_selected_advanced_statistics()
+        advanced_statistics_only = self.advanced_statistics_only_checkbox.isChecked()
         self.worker = SegmentationWorker(
             sample_path_list,
             model_path,
@@ -741,6 +834,8 @@ class MainWindow(QMainWindow):
             save_crop_as,
             save_frames,
             save_segmentation,
+            extra_props,
+            advanced_statistics_only,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
         self.worker.finished.connect(self.segmentation_finished)
@@ -1325,6 +1420,8 @@ class SegmentationWorker(QThread):
         save_crop_as,
         save_frames,
         save_segmentation,
+        extra_props,
+        advanced_statistics_only,
     ):
         super().__init__()
         self.sample_path_list = sample_path_list
@@ -1343,6 +1440,8 @@ class SegmentationWorker(QThread):
         self.save_crop_as = save_crop_as
         self.save_frames = save_frames
         self.save_segmentation = save_segmentation
+        self.extra_props = extra_props
+        self.advanced_statistics_only = advanced_statistics_only
 
     def run(self):
         try:
@@ -1351,6 +1450,7 @@ class SegmentationWorker(QThread):
             from main_functions.calculate_phenotypes import calculate_phenotypes
             from main_functions.crop_sample import crop_sample
             from main_functions.split_phenotype_mask import split_phenotype_mask
+            from main_functions.add_advanced_statistics import add_advanced_statistics
 
             start_time = datetime.now()
             loaded_cell_model = load_model(self.cell_model_path)
@@ -1367,7 +1467,10 @@ class SegmentationWorker(QThread):
                 )
 
             for idx, i in enumerate(self.sample_path_list):
-                if not self.phenotype_calling_only:
+                if (
+                    not self.phenotype_calling_only
+                    and not self.advanced_statistics_only
+                ):
                     if self.do_crop_sample:
                         crop_sample(
                             i,
@@ -1384,6 +1487,7 @@ class SegmentationWorker(QThread):
                         self.do_crop_sample,
                         save_frames=self.save_frames,
                         save_segmentation=self.save_segmentation,
+                        extra_props=self.extra_props,
                     )
                 if self.do_phenotype_calling:
                     print("Calculating phenotypes...")
@@ -1393,6 +1497,14 @@ class SegmentationWorker(QThread):
                         self.phenotype_2,
                         self.cutoff_method,
                         self.raw_or_background_subtracted,
+                    )
+                if self.advanced_statistics_only:
+                    print("Calculating advanced statistics...")
+                    add_advanced_statistics(
+                        i,
+                        self.extra_props,
+                        self.channel_names,
+                        do_crop_sample=self.do_crop_sample,
                     )
                 if self.do_phenotype_calling and self.create_split_phenotype_mask:
                     print("Creating split phenotype mask...")

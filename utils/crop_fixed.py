@@ -120,6 +120,8 @@ def crop_fixed(
         print(f"Original movie shape: {movie.shape}")
     elif input_file.endswith(".tif"):
         movie = tifffile.imread(input_file)  # T,Z,C,Y,X
+        while len(movie.shape) < 5:
+            movie = np.expand_dims(movie, axis=0)  # Add time dimension if missing
         movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
 
     # Get a bounding box cropped version of the organoid — always max-project over nuclei channels (handles 1 or 2)
@@ -142,8 +144,9 @@ def crop_fixed(
     # Use the this XYZ mask on the original movie to crop as both a bounding box and to make all pixels (corners) where there is no organoid actually black
     ref_masked = np.where(ref_expanded > 0, ref, 0).astype(np.uint16)
 
-    # Make an max XZ projection that we will use to see what Z slices are important
-    XZ = np.max(ref_masked, axis=1)
+    # Make an XZ projection used to determine relevant Z slices.
+    # ref_masked is (T, Z, Y, X) -> collapse T and Y to get (Z, X).
+    XZ = np.max(ref_masked, axis=(0, 2))
 
     # Apply offset to enhance contrast and make background and signal more distinct
     XZ = offset_image(XZ, type="median")
@@ -164,47 +167,53 @@ def crop_fixed(
             moran_values.append((idx, 0))
 
     # Step 2: Calculate dynamic threshold based on max moran I value found
-    max_moran = max(val for _, val in moran_values)
-    threshold = 0.4 * max_moran
+    if not moran_values:
+        # Fallback to full Z-range if Moran computation yielded no usable values.
+        slice_min, slice_max = 0, ref.shape[1]
+    else:
+        max_moran = max(val for _, val in moran_values)
+        threshold = 0.4 * max_moran
 
-    # Step 3: Filter Z slices using threshold
-    z_list = [idx for idx, val in moran_values if val >= threshold]
+        # Step 3: Filter Z slices using threshold
+        z_list = [idx for idx, val in moran_values if val >= threshold]
 
-    z_vals_sorted = sorted(set(z_list))
-    max_block = []
-    current_block = [z_vals_sorted[0]]
-
-    for i in range(1, len(z_vals_sorted)):
-        if z_vals_sorted[i] - z_vals_sorted[i - 1] <= 6:
-            current_block.append(z_vals_sorted[i])
+        if not z_list:
+            slice_min, slice_max = 0, ref.shape[1]
         else:
+            z_vals_sorted = sorted(set(z_list))
+            max_block = []
+            current_block = [z_vals_sorted[0]]
+
+            for i in range(1, len(z_vals_sorted)):
+                if z_vals_sorted[i] - z_vals_sorted[i - 1] <= 6:
+                    current_block.append(z_vals_sorted[i])
+                else:
+                    if len(current_block) > len(max_block):
+                        max_block = current_block
+                    current_block = [z_vals_sorted[i]]
+
+            # Final check in case the longest block ends the loop
             if len(current_block) > len(max_block):
                 max_block = current_block
-            current_block = [z_vals_sorted[i]]
 
-    # Final check in case the longest block ends the loop
-    if len(current_block) > len(max_block):
-        max_block = current_block
-
-    slice_min = max(min(max_block) - 2, 0)
-    slice_max = min(max(max_block) + 2, ref.shape[0])
+            slice_min = max(min(max_block) - 2, 0)
+            slice_max = min(max(max_block) + 2, ref.shape[1])
 
     # This time, crop the frame of the movie on all channels using corrext XYZ
     cropped_image = movie[:, :, slice_min:slice_max, row_min:row_max, col_min:col_max]
 
-    # On this cropped frame, we again need to make it so that the pixels in the corners where no organoid is are actually black
-    mask_crop = maskXY[row_min:row_max, col_min:col_max]  # shape: (Y_crop, X_crop)
-    # Expand mask to 4D: (C, Z, Y_crop, X_crop)
-    mask_expanded = mask_crop[np.newaxis, np.newaxis, :, :]
-    # Repeat over C and Z to match cropped_image shape
-    mask_expanded = np.repeat(mask_expanded, cropped_image.shape[0], axis=0)  # C
-    mask_expanded = np.repeat(mask_expanded, cropped_image.shape[1], axis=1)  # Z
-    # Apply the mask
+    # On this cropped frame, make pixels outside the organoid black.
+    # cropped_image has shape (T, C, Z, Y, X).
+    mask_crop = maskXY[row_min:row_max, col_min:col_max]  # (Y_crop, X_crop)
+    mask_expanded = mask_crop[np.newaxis, np.newaxis, np.newaxis, :, :]  # (1,1,1,Y,X)
+    mask_expanded = np.repeat(mask_expanded, cropped_image.shape[0], axis=0)  # T
+    mask_expanded = np.repeat(mask_expanded, cropped_image.shape[1], axis=1)  # C
+    mask_expanded = np.repeat(mask_expanded, cropped_image.shape[2], axis=2)  # Z
     cropped_image_masked = np.where(mask_expanded, cropped_image, 0).astype(np.uint16)
 
     cropped_image_masked = np.transpose(
-        cropped_image_masked, (1, 0, 2, 3)
-    )  # Z C Y X for tiff
+        cropped_image_masked, (0, 2, 1, 3, 4)
+    )  # Z,C,Y,X
 
     return cropped_image_masked
 

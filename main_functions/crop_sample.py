@@ -58,16 +58,13 @@ def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
     )
 
     if is_fixed:
-        # given as Z C Y X
+        # given as T Z C Y X
         cropped_movie = crop_fixed(
             proj_XY=proj_XY,
             input_file=input_file,
             nuclei=nuclei_channels,
             name=name,
         )
-        cropped_movie = np.expand_dims(
-            cropped_movie, axis=0
-        )  # add time dimension as the first dimension
 
     else:
         cropped_movie = crop(

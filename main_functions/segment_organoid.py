@@ -19,6 +19,7 @@ from utils.max_project import max_project
 from utils.compensate_voxel_size import compensate_voxel_size
 from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
+from utils.get_extra_mask_properties import get_extra_mask_properties
 
 
 def extract_frame_number(filename):
@@ -35,8 +36,22 @@ def segment_organoid(
     do_crop_sample=False,
     save_frames=True,
     save_segmentation=True,
+    extra_props=None,  # List of extra properties to extract from the masks in addition to the default properties (label, z, y, x, bounding_box, volume)
 ):
     nuclei_channels = []
+    extra_props = extra_props or []
+
+    def _is_intensity_property(prop_name):
+        return (
+            prop_name.startswith("intensity_")
+            or prop_name.startswith("centroid_weighted")
+            or prop_name.startswith("moments_weighted")
+            or prop_name == "image_intensity"
+        )
+
+    intensity_props = [p for p in extra_props if _is_intensity_property(p)]
+    shape_props = [p for p in extra_props if not _is_intensity_property(p)]
+
     for i, channel_type in enumerate(channel_types):
         if "nuclei" in channel_type.lower():
             nuclei_channels.append(i)
@@ -87,7 +102,9 @@ def segment_organoid(
             loaded_movie = tif.asarray()
         while loaded_movie.ndim < 5:
             loaded_movie = np.expand_dims(loaded_movie, axis=0)
-        loaded_movie = np.transpose(loaded_movie, (0, 2, 1, 3, 4))
+        loaded_movie = np.transpose(
+            loaded_movie, (0, 2, 1, 3, 4)
+        )  # from T,Z,C,Y,X to T,C,Z,Y,X
 
     else:
         raise ValueError(
@@ -96,6 +113,7 @@ def segment_organoid(
 
     segmented_movie = []
     properties = []
+    print(f"Loaded movie shape (T, C, Z, Y, X): {loaded_movie.shape}")
     # print(f"full movie shape {loaded_movie.shape}")
     for timepoint in alive_it(
         range(loaded_movie.shape[0]), title="Segmenting organoid"
@@ -111,6 +129,7 @@ def segment_organoid(
                 nuclei_channels[0]
             ]  # (Z, Y, X) — avoid extra leading dim
         # print(f"frame shape {frame.shape}")
+        # print(f"Segmenting timepoint {timepoint} with shape {frame_nuclei.shape}...")
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
         # stdout silenced to stop printing random stuff
@@ -118,6 +137,14 @@ def segment_organoid(
         sys.stdout = open(os.devnull, "w")
         segmented_stack = segment(frame_nuclei, cell_model)
         # print(segmented_stack.shape, np.unique(segmented_stack))
+        # tifffile.imwrite(
+        #     os.path.join(input_directory, f"segmented_stack_timepoint_{timepoint}.tif"),
+        #     segmented_stack,
+        #     imagej=True,
+        #     metadata={"axes": "ZYX"},
+        #     compression="zlib",
+        #     compressionargs={"level": 8},
+        # )
 
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
@@ -221,6 +248,24 @@ def segment_organoid(
                 f"{channel.lower()}_background_subtracted",
             )
             channel_dfs[channel] = pd.merge(df_ch, df_ch_offset, on="label")
+
+        if shape_props:
+            extra_shape_df = get_extra_mask_properties(
+                segmented_stack_stitched, extra_props=shape_props
+            )
+            props = props.merge(extra_shape_df, on="label", how="left")
+
+        if intensity_props:
+            for ch_idx, channel in enumerate(channel_names):
+                if ch_idx >= frame.shape[0]:
+                    continue
+                extra_intensity_df = get_extra_mask_properties(
+                    segmented_stack_stitched,
+                    intensity_image=frame[ch_idx],
+                    extra_props=intensity_props,
+                    channel_name=channel,
+                )
+                props = props.merge(extra_intensity_df, on="label", how="left")
 
         # Combine all channel dataframes into one dataframe for the timepoint
         df_timepoint = props.copy()
