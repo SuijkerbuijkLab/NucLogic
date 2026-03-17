@@ -30,5 +30,5 @@ dependencies:
       - seaborn
       - tables
       - pyqtdarktheme
-      - opencv-python-headless
+      - opencv-python
       - PyImarisWriter

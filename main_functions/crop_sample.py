@@ -10,7 +10,14 @@ from utils.save_as_ims import save_as_ims
 import numpy as np
 
 
-def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
+def crop_sample(
+    input_directory,
+    channel_types,
+    organoid_model,
+    save_as=".ims",
+    manual_fixed=False,
+    fixed_only=False,
+):
 
     nuclei_channels = []
     for i, channel_type in enumerate(channel_types):
@@ -49,6 +56,9 @@ def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
 
     is_fixed = loaded_movie.ndim < 5
 
+    if fixed_only and not is_fixed:
+        return False
+
     # If there are no existing cropped tiffs, we will create a max XY projection used to crop the organoid
     # The max XY projection is then used in the crop function to crop every frame of the movie in both XY and XZ to generate way smaller files for segmentation
     proj_XY = max_project(
@@ -64,6 +74,7 @@ def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
             input_file=input_file,
             nuclei=nuclei_channels,
             name=name,
+            manual=manual_fixed,
         )
 
     else:
@@ -113,3 +124,5 @@ def crop_sample(input_directory, channel_types, organoid_model, save_as=".ims"):
             compression="zlib",
             compressionargs={"level": 8},
         )
+
+    return True

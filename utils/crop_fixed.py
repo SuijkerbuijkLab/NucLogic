@@ -75,8 +75,12 @@ def crop_fixed(
             np.uint8
         )
 
-        # Get polygon selection
+        # Get polygon selection. Fall back to matplotlib when OpenCV GUI is unavailable.
         selected_mask, _, _ = polygon_selection(normalized_image)
+        if selected_mask is None:
+            raise ValueError(
+                "Manual cropping was cancelled or no polygon was selected."
+            )
 
         while selected_mask.ndim < original_projXY.ndim:
             selected_mask = np.expand_dims(selected_mask, axis=0)
@@ -251,47 +255,57 @@ def polygon_selection(image, display_size=1024):
 
     points = []
 
-    # Mouse callback function
-    def draw_polygon(event, x, y, flags, param):
-        nonlocal draw_image_resized
+    # First try OpenCV HighGUI. If unavailable (headless build), fall back to matplotlib ginput.
+    try:
+        # Mouse callback function
+        def draw_polygon(event, x, y, flags, param):
+            nonlocal draw_image_resized
 
-        # Left button click - add point
-        if event == cv2.EVENT_LBUTTONDOWN:
-            points.append((x, y))
-            # Draw a small circle at clicked point
-            cv2.circle(
-                draw_image_resized,
-                center=(x, y),
-                radius=3,
-                color=(255, 255, 0),
-                thickness=-1,
-            )
-
-            # Connect lines between points
-            if len(points) > 1:
-                cv2.line(
+            # Left button click - add point
+            if event == cv2.EVENT_LBUTTONDOWN:
+                points.append((x, y))
+                # Draw a small circle at clicked point
+                cv2.circle(
                     draw_image_resized,
-                    points[-2],
-                    points[-1],
-                    thickness=1,
-                    color=(255, 0, 0),
+                    center=(x, y),
+                    radius=3,
+                    color=(255, 255, 0),
+                    thickness=-1,
                 )
 
-            # Show the image with selected points
-            cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
+                # Connect lines between points
+                if len(points) > 1:
+                    cv2.line(
+                        draw_image_resized,
+                        points[-2],
+                        points[-1],
+                        thickness=1,
+                        color=(255, 0, 0),
+                    )
 
-    # Create window and set mouse callback
-    cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
-    cv2.setMouseCallback("Select Polygon - Press C when done", draw_polygon)
+                # Show the image with selected points
+                cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
 
-    # Wait for key press
-    while True:
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("c"):  # Press 'c' to complete
-            break
+        # Create window and set mouse callback
+        cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
+        cv2.setMouseCallback("Select Polygon - Press C when done", draw_polygon)
 
-    # Close the window
-    cv2.destroyAllWindows()
+        # Wait for key press
+        while True:
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("c"):  # Press 'c' to complete
+                break
+
+        # Close the window
+        cv2.destroyAllWindows()
+    except cv2.error:
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.imshow(draw_image_resized, cmap="gray")
+        ax.set_title("Click polygon points, then press Enter")
+        ax.axis("off")
+        selected_points = plt.ginput(n=-1, timeout=0)
+        plt.close(fig)
+        points = [(int(x), int(y)) for x, y in selected_points]
 
     # Create mask from polygon if we have enough points
     if len(points) > 2:

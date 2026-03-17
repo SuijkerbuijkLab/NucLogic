@@ -503,6 +503,12 @@ class MainWindow(QMainWindow):
         self.do_crop_sample.setChecked(True)
         layout.addWidget(self.do_crop_sample)
 
+        self.manual_crop_fixed_checkbox = QCheckBox(
+            "For fixed samples: use manual cropping"
+        )
+        self.manual_crop_fixed_checkbox.setChecked(False)
+        layout.addWidget(self.manual_crop_fixed_checkbox)
+
         # Save crop as ims or tif file selector
         layout2 = QHBoxLayout()
         layout2.addWidget(QLabel("Save cropped files as:"))
@@ -938,6 +944,7 @@ class MainWindow(QMainWindow):
             self.segmentation_error(str(e))
             return
         do_crop_sample = self.do_crop_sample.isChecked()
+        manual_crop_fixed = self.manual_crop_fixed_checkbox.isChecked()
         save_crop_as = self.save_crop_as.currentText()
         save_frames = self.save_frames_checkbox.isChecked()
         save_segmentation = self.save_segmentation_checkbox.isChecked()
@@ -952,6 +959,27 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             self.segmentation_error(str(e))
             return
+
+        manually_cropped_fixed_samples = []
+        if do_crop_sample and manual_crop_fixed:
+            try:
+                from main_functions.crop_sample import crop_sample
+
+                for sample_path in sample_path_list:
+                    was_cropped = crop_sample(
+                        sample_path,
+                        channel_types,
+                        organoid_model=None,
+                        save_as=save_crop_as,
+                        manual_fixed=True,
+                        fixed_only=True,
+                    )
+                    if was_cropped:
+                        manually_cropped_fixed_samples.append(sample_path)
+            except Exception as e:
+                self.segmentation_error(str(e))
+                return
+
         self.worker = SegmentationWorker(
             sample_path_list,
             model_path,
@@ -967,6 +995,7 @@ class MainWindow(QMainWindow):
             custom_cutoff,
             raw_or_background_subtracted,
             do_crop_sample,
+            manual_crop_fixed,
             save_crop_as,
             save_frames,
             save_segmentation,
@@ -975,6 +1004,7 @@ class MainWindow(QMainWindow):
             measure_intensity_in,
             cytoplasm_size,
             save_measurement_mask,
+            manually_cropped_fixed_samples,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
         self.worker.finished.connect(self.segmentation_finished)
@@ -1557,6 +1587,7 @@ class SegmentationWorker(QThread):
         custom_cutoff,
         raw_or_background_subtracted,
         do_crop_sample,
+        manual_crop_fixed,
         save_crop_as,
         save_frames,
         save_segmentation,
@@ -1565,6 +1596,7 @@ class SegmentationWorker(QThread):
         measure_intensity_in,
         cytoplasm_size,
         save_measurement_mask,
+        manually_cropped_fixed_samples=None,
     ):
         super().__init__()
         self.sample_path_list = sample_path_list
@@ -1581,6 +1613,7 @@ class SegmentationWorker(QThread):
         self.custom_cutoff = custom_cutoff
         self.raw_or_background_subtracted = raw_or_background_subtracted
         self.do_crop_sample = do_crop_sample
+        self.manual_crop_fixed = manual_crop_fixed
         self.save_crop_as = save_crop_as
         self.save_frames = save_frames
         self.save_segmentation = save_segmentation
@@ -1589,6 +1622,7 @@ class SegmentationWorker(QThread):
         self.measure_intensity_in = measure_intensity_in
         self.cytoplasm_size = cytoplasm_size
         self.save_measurement_mask = save_measurement_mask
+        self.manually_cropped_fixed_samples = set(manually_cropped_fixed_samples or [])
 
     def run(self):
         try:
@@ -1613,61 +1647,81 @@ class SegmentationWorker(QThread):
                     os.path.join(model_path, "sam2.1_hiera_small.pt"),
                 )
 
+            failed_samples = []
             for idx, i in enumerate(self.sample_path_list):
-                if (
-                    not self.phenotype_calling_only
-                    and not self.advanced_statistics_only
-                ):
-                    if self.do_crop_sample:
-                        crop_sample(
+                try:
+                    if (
+                        not self.phenotype_calling_only
+                        and not self.advanced_statistics_only
+                    ):
+                        if self.do_crop_sample:
+                            if i in self.manually_cropped_fixed_samples:
+                                print(
+                                    f"Skipping crop for {i}: fixed sample was manually cropped in UI thread."
+                                )
+                            else:
+                                crop_sample(
+                                    i,
+                                    self.channel_types,
+                                    organoid_model,
+                                    manual_fixed=self.manual_crop_fixed,
+                                    save_as=self.save_crop_as,
+                                )
+                        segment_organoid(
                             i,
+                            loaded_cell_model,
                             self.channel_types,
-                            organoid_model,
-                            save_as=self.save_crop_as,
+                            self.channel_names,
+                            self.breaking_threshold,
+                            self.do_crop_sample,
+                            save_frames=self.save_frames,
+                            save_segmentation=self.save_segmentation,
+                            extra_props=self.extra_props,
+                            measure_intensity_in=self.measure_intensity_in,
+                            cytoplasm_size=self.cytoplasm_size,
+                            save_measurement_mask=self.save_measurement_mask,
                         )
-                    segment_organoid(
-                        i,
-                        loaded_cell_model,
-                        self.channel_types,
-                        self.channel_names,
-                        self.breaking_threshold,
-                        self.do_crop_sample,
-                        save_frames=self.save_frames,
-                        save_segmentation=self.save_segmentation,
-                        extra_props=self.extra_props,
-                        measure_intensity_in=self.measure_intensity_in,
-                        cytoplasm_size=self.cytoplasm_size,
-                        save_measurement_mask=self.save_measurement_mask,
+                    if self.do_phenotype_calling:
+                        print("Calculating phenotypes...")
+                        calculate_phenotypes(
+                            i,
+                            self.phenotype_1,
+                            self.phenotype_2,
+                            self.cutoff_method,
+                            self.custom_cutoff,
+                            self.raw_or_background_subtracted,
+                        )
+                    if self.advanced_statistics_only:
+                        print("Calculating advanced statistics...")
+                        add_advanced_statistics(
+                            i,
+                            self.extra_props,
+                            self.channel_names,
+                            do_crop_sample=self.do_crop_sample,
+                            measure_intensity_in=self.measure_intensity_in,
+                            cytoplasm_size=self.cytoplasm_size,
+                            save_measurement_mask=self.save_measurement_mask,
+                        )
+                    if self.do_phenotype_calling and self.create_split_phenotype_mask:
+                        print("Creating split phenotype mask...")
+                        split_phenotype_mask(i, self.phenotype_1, self.phenotype_2)
+                    print(
+                        f"Finished processing sample {i}\n{idx + 1}/{len(self.sample_path_list)}"
                     )
-                if self.do_phenotype_calling:
-                    print("Calculating phenotypes...")
-                    calculate_phenotypes(
-                        i,
-                        self.phenotype_1,
-                        self.phenotype_2,
-                        self.cutoff_method,
-                        self.custom_cutoff,
-                        self.raw_or_background_subtracted,
-                    )
-                if self.advanced_statistics_only:
-                    print("Calculating advanced statistics...")
-                    add_advanced_statistics(
-                        i,
-                        self.extra_props,
-                        self.channel_names,
-                        do_crop_sample=self.do_crop_sample,
-                        measure_intensity_in=self.measure_intensity_in,
-                        cytoplasm_size=self.cytoplasm_size,
-                        save_measurement_mask=self.save_measurement_mask,
-                    )
-                if self.do_phenotype_calling and self.create_split_phenotype_mask:
-                    print("Creating split phenotype mask...")
-                    split_phenotype_mask(i, self.phenotype_1, self.phenotype_2)
-                print(
-                    f"Finished processing sample {i}\n{idx + 1}/{len(self.sample_path_list)}"
-                )
-                progress = int((idx + 1) / len(self.sample_path_list) * 100)
-                self.progress_updated.emit(progress)
+                except Exception as sample_error:
+                    import traceback
+
+                    traceback.print_exc()
+                    failed_samples.append(f"{i}: {sample_error}")
+                    print(f"Skipping sample due to error: {i}")
+                finally:
+                    progress = int((idx + 1) / len(self.sample_path_list) * 100)
+                    self.progress_updated.emit(progress)
+
+            if failed_samples:
+                print("Some samples failed during processing:")
+                for failed in failed_samples:
+                    print(f" - {failed}")
 
             elapsed_time = (datetime.now() - start_time).total_seconds()
             self.finished.emit(elapsed_time)
