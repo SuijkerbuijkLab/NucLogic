@@ -46,6 +46,13 @@ def calculate_phenotypes(
     )
     properties[log_ratio_col] = np.log10(properties[ratio_col] + 1e-6)
 
+    # if the log ratio col is missing, we return an error because we need it for phenotype classification
+    if log_ratio_col not in properties.columns:
+        print(
+            f"Did not find the necessary columns for phenotype classification in the properties file. Please make sure to include mean intensity measurements for both phenotypes when selecting extra properties to add."
+        )
+        return
+
     if "automatic" in cutoff_method.lower():
         cutoff = calculate_cutoff(properties, log_ratio_col)
 
