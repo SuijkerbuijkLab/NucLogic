@@ -20,6 +20,7 @@ from utils.compensate_voxel_size import compensate_voxel_size
 from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
 from utils.get_extra_mask_properties import get_extra_mask_properties
+from utils.expand_mask import expand_mask
 
 
 def extract_frame_number(filename):
@@ -37,6 +38,9 @@ def segment_organoid(
     save_frames=True,
     save_segmentation=True,
     extra_props=None,  # List of extra properties to extract from the masks in addition to the default properties (label, z, y, x, bounding_box, volume)
+    measure_intensity_in="Nuclei",
+    cytoplasm_size=5,
+    save_measurement_mask=False,
 ):
     nuclei_channels = []
     extra_props = extra_props or []
@@ -51,6 +55,7 @@ def segment_organoid(
 
     intensity_props = [p for p in extra_props if _is_intensity_property(p)]
     shape_props = [p for p in extra_props if not _is_intensity_property(p)]
+    measure_region = measure_intensity_in.lower().strip()
 
     for i, channel_type in enumerate(channel_types):
         if "nuclei" in channel_type.lower():
@@ -112,6 +117,7 @@ def segment_organoid(
         )
 
     segmented_movie = []
+    measurement_mask_movie = []
     properties = []
     print(f"Loaded movie shape (T, C, Z, Y, X): {loaded_movie.shape}")
     # print(f"full movie shape {loaded_movie.shape}")
@@ -236,14 +242,38 @@ def segment_organoid(
         # Compensate for voxel size to get real world xyz distance values instead of pixel values
         props = compensate_voxel_size(props, voxel_size)
 
+        if measure_region == "nuclei":
+            mask_for_intensity = segmented_stack_stitched
+            region_tag = "nuclei"
+        elif measure_region == "whole cell":
+            mask_for_intensity = expand_mask(
+                segmented_stack_stitched, dilation_size=cytoplasm_size
+            )
+            region_tag = "whole_cell"
+        elif measure_region == "cytoplasm":
+            whole_cell_mask = expand_mask(
+                segmented_stack_stitched, dilation_size=cytoplasm_size
+            )
+            mask_for_intensity = np.where(
+                segmented_stack_stitched == 0, whole_cell_mask, 0
+            ).astype(whole_cell_mask.dtype)
+            region_tag = "cytoplasm"
+        else:
+            raise ValueError(
+                "measure_intensity_in must be one of: 'Nuclei', 'Cytoplasm', 'Whole cell'."
+            )
+
+        if save_measurement_mask and measure_region != "nuclei":
+            measurement_mask_movie.append(mask_for_intensity)
+
         channel_dfs = {}  # Store channel dataframes during for loop
         for i, channel in enumerate(channel_names):
             df_ch = properties_channel(
-                segmented_stack_stitched, frame[i], f"{channel.lower()}_raw"
+                mask_for_intensity, frame[i], f"{channel.lower()}_raw"
             )
             offset_ch = offset_image(frame[i], "median")
             df_ch_offset = properties_channel(
-                segmented_stack_stitched,
+                mask_for_intensity,
                 offset_ch,
                 f"{channel.lower()}_background_subtracted",
             )
@@ -260,10 +290,10 @@ def segment_organoid(
                 if ch_idx >= frame.shape[0]:
                     continue
                 extra_intensity_df = get_extra_mask_properties(
-                    segmented_stack_stitched,
+                    mask_for_intensity,
                     intensity_image=frame[ch_idx],
                     extra_props=intensity_props,
-                    channel_name=channel,
+                    channel_name=f"{channel}_{region_tag}",
                 )
                 props = props.merge(extra_intensity_df, on="label", how="left")
 
@@ -302,6 +332,31 @@ def segment_organoid(
         compression="zlib",
         compressionargs={"level": 8},
     )
+
+    if save_measurement_mask and measure_region != "nuclei" and measurement_mask_movie:
+        measurement_mask_movie = np.stack(measurement_mask_movie, axis=0)
+        tifffile.imwrite(
+            os.path.join(input_directory, f"{name}_segmented_{region_tag}.tif"),
+            measurement_mask_movie,
+            bigtiff=True,
+            imagej=True,
+            resolution=((1 / voxel_size[0]) * 25400, (1 / voxel_size[1]) * 25400),
+            metadata={
+                "unit": "um",
+                "axes": "TZYX",
+                "PhysicalSizeX": voxel_size[2],
+                "PhysicalSizeXUnit": "um",
+                "PhysicalSizeY": voxel_size[1],
+                "PhysicalSizeYUnit": "um",
+                "PhysicalSizeZ": voxel_size[0],
+                "PhysicalSizeZUnit": "um",
+                "spacing": voxel_size[0],
+                "TimeIncrement": 1 * time_interval,
+                "TimeIncrementUnit": "h",
+            },
+            compression="zlib",
+            compressionargs={"level": 8},
+        )
 
     # Convert the data from all frames to a pandas data frame
     properties = pd.concat(properties, ignore_index=True)

@@ -9,6 +9,7 @@ def calculate_phenotypes(
     phenotype_1,
     phenotype_2,
     cutoff_method,
+    custom_cutoff,
     raw_or_background_subtracted,
 ):
     phenotype_column_name = f"phenotype_{phenotype_1}_vs_{phenotype_2}"
@@ -66,6 +67,13 @@ def calculate_phenotypes(
         properties[phenotype_column_name] = properties[log_ratio_col].apply(
             lambda x: f"{phenotype_1}" if x >= cutoff else f"{phenotype_2}"
         )
+    elif "custom cutoff" in cutoff_method.lower():
+        cutoff = float(custom_cutoff)
+        properties[phenotype_column_name] = properties[log_ratio_col].apply(
+            lambda x: f"{phenotype_1}" if x >= cutoff else f"{phenotype_2}"
+        )
+    else:
+        raise ValueError(f"Unsupported cutoff method: {cutoff_method}")
 
     properties.to_csv(
         os.path.join(

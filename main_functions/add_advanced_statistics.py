@@ -4,11 +4,19 @@ import numpy as np
 import tifffile
 from utils.get_extra_mask_properties import get_extra_mask_properties
 from utils.find_input_file import find_input_file
+from utils.expand_mask import expand_mask
+from utils.get_time_interval import get_time_interval
 from imaris_ims_file_reader import ims
 
 
 def add_advanced_statistics(
-    input_directory, extra_props, channel_names, do_crop_sample=False
+    input_directory,
+    extra_props,
+    channel_names,
+    do_crop_sample=False,
+    measure_intensity_in="Nuclei",
+    cytoplasm_size=5,
+    save_measurement_mask=False,
 ):
     extra_props = extra_props or []
 
@@ -61,6 +69,25 @@ def add_advanced_statistics(
             f"Unexpected segmented image shape {segmented_movie.shape}; expected TZYX or ZYX."
         )
 
+    measure_region = measure_intensity_in.lower().strip()
+    if measure_region == "nuclei":
+        mask_to_use = segmented_movie
+        region_tag = "nuclei"
+    elif measure_region == "whole cell":
+        mask_to_use = expand_mask(segmented_movie, dilation_size=cytoplasm_size)
+        region_tag = "whole_cell"
+    elif measure_region == "cytoplasm":
+        whole_cell_mask = expand_mask(segmented_movie, dilation_size=cytoplasm_size)
+        # Keep expanded cell labels only outside the nucleus to preserve per-cell labeling.
+        mask_to_use = np.where(segmented_movie == 0, whole_cell_mask, 0).astype(
+            whole_cell_mask.dtype
+        )
+        region_tag = "cytoplasm"
+    else:
+        raise ValueError(
+            "measure_intensity_in must be one of: 'Nuclei', 'Cytoplasm', 'Whole cell'."
+        )
+
     if do_crop_sample:
         input_file = [
             os.path.join(input_directory, f)
@@ -82,11 +109,29 @@ def add_advanced_statistics(
 
     # Load source movie with expected shape T, C, Z, Y, X
     if input_file.endswith(".ims"):
+        time_interval = get_time_interval(input_file)
         loaded_movie = ims(input_file)  # TCZXY
+        voxel_size = loaded_movie.resolution
         while loaded_movie.ndim < 5:
             loaded_movie = np.expand_dims(loaded_movie, axis=0)
     elif input_file.endswith(".tif") or input_file.endswith(".tiff"):
-        loaded_movie = tifffile.imread(input_file)
+        with tifffile.TiffFile(input_file) as tif:
+            if tif.is_ome:
+                import xml.etree.ElementTree as ET
+
+                root = ET.fromstring(tif.ome_metadata)
+                ns = root.tag.split("}")[0].lstrip("{")
+                pixels = root.find(f".//{{{ns}}}Pixels")
+                voxel_size = (
+                    float(pixels.get("PhysicalSizeZ", 1.0)),
+                    float(pixels.get("PhysicalSizeY", 1.0)),
+                    float(pixels.get("PhysicalSizeX", 1.0)),
+                )
+                time_interval = float(pixels.get("TimeIncrement", 1.0))
+            else:
+                voxel_size = (1.0, 1.0, 1.0)
+                time_interval = 1
+            loaded_movie = tif.asarray()
         while loaded_movie.ndim < 5:
             loaded_movie = np.expand_dims(loaded_movie, axis=0)
         loaded_movie = np.transpose(
@@ -97,9 +142,34 @@ def add_advanced_statistics(
             "Unsupported file format in sample directory. Please provide a .tif, .tiff, or .ims file."
         )
 
+    if save_measurement_mask and measure_region != "nuclei":
+        sample_name = os.path.basename(input_directory)
+        tifffile.imwrite(
+            os.path.join(input_directory, f"{sample_name}_segmented_{region_tag}.tif"),
+            mask_to_use,
+            bigtiff=True,
+            imagej=True,
+            resolution=((1 / voxel_size[0]) * 25400, (1 / voxel_size[1]) * 25400),
+            metadata={
+                "unit": "um",
+                "axes": "TZYX",
+                "PhysicalSizeX": voxel_size[2],
+                "PhysicalSizeXUnit": "um",
+                "PhysicalSizeY": voxel_size[1],
+                "PhysicalSizeYUnit": "um",
+                "PhysicalSizeZ": voxel_size[0],
+                "PhysicalSizeZUnit": "um",
+                "spacing": voxel_size[0],
+                "TimeIncrement": 1 * time_interval,
+                "TimeIncrementUnit": "h",
+            },
+            compression="zlib",
+            compressionargs={"level": 8},
+        )
+
     n_timepoints = min(
         len(props["timepoint"].unique()),
-        segmented_movie.shape[0],
+        mask_to_use.shape[0],
         loaded_movie.shape[0],
     )
     if n_timepoints == 0:
@@ -113,7 +183,7 @@ def add_advanced_statistics(
             continue
 
         time_props = props[props["timepoint"] == timepoint].copy()
-        mask_3d = segmented_movie[timepoint]
+        mask_3d = mask_to_use[timepoint]
         frame = loaded_movie[timepoint]  # C, Z, Y, X
 
         # Add non-intensity/shape props once per timepoint.
@@ -130,7 +200,7 @@ def add_advanced_statistics(
                     mask_3d,
                     intensity_image=frame[ch_idx],
                     extra_props=intensity_props,
-                    channel_name=channel_name,
+                    channel_name=f"{channel_name}_{region_tag}",
                 )
                 time_props = time_props.merge(intensity_df, on="label", how="left")
 

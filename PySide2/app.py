@@ -312,6 +312,8 @@ class MainWindow(QMainWindow):
     def _create_advanced_statistics_layout(self):
         layout = QVBoxLayout()
         layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignTop)
         adv_stats_btn = QPushButton("Show advanced statistics settings")
         adv_stats_btn.setCheckable(True)
         adv_stats_btn.toggled.connect(self._toggle_advanced_statistics)
@@ -320,6 +322,9 @@ class MainWindow(QMainWindow):
 
         # Create advanced statistics settings widget
         self.advanced_statistics_widget = QWidget()
+        self.advanced_statistics_widget.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Maximum
+        )
         self.advanced_statistics_widget.setLayout(self._create_advanced_statistics())
         self.advanced_statistics_widget.setVisible(False)
         layout.addWidget(self.advanced_statistics_widget)
@@ -331,7 +336,9 @@ class MainWindow(QMainWindow):
 
     def _create_advanced_statistics(self):
         layout = QVBoxLayout()
-        layout.setSpacing(0)
+        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignTop)
 
         layout.addWidget(
             QLabel(
@@ -342,7 +349,54 @@ class MainWindow(QMainWindow):
             "Only add extra statistics data, skipping cropping & segmentation (only usefull for already segmented samples)"
         )
         layout.addWidget(self.advanced_statistics_only_checkbox)
-        layout.addWidget(QLabel("Additional properties to calculate (multi-select):"))
+        layout1 = QHBoxLayout()
+        layout1.addWidget(QLabel("Calculate intensity data inside the:"))
+        self.nuclei_or_cytoplasm_checkbox = QComboBox()
+        self.nuclei_or_cytoplasm_checkbox.addItems(
+            ["Nuclei", "Cytoplasm", "Whole cell"]
+        )
+        self.nuclei_or_cytoplasm_checkbox.currentTextChanged.connect(
+            self._cytoplasm_measurement_toggled
+        )
+        layout1.addWidget(self.nuclei_or_cytoplasm_checkbox)
+        layout1.addStretch()
+        layout.addLayout(layout1)
+
+        measurement_sub_layout = QVBoxLayout()
+        measurement_sub_layout.setSpacing(6)
+        measurement_sub_layout.setContentsMargins(30, 0, 0, 0)
+
+        layout_cytoplasm = QHBoxLayout()
+        self.QLabel_cytoplasm_size = QLabel(
+            "Create cytoplasm by extending ... pixels outside of nucleus in XY:"
+        )
+        self.QLabel_cytoplasm_size.setVisible(False)
+        layout_cytoplasm.addWidget(self.QLabel_cytoplasm_size)
+        self.cytoplasm_size_input = QLineEdit("5")
+        self.cytoplasm_size_input.setVisible(False)
+        layout_cytoplasm.addWidget(self.cytoplasm_size_input)
+        layout_cytoplasm.addStretch()
+        measurement_sub_layout.addLayout(layout_cytoplasm)
+
+        layout_mask = QHBoxLayout()
+        self.save_measurement_mask_checkbox = QCheckBox(
+            "Also save generated cytoplasm/whole-cell segmentation mask"
+        )
+        self.save_measurement_mask_checkbox.setVisible(False)
+        self.save_measurement_mask_checkbox.setChecked(False)
+        layout_mask.addWidget(self.save_measurement_mask_checkbox)
+        layout_mask.addStretch()
+        measurement_sub_layout.addLayout(layout_mask)
+
+        layout.addLayout(measurement_sub_layout)
+        layout.addWidget(
+            QLabel(
+                "Note: Phenotype/cell-type calling uses this same nuclei/cytoplasm/whole-cell intensity setting."
+            )
+        )
+
+        layout2 = QHBoxLayout()
+        layout2.addWidget(QLabel("Additional properties to calculate (multi-select):"))
         self.calculate_advanced_statistics_list = QListWidget()
         self.calculate_advanced_statistics_list.setSelectionMode(
             QAbstractItemView.MultiSelection
@@ -388,15 +442,55 @@ class MainWindow(QMainWindow):
         for item in advanced_property_items:
             self.calculate_advanced_statistics_list.addItem(QListWidgetItem(item))
 
-        layout.addWidget(self.calculate_advanced_statistics_list)
+        layout2.addWidget(self.calculate_advanced_statistics_list)
+        layout2.addStretch()  # Push everything to the left
+        layout.addLayout(layout2)
 
         return layout
+
+    def _cytoplasm_measurement_toggled(self):
+        selected_option = self.nuclei_or_cytoplasm_checkbox.currentText()
+        if selected_option == "Cytoplasm" or selected_option == "Whole cell":
+            self.QLabel_cytoplasm_size.setVisible(True)
+            self.cytoplasm_size_input.setVisible(True)
+            self.save_measurement_mask_checkbox.setVisible(True)
+        else:
+            self.QLabel_cytoplasm_size.setVisible(False)
+            self.cytoplasm_size_input.setVisible(False)
+            self.save_measurement_mask_checkbox.setVisible(False)
+            self.save_measurement_mask_checkbox.setChecked(False)
 
     def get_selected_advanced_statistics(self):
         return [
             item.text()
             for item in self.calculate_advanced_statistics_list.selectedItems()
         ]
+
+    def get_advanced_statistics_settings(self):
+        measure_intensity_in = self.nuclei_or_cytoplasm_checkbox.currentText()
+        cytoplasm_size = 5
+        if measure_intensity_in in ("Cytoplasm", "Whole cell"):
+            try:
+                cytoplasm_size = int(self.cytoplasm_size_input.text())
+            except ValueError as exc:
+                raise ValueError(
+                    "Invalid cytoplasm size. Please enter a positive integer."
+                ) from exc
+            if cytoplasm_size < 1:
+                raise ValueError(
+                    "Invalid cytoplasm size. Please enter a positive integer."
+                )
+
+        extra_props = self.get_selected_advanced_statistics()
+        advanced_statistics_only = self.advanced_statistics_only_checkbox.isChecked()
+        save_measurement_mask = self.save_measurement_mask_checkbox.isChecked()
+        return (
+            extra_props,
+            advanced_statistics_only,
+            measure_intensity_in,
+            cytoplasm_size,
+            save_measurement_mask,
+        )
 
     def _create_cropping_settings_layout(self):
         layout = QVBoxLayout()
@@ -484,11 +578,24 @@ class MainWindow(QMainWindow):
             [
                 "Calculate cutoff automatically (Usefull for populations that are roughly 50/50)",
                 "Use fixed cutoff of 0 (Phenotype attributed to brightest channel, usefull for populations with clear positive/negative)",
+                "Use custom cutoff value (User-defined float)",
             ]
         )
+        self.calculate_cutoff.currentTextChanged.connect(self._toggle_custom_cutoff)
         layout3.addWidget(self.calculate_cutoff)
         layout3.addStretch()  # Push everything to the left
         layout.addLayout(layout3)
+
+        layout_custom_cutoff = QHBoxLayout()
+        self.custom_cutoff_label = QLabel("Custom cutoff value (log10 ratio):")
+        self.custom_cutoff_label.setVisible(False)
+        self.custom_cutoff_input = QLineEdit("0.0")
+        self.custom_cutoff_input.setPlaceholderText("e.g. -0.25")
+        self.custom_cutoff_input.setVisible(False)
+        layout_custom_cutoff.addWidget(self.custom_cutoff_label)
+        layout_custom_cutoff.addWidget(self.custom_cutoff_input)
+        layout_custom_cutoff.addStretch()
+        layout.addLayout(layout_custom_cutoff)
 
         layout4 = QHBoxLayout()
         layout4.addWidget(QLabel("Base phenotype/cell-type on:"))
@@ -501,6 +608,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(layout4)
 
         return layout
+
+    def _toggle_custom_cutoff(self, selected_cutoff_method):
+        show_custom = "custom cutoff" in selected_cutoff_method.lower()
+        self.custom_cutoff_input.setVisible(show_custom)
+        self.custom_cutoff_label.setVisible(show_custom)
 
     def _create_run_segmentation_layout(self):
         layout = QVBoxLayout()
@@ -778,6 +890,14 @@ class MainWindow(QMainWindow):
         channel_1 = self.phenotype_1.currentText()
         channel_2 = self.phenotype_2.currentText()
         cutoff_method = self.calculate_cutoff.currentText()
+        custom_cutoff = None
+        if "custom cutoff" in cutoff_method.lower():
+            try:
+                custom_cutoff = float(self.custom_cutoff_input.text())
+            except ValueError as exc:
+                raise ValueError(
+                    "Invalid custom cutoff value. Please enter a valid float."
+                ) from exc
         raw_or_background_subtracted = self.raw_or_background_subtracted.currentText()
         phenotype_calling_only = self.phenotype_calling_only_checkbox.isChecked()
         create_split_phenotype_mask = self.create_split_phenotype_mask.isChecked()
@@ -786,6 +906,7 @@ class MainWindow(QMainWindow):
             channel_1,
             channel_2,
             cutoff_method,
+            custom_cutoff,
             raw_or_background_subtracted,
             phenotype_calling_only,
             create_split_phenotype_mask,
@@ -802,21 +923,35 @@ class MainWindow(QMainWindow):
         model_path = self.get_model_path()
         channel_names, channel_types = self.get_channel_settings()
         breaking_threshold = self.get_breaking_threshold()
-        (
-            do_phenotype_calling,
-            phenotype_1,
-            phenotype_2,
-            cutoff_method,
-            raw_or_background_subtracted,
-            phenotype_calling_only,
-            create_split_phenotype_mask,
-        ) = self.get_phenotype_calling_settings()
+        try:
+            (
+                do_phenotype_calling,
+                phenotype_1,
+                phenotype_2,
+                cutoff_method,
+                custom_cutoff,
+                raw_or_background_subtracted,
+                phenotype_calling_only,
+                create_split_phenotype_mask,
+            ) = self.get_phenotype_calling_settings()
+        except ValueError as e:
+            self.segmentation_error(str(e))
+            return
         do_crop_sample = self.do_crop_sample.isChecked()
         save_crop_as = self.save_crop_as.currentText()
         save_frames = self.save_frames_checkbox.isChecked()
         save_segmentation = self.save_segmentation_checkbox.isChecked()
-        extra_props = self.get_selected_advanced_statistics()
-        advanced_statistics_only = self.advanced_statistics_only_checkbox.isChecked()
+        try:
+            (
+                extra_props,
+                advanced_statistics_only,
+                measure_intensity_in,
+                cytoplasm_size,
+                save_measurement_mask,
+            ) = self.get_advanced_statistics_settings()
+        except ValueError as e:
+            self.segmentation_error(str(e))
+            return
         self.worker = SegmentationWorker(
             sample_path_list,
             model_path,
@@ -829,6 +964,7 @@ class MainWindow(QMainWindow):
             phenotype_1,
             phenotype_2,
             cutoff_method,
+            custom_cutoff,
             raw_or_background_subtracted,
             do_crop_sample,
             save_crop_as,
@@ -836,6 +972,9 @@ class MainWindow(QMainWindow):
             save_segmentation,
             extra_props,
             advanced_statistics_only,
+            measure_intensity_in,
+            cytoplasm_size,
+            save_measurement_mask,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
         self.worker.finished.connect(self.segmentation_finished)
@@ -1415,6 +1554,7 @@ class SegmentationWorker(QThread):
         phenotype_1,
         phenotype_2,
         cutoff_method,
+        custom_cutoff,
         raw_or_background_subtracted,
         do_crop_sample,
         save_crop_as,
@@ -1422,6 +1562,9 @@ class SegmentationWorker(QThread):
         save_segmentation,
         extra_props,
         advanced_statistics_only,
+        measure_intensity_in,
+        cytoplasm_size,
+        save_measurement_mask,
     ):
         super().__init__()
         self.sample_path_list = sample_path_list
@@ -1435,6 +1578,7 @@ class SegmentationWorker(QThread):
         self.phenotype_1 = phenotype_1
         self.phenotype_2 = phenotype_2
         self.cutoff_method = cutoff_method
+        self.custom_cutoff = custom_cutoff
         self.raw_or_background_subtracted = raw_or_background_subtracted
         self.do_crop_sample = do_crop_sample
         self.save_crop_as = save_crop_as
@@ -1442,6 +1586,9 @@ class SegmentationWorker(QThread):
         self.save_segmentation = save_segmentation
         self.extra_props = extra_props
         self.advanced_statistics_only = advanced_statistics_only
+        self.measure_intensity_in = measure_intensity_in
+        self.cytoplasm_size = cytoplasm_size
+        self.save_measurement_mask = save_measurement_mask
 
     def run(self):
         try:
@@ -1488,6 +1635,9 @@ class SegmentationWorker(QThread):
                         save_frames=self.save_frames,
                         save_segmentation=self.save_segmentation,
                         extra_props=self.extra_props,
+                        measure_intensity_in=self.measure_intensity_in,
+                        cytoplasm_size=self.cytoplasm_size,
+                        save_measurement_mask=self.save_measurement_mask,
                     )
                 if self.do_phenotype_calling:
                     print("Calculating phenotypes...")
@@ -1496,6 +1646,7 @@ class SegmentationWorker(QThread):
                         self.phenotype_1,
                         self.phenotype_2,
                         self.cutoff_method,
+                        self.custom_cutoff,
                         self.raw_or_background_subtracted,
                     )
                 if self.advanced_statistics_only:
@@ -1505,6 +1656,9 @@ class SegmentationWorker(QThread):
                         self.extra_props,
                         self.channel_names,
                         do_crop_sample=self.do_crop_sample,
+                        measure_intensity_in=self.measure_intensity_in,
+                        cytoplasm_size=self.cytoplasm_size,
+                        save_measurement_mask=self.save_measurement_mask,
                     )
                 if self.do_phenotype_calling and self.create_split_phenotype_mask:
                     print("Creating split phenotype mask...")
