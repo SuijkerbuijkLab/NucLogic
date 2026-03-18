@@ -17,7 +17,28 @@ def crop_sample(
     save_as=".ims",
     manual_fixed=False,
     fixed_only=False,
+    user_voxel_size=(1.0, 1.0, 1.0),
 ):
+    def _to_voxel_tuple(voxel_like):
+        try:
+            return (
+                float(voxel_like[0]),
+                float(voxel_like[1]),
+                float(voxel_like[2]),
+            )
+        except (TypeError, ValueError, IndexError):
+            return (1.0, 1.0, 1.0)
+
+    def _should_use_user_voxel(measured_voxel, metadata_missing):
+        measured = _to_voxel_tuple(measured_voxel)
+        user_voxel = _to_voxel_tuple(user_voxel_size)
+        user_is_default = np.allclose(user_voxel, (1.0, 1.0, 1.0))
+        measured_is_default = np.allclose(measured, (1.0, 1.0, 1.0))
+        if not user_is_default and (metadata_missing or measured_is_default):
+            print(f"Using user-provided voxel size override: {user_voxel}")
+            return user_voxel
+        return measured
+
 
     nuclei_channels = []
     for i, channel_type in enumerate(channel_types):
@@ -31,10 +52,14 @@ def crop_sample(
     name = os.path.basename(input_file).split(".")[0]
 
     # Get metadata of the time interval of the movie
+    metadata_missing = False
     if input_file.endswith(".ims"):
         time_interval = get_time_interval(input_file)
         loaded_movie = ims(input_file)
         voxel_size = loaded_movie.resolution
+        if voxel_size is None:
+            metadata_missing = True
+            voxel_size = (1.0, 1.0, 1.0)
     else:
         with tifffile.TiffFile(input_file) as tif:
             if tif.is_ome:
@@ -43,16 +68,25 @@ def crop_sample(
                 root = ET.fromstring(tif.ome_metadata)
                 ns = root.tag.split("}")[0].lstrip("{")
                 pixels = root.find(f".//{{{ns}}}Pixels")
+                z_size = pixels.get("PhysicalSizeZ") if pixels is not None else None
+                y_size = pixels.get("PhysicalSizeY") if pixels is not None else None
+                x_size = pixels.get("PhysicalSizeX") if pixels is not None else None
+                metadata_missing = pixels is None or any(
+                    value is None for value in (z_size, y_size, x_size)
+                )
                 voxel_size = (
-                    float(pixels.get("PhysicalSizeZ", 1.0)),
-                    float(pixels.get("PhysicalSizeY", 1.0)),
-                    float(pixels.get("PhysicalSizeX", 1.0)),
+                    float(z_size or 1.0),
+                    float(y_size or 1.0),
+                    float(x_size or 1.0),
                 )
                 time_interval = float(pixels.get("TimeIncrement", 1.0))
             else:
+                metadata_missing = True
                 voxel_size = (1.0, 1.0, 1.0)
                 time_interval = 1.0
             loaded_movie = tif.asarray()
+
+    voxel_size = _should_use_user_voxel(voxel_size, metadata_missing)
 
     is_fixed = loaded_movie.ndim < 5
 

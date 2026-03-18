@@ -17,6 +17,7 @@ def add_advanced_statistics(
     measure_intensity_in="Nuclei",
     cytoplasm_size=5,
     save_measurement_mask=False,
+    user_voxel_size=(1.0, 1.0, 1.0),
 ):
     extra_props = extra_props or []
 
@@ -31,6 +32,26 @@ def add_advanced_statistics(
             or prop_name.startswith("moments_weighted")
             or prop_name == "image_intensity"
         )
+
+    def _to_voxel_tuple(voxel_like):
+        try:
+            return (
+                float(voxel_like[0]),
+                float(voxel_like[1]),
+                float(voxel_like[2]),
+            )
+        except (TypeError, ValueError, IndexError):
+            return (1.0, 1.0, 1.0)
+
+    def _resolve_voxel_size(measured_voxel, metadata_missing):
+        measured = _to_voxel_tuple(measured_voxel)
+        user_voxel = _to_voxel_tuple(user_voxel_size)
+        user_is_default = np.allclose(user_voxel, (1.0, 1.0, 1.0))
+        measured_is_default = np.allclose(measured, (1.0, 1.0, 1.0))
+        if not user_is_default and (metadata_missing or measured_is_default):
+            print(f"Using user-provided voxel size override: {user_voxel}")
+            return user_voxel
+        return measured
 
     intensity_props = [p for p in extra_props if _is_intensity_property(p)]
     shape_props = [p for p in extra_props if not _is_intensity_property(p)]
@@ -108,10 +129,14 @@ def add_advanced_statistics(
         name = os.path.basename(input_file).split(".")[0]
 
     # Load source movie with expected shape T, C, Z, Y, X
+    metadata_missing = False
     if input_file.endswith(".ims"):
         time_interval = get_time_interval(input_file)
         loaded_movie = ims(input_file)  # TCZXY
         voxel_size = loaded_movie.resolution
+        if voxel_size is None:
+            metadata_missing = True
+            voxel_size = (1.0, 1.0, 1.0)
         while loaded_movie.ndim < 5:
             loaded_movie = np.expand_dims(loaded_movie, axis=0)
     elif input_file.endswith(".tif") or input_file.endswith(".tiff"):
@@ -122,13 +147,20 @@ def add_advanced_statistics(
                 root = ET.fromstring(tif.ome_metadata)
                 ns = root.tag.split("}")[0].lstrip("{")
                 pixels = root.find(f".//{{{ns}}}Pixels")
+                z_size = pixels.get("PhysicalSizeZ") if pixels is not None else None
+                y_size = pixels.get("PhysicalSizeY") if pixels is not None else None
+                x_size = pixels.get("PhysicalSizeX") if pixels is not None else None
+                metadata_missing = pixels is None or any(
+                    value is None for value in (z_size, y_size, x_size)
+                )
                 voxel_size = (
-                    float(pixels.get("PhysicalSizeZ", 1.0)),
-                    float(pixels.get("PhysicalSizeY", 1.0)),
-                    float(pixels.get("PhysicalSizeX", 1.0)),
+                    float(z_size or 1.0),
+                    float(y_size or 1.0),
+                    float(x_size or 1.0),
                 )
                 time_interval = float(pixels.get("TimeIncrement", 1.0))
             else:
+                metadata_missing = True
                 voxel_size = (1.0, 1.0, 1.0)
                 time_interval = 1
             loaded_movie = tif.asarray()
@@ -141,6 +173,8 @@ def add_advanced_statistics(
         raise ValueError(
             "Unsupported file format in sample directory. Please provide a .tif, .tiff, or .ims file."
         )
+
+    voxel_size = _resolve_voxel_size(voxel_size, metadata_missing)
 
     if save_measurement_mask and measure_region != "nuclei":
         sample_name = os.path.basename(input_directory)

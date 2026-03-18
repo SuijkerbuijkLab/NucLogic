@@ -446,6 +446,27 @@ class MainWindow(QMainWindow):
         layout2.addStretch()  # Push everything to the left
         layout.addLayout(layout2)
 
+        layout_voxel_inputs = QHBoxLayout()
+        layout_voxel_inputs.addWidget(
+            QLabel(
+                "If your Tiff/IMS input file doesn't have correct voxel size metadata, you can add it here (most often not needed):"
+            )
+        )
+        layout_voxel_inputs.addWidget(QLabel("Z:"))
+        self.voxel_size_z_input = QLineEdit("1.0")
+        self.voxel_size_z_input.setMaximumWidth(90)
+        layout_voxel_inputs.addWidget(self.voxel_size_z_input)
+        layout_voxel_inputs.addWidget(QLabel("X:"))
+        self.voxel_size_x_input = QLineEdit("1.0")
+        self.voxel_size_x_input.setMaximumWidth(90)
+        layout_voxel_inputs.addWidget(self.voxel_size_x_input)
+        layout_voxel_inputs.addWidget(QLabel("Y:"))
+        self.voxel_size_y_input = QLineEdit("1.0")
+        self.voxel_size_y_input.setMaximumWidth(90)
+        layout_voxel_inputs.addWidget(self.voxel_size_y_input)
+        layout_voxel_inputs.addStretch()
+        layout.addLayout(layout_voxel_inputs)
+
         return layout
 
     def _cytoplasm_measurement_toggled(self):
@@ -484,12 +505,28 @@ class MainWindow(QMainWindow):
         extra_props = self.get_selected_advanced_statistics()
         advanced_statistics_only = self.advanced_statistics_only_checkbox.isChecked()
         save_measurement_mask = self.save_measurement_mask_checkbox.isChecked()
+        try:
+            voxel_z = float(self.voxel_size_z_input.text())
+            voxel_x = float(self.voxel_size_x_input.text())
+            voxel_y = float(self.voxel_size_y_input.text())
+        except ValueError as exc:
+            raise ValueError(
+                "Invalid voxel size override. Please enter valid float values for Z, X, and Y."
+            ) from exc
+
+        if voxel_z <= 0 or voxel_x <= 0 or voxel_y <= 0:
+            raise ValueError(
+                "Invalid voxel size override. Z, X, and Y must be positive values."
+            )
+
+        user_voxel_size = (voxel_z, voxel_y, voxel_x)
         return (
             extra_props,
             advanced_statistics_only,
             measure_intensity_in,
             cytoplasm_size,
             save_measurement_mask,
+            user_voxel_size,
         )
 
     def _create_cropping_settings_layout(self):
@@ -828,11 +865,13 @@ class MainWindow(QMainWindow):
 
     def _browse_model_file(self):
         """Open file dialog to select model file"""
+        file_filter = "All Files (*);;Model Files (*.pt *.pth *.onnx)"
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Model File",
             "",
-            "Model Files (*.pt *.pth *.onnx);;All Files (*)",
+            file_filter,
+            "All Files (*)",
         )
         if file_path:
             self.model_file_label.setText(file_path)
@@ -955,6 +994,7 @@ class MainWindow(QMainWindow):
                 measure_intensity_in,
                 cytoplasm_size,
                 save_measurement_mask,
+                user_voxel_size,
             ) = self.get_advanced_statistics_settings()
         except ValueError as e:
             self.segmentation_error(str(e))
@@ -973,6 +1013,7 @@ class MainWindow(QMainWindow):
                         save_as=save_crop_as,
                         manual_fixed=True,
                         fixed_only=True,
+                        user_voxel_size=user_voxel_size,
                     )
                     if was_cropped:
                         manually_cropped_fixed_samples.append(sample_path)
@@ -1004,6 +1045,7 @@ class MainWindow(QMainWindow):
             measure_intensity_in,
             cytoplasm_size,
             save_measurement_mask,
+            user_voxel_size,
             manually_cropped_fixed_samples,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
@@ -1596,6 +1638,7 @@ class SegmentationWorker(QThread):
         measure_intensity_in,
         cytoplasm_size,
         save_measurement_mask,
+        user_voxel_size,
         manually_cropped_fixed_samples=None,
     ):
         super().__init__()
@@ -1622,6 +1665,7 @@ class SegmentationWorker(QThread):
         self.measure_intensity_in = measure_intensity_in
         self.cytoplasm_size = cytoplasm_size
         self.save_measurement_mask = save_measurement_mask
+        self.user_voxel_size = user_voxel_size
         self.manually_cropped_fixed_samples = set(manually_cropped_fixed_samples or [])
 
     def run(self):
@@ -1666,6 +1710,7 @@ class SegmentationWorker(QThread):
                                     organoid_model,
                                     manual_fixed=self.manual_crop_fixed,
                                     save_as=self.save_crop_as,
+                                    user_voxel_size=self.user_voxel_size,
                                 )
                         segment_organoid(
                             i,
@@ -1680,6 +1725,7 @@ class SegmentationWorker(QThread):
                             measure_intensity_in=self.measure_intensity_in,
                             cytoplasm_size=self.cytoplasm_size,
                             save_measurement_mask=self.save_measurement_mask,
+                            user_voxel_size=self.user_voxel_size,
                         )
                     if self.do_phenotype_calling:
                         print("Calculating phenotypes...")
@@ -1701,6 +1747,7 @@ class SegmentationWorker(QThread):
                             measure_intensity_in=self.measure_intensity_in,
                             cytoplasm_size=self.cytoplasm_size,
                             save_measurement_mask=self.save_measurement_mask,
+                            user_voxel_size=self.user_voxel_size,
                         )
                     if self.do_phenotype_calling and self.create_split_phenotype_mask:
                         print("Creating split phenotype mask...")
