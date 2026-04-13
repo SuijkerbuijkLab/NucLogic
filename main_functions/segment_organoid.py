@@ -21,6 +21,7 @@ from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
 from utils.get_extra_mask_properties import get_extra_mask_properties
 from utils.expand_mask import expand_mask
+from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 
 def extract_frame_number(filename):
@@ -113,35 +114,9 @@ def segment_organoid(
             metadata_missing = True
             voxel_size = (1.0, 1.0, 1.0)
     elif input_file.endswith(".tif") or input_file.endswith(".tiff"):
-        with tifffile.TiffFile(input_file) as tif:
-            if tif.is_ome:
-                import xml.etree.ElementTree as ET
-
-                root = ET.fromstring(tif.ome_metadata)
-                ns = root.tag.split("}")[0].lstrip("{")
-                pixels = root.find(f".//{{{ns}}}Pixels")
-                z_size = pixels.get("PhysicalSizeZ") if pixels is not None else None
-                y_size = pixels.get("PhysicalSizeY") if pixels is not None else None
-                x_size = pixels.get("PhysicalSizeX") if pixels is not None else None
-                metadata_missing = pixels is None or any(
-                    value is None for value in (z_size, y_size, x_size)
-                )
-                voxel_size = (
-                    float(z_size or 1.0),
-                    float(y_size or 1.0),
-                    float(x_size or 1.0),
-                )
-                time_interval = float(pixels.get("TimeIncrement", 1.0))
-            else:
-                metadata_missing = True
-                voxel_size = (1.0, 1.0, 1.0)
-                time_interval = 1
-            loaded_movie = tif.asarray()
-        while loaded_movie.ndim < 5:
-            loaded_movie = np.expand_dims(loaded_movie, axis=0)
-        loaded_movie = np.transpose(
-            loaded_movie, (0, 2, 1, 3, 4)
-        )  # from T,Z,C,Y,X to T,C,Z,Y,X
+        loaded_movie, voxel_size, time_interval, metadata_missing = (
+            load_tiff_movie_and_metadata(input_file)
+        )
 
     else:
         raise ValueError(
@@ -225,19 +200,15 @@ def segment_organoid(
                 frame_tzcyx,
                 bigtiff=True,
                 resolution=(
-                    (1 / voxel_size[0]) * 25400,
-                    (1 / voxel_size[1]) * 25400,
+                    1 / voxel_size[2],
+                    1 / voxel_size[1],
                 ),
                 metadata={
                     "unit": "um",
                     "axes": "TZCYX",
-                    "PhysicalSizeX": voxel_size[2],
-                    "PhysicalSizeXUnit": "um",
-                    "PhysicalSizeY": voxel_size[1],
-                    "PhysicalSizeYUnit": "um",
-                    "PhysicalSizeZ": voxel_size[0],
-                    "PhysicalSizeZUnit": "um",
                     "spacing": voxel_size[0],
+                    "finterval": time_interval,
+                    "tunit": "h",
                 },
                 compression="zlib",
                 compressionargs={"level": 8},
@@ -253,19 +224,15 @@ def segment_organoid(
                 seg_tzcyx,
                 bigtiff=True,
                 resolution=(
-                    (1 / voxel_size[0]) * 25400,
-                    (1 / voxel_size[1]) * 25400,
+                    1 / voxel_size[2],
+                    1 / voxel_size[1],
                 ),
                 metadata={
                     "unit": "um",
                     "axes": "TZCYX",
-                    "PhysicalSizeX": voxel_size[2],
-                    "PhysicalSizeXUnit": "um",
-                    "PhysicalSizeY": voxel_size[1],
-                    "PhysicalSizeYUnit": "um",
-                    "PhysicalSizeZ": voxel_size[0],
-                    "PhysicalSizeZUnit": "um",
                     "spacing": voxel_size[0],
+                    "finterval": time_interval,
+                    "tunit": "h",
                 },
                 compression="zlib",
                 compressionargs={"level": 8},
@@ -349,19 +316,13 @@ def segment_organoid(
         segmented_movie,
         bigtiff=True,
         imagej=True,
-        resolution=((1 / voxel_size[0]) * 25400, (1 / voxel_size[1]) * 25400),
+        resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
         metadata={
             "unit": "um",
             "axes": "TZYX",
-            "PhysicalSizeX": voxel_size[2],
-            "PhysicalSizeXUnit": "um",
-            "PhysicalSizeY": voxel_size[1],
-            "PhysicalSizeYUnit": "um",
-            "PhysicalSizeZ": voxel_size[0],
-            "PhysicalSizeZUnit": "um",
             "spacing": voxel_size[0],
-            "TimeIncrement": 1 * time_interval,
-            "TimeIncrementUnit": "h",
+            "finterval": time_interval,
+            "tunit": "h",
         },
         compression="zlib",
         compressionargs={"level": 8},
@@ -374,19 +335,13 @@ def segment_organoid(
             measurement_mask_movie,
             bigtiff=True,
             imagej=True,
-            resolution=((1 / voxel_size[0]) * 25400, (1 / voxel_size[1]) * 25400),
+            resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
             metadata={
                 "unit": "um",
                 "axes": "TZYX",
-                "PhysicalSizeX": voxel_size[2],
-                "PhysicalSizeXUnit": "um",
-                "PhysicalSizeY": voxel_size[1],
-                "PhysicalSizeYUnit": "um",
-                "PhysicalSizeZ": voxel_size[0],
-                "PhysicalSizeZUnit": "um",
                 "spacing": voxel_size[0],
-                "TimeIncrement": 1 * time_interval,
-                "TimeIncrementUnit": "h",
+                "finterval": time_interval,
+                "tunit": "h",
             },
             compression="zlib",
             compressionargs={"level": 8},

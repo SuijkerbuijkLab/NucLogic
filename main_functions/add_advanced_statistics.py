@@ -6,7 +6,9 @@ from utils.get_extra_mask_properties import get_extra_mask_properties
 from utils.find_input_file import find_input_file
 from utils.expand_mask import expand_mask
 from utils.get_time_interval import get_time_interval
+from utils.offset_image import offset_image
 from imaris_ims_file_reader import ims
+from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 
 def add_advanced_statistics(
@@ -140,35 +142,9 @@ def add_advanced_statistics(
         while loaded_movie.ndim < 5:
             loaded_movie = np.expand_dims(loaded_movie, axis=0)
     elif input_file.endswith(".tif") or input_file.endswith(".tiff"):
-        with tifffile.TiffFile(input_file) as tif:
-            if tif.is_ome:
-                import xml.etree.ElementTree as ET
-
-                root = ET.fromstring(tif.ome_metadata)
-                ns = root.tag.split("}")[0].lstrip("{")
-                pixels = root.find(f".//{{{ns}}}Pixels")
-                z_size = pixels.get("PhysicalSizeZ") if pixels is not None else None
-                y_size = pixels.get("PhysicalSizeY") if pixels is not None else None
-                x_size = pixels.get("PhysicalSizeX") if pixels is not None else None
-                metadata_missing = pixels is None or any(
-                    value is None for value in (z_size, y_size, x_size)
-                )
-                voxel_size = (
-                    float(z_size or 1.0),
-                    float(y_size or 1.0),
-                    float(x_size or 1.0),
-                )
-                time_interval = float(pixels.get("TimeIncrement", 1.0))
-            else:
-                metadata_missing = True
-                voxel_size = (1.0, 1.0, 1.0)
-                time_interval = 1
-            loaded_movie = tif.asarray()
-        while loaded_movie.ndim < 5:
-            loaded_movie = np.expand_dims(loaded_movie, axis=0)
-        loaded_movie = np.transpose(
-            loaded_movie, (0, 2, 1, 3, 4)
-        )  # from T,Z,C,Y,X to T,C,Z,Y,X
+        loaded_movie, voxel_size, time_interval, metadata_missing = (
+            load_tiff_movie_and_metadata(input_file)
+        )
     else:
         raise ValueError(
             "Unsupported file format in sample directory. Please provide a .tif, .tiff, or .ims file."
@@ -183,19 +159,13 @@ def add_advanced_statistics(
             mask_to_use,
             bigtiff=True,
             imagej=True,
-            resolution=((1 / voxel_size[0]) * 25400, (1 / voxel_size[1]) * 25400),
+            resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
             metadata={
                 "unit": "um",
                 "axes": "TZYX",
-                "PhysicalSizeX": voxel_size[2],
-                "PhysicalSizeXUnit": "um",
-                "PhysicalSizeY": voxel_size[1],
-                "PhysicalSizeYUnit": "um",
-                "PhysicalSizeZ": voxel_size[0],
-                "PhysicalSizeZUnit": "um",
                 "spacing": voxel_size[0],
-                "TimeIncrement": 1 * time_interval,
-                "TimeIncrementUnit": "h",
+                "finterval": time_interval,
+                "tunit": "h",
             },
             compression="zlib",
             compressionargs={"level": 8},
@@ -213,30 +183,52 @@ def add_advanced_statistics(
     updated_timepoint_tables = []
 
     for timepoint in sorted(props["timepoint"].unique()):
+        timepoint_int = int(timepoint)
         if timepoint >= n_timepoints:
             continue
 
         time_props = props[props["timepoint"] == timepoint].copy()
-        mask_3d = mask_to_use[timepoint]
-        frame = loaded_movie[timepoint]  # C, Z, Y, X
+        mask_3d = mask_to_use[timepoint_int]
+        frame = loaded_movie[timepoint_int]  # C, Z, Y, X
+
+        def _merge_overwrite(base_df, new_df, key="label"):
+            # Recompute columns should overwrite previous values instead of creating _x/_y duplicates.
+            overlap = [
+                col for col in new_df.columns if col != key and col in base_df.columns
+            ]
+            if overlap:
+                base_df = base_df.drop(columns=overlap)
+            return base_df.merge(new_df, on=key, how="left")
 
         # Add non-intensity/shape props once per timepoint.
         if shape_props:
             shape_df = get_extra_mask_properties(mask_3d, extra_props=shape_props)
-            time_props = time_props.merge(shape_df, on="label", how="left")
+            time_props = _merge_overwrite(time_props, shape_df, key="label")
 
-        # Add intensity-dependent props for each channel with channel prefix.
+        # Add intensity-dependent props for each channel as both raw and background-subtracted.
         if intensity_props:
             for ch_idx, channel_name in enumerate(channel_names):
                 if ch_idx >= frame.shape[0]:
                     continue
-                intensity_df = get_extra_mask_properties(
+
+                raw_intensity_df = get_extra_mask_properties(
                     mask_3d,
                     intensity_image=frame[ch_idx],
                     extra_props=intensity_props,
-                    channel_name=f"{channel_name}_{region_tag}",
+                    channel_name=f"{channel_name}_{region_tag}_raw",
                 )
-                time_props = time_props.merge(intensity_df, on="label", how="left")
+                time_props = _merge_overwrite(time_props, raw_intensity_df, key="label")
+
+                offset_ch = offset_image(frame[ch_idx], "median")
+                bgsub_intensity_df = get_extra_mask_properties(
+                    mask_3d,
+                    intensity_image=offset_ch,
+                    extra_props=intensity_props,
+                    channel_name=f"{channel_name}_{region_tag}_background_subtracted",
+                )
+                time_props = _merge_overwrite(
+                    time_props, bgsub_intensity_df, key="label"
+                )
 
         updated_timepoint_tables.append(time_props)
 

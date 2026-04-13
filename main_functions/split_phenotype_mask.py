@@ -58,18 +58,36 @@ def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
             mask_phenotype_2, time_mask, 0
         )
 
+    phenotype_1_mask = new_segmentation[:, :, 0, :, :]
+    phenotype_2_mask = new_segmentation[:, :, 1, :, :]
+
     name = os.path.basename(input_directory)
     tifffile.imwrite(
         os.path.join(
             input_directory,
-            f"{name}_split_phenotype_mask_{phenotype_1}_vs_{phenotype_2}.tif",
+            f"{name}_{phenotype_1}_mask.tif",
         ),
-        new_segmentation,
+        phenotype_1_mask,
         bigtiff=True,
         imagej=True,
         metadata={
             "unit": "um",
-            "axes": "TZCYX",
+            "axes": "TZYX",
+        },
+        compression="zlib",
+        compressionargs={"level": 8},
+    )
+    tifffile.imwrite(
+        os.path.join(
+            input_directory,
+            f"{name}_{phenotype_2}_mask.tif",
+        ),
+        phenotype_2_mask,
+        bigtiff=True,
+        imagej=True,
+        metadata={
+            "unit": "um",
+            "axes": "TZYX",
         },
         compression="zlib",
         compressionargs={"level": 8},

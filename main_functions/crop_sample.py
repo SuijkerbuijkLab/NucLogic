@@ -8,6 +8,7 @@ from utils.crop_fixed import crop_fixed
 from utils.crop import crop
 from utils.save_as_ims import save_as_ims
 import numpy as np
+from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 
 def crop_sample(
@@ -39,7 +40,6 @@ def crop_sample(
             return user_voxel
         return measured
 
-
     nuclei_channels = []
     for i, channel_type in enumerate(channel_types):
         if "nuclei" in channel_type.lower():
@@ -60,35 +60,17 @@ def crop_sample(
         if voxel_size is None:
             metadata_missing = True
             voxel_size = (1.0, 1.0, 1.0)
+        while loaded_movie.ndim < 5:
+            loaded_movie = np.expand_dims(loaded_movie, axis=0)
     else:
-        with tifffile.TiffFile(input_file) as tif:
-            if tif.is_ome:
-                import xml.etree.ElementTree as ET
-
-                root = ET.fromstring(tif.ome_metadata)
-                ns = root.tag.split("}")[0].lstrip("{")
-                pixels = root.find(f".//{{{ns}}}Pixels")
-                z_size = pixels.get("PhysicalSizeZ") if pixels is not None else None
-                y_size = pixels.get("PhysicalSizeY") if pixels is not None else None
-                x_size = pixels.get("PhysicalSizeX") if pixels is not None else None
-                metadata_missing = pixels is None or any(
-                    value is None for value in (z_size, y_size, x_size)
-                )
-                voxel_size = (
-                    float(z_size or 1.0),
-                    float(y_size or 1.0),
-                    float(x_size or 1.0),
-                )
-                time_interval = float(pixels.get("TimeIncrement", 1.0))
-            else:
-                metadata_missing = True
-                voxel_size = (1.0, 1.0, 1.0)
-                time_interval = 1.0
-            loaded_movie = tif.asarray()
+        loaded_movie, voxel_size, time_interval, metadata_missing = (
+            load_tiff_movie_and_metadata(input_file)
+        )
 
     voxel_size = _should_use_user_voxel(voxel_size, metadata_missing)
 
-    is_fixed = loaded_movie.ndim < 5
+    # Loader normalizes TIFF/IMS to 5D (T,C,Z,Y,X); fixed samples are represented as T=1.
+    is_fixed = loaded_movie.shape[0] == 1
 
     if fixed_only and not is_fixed:
         return False
@@ -139,21 +121,15 @@ def crop_sample(
             bigtiff=True,
             imagej=True,
             resolution=(
-                (1 / voxel_size[1]) * 25400,
-                (1 / voxel_size[2]) * 25400,
+                1 / voxel_size[2],
+                1 / voxel_size[1],
             ),
             metadata={
                 "unit": "um",
                 "axes": "TZCYX",
-                "PhysicalSizeX": voxel_size[2],
-                "PhysicalSizeXUnit": "um",
-                "PhysicalSizeY": voxel_size[1],
-                "PhysicalSizeYUnit": "um",
-                "PhysicalSizeZ": voxel_size[0],
-                "PhysicalSizeZUnit": "um",
                 "spacing": voxel_size[0],
-                "TimeIncrement": time_interval,
-                "TimeIncrementUnit": "h",
+                "finterval": time_interval,
+                "tunit": "h",
             },
             compression="zlib",
             compressionargs={"level": 8},

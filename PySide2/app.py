@@ -13,6 +13,7 @@ matplotlib.use("Qt5Agg")
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 from utils.file_to_folder import file_to_folder
+from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 # Import PySide2 FIRST
 from PySide2.QtCore import Qt, QThread, Signal
@@ -538,24 +539,40 @@ class MainWindow(QMainWindow):
             "Crop samples before segmentation, this is done automatically for timelapses and manually for fixed samples"
         )
         self.do_crop_sample.setChecked(True)
+        self.do_crop_sample.toggled.connect(self._toggle_crop_suboptions)
         layout.addWidget(self.do_crop_sample)
+
+        self.manual_crop_fixed_widget = QWidget()
+        manual_crop_layout = QVBoxLayout(self.manual_crop_fixed_widget)
+        manual_crop_layout.setContentsMargins(0, 0, 0, 0)
+        manual_crop_layout.setSpacing(0)
 
         self.manual_crop_fixed_checkbox = QCheckBox(
             "For fixed samples: use manual cropping"
         )
         self.manual_crop_fixed_checkbox.setChecked(False)
-        layout.addWidget(self.manual_crop_fixed_checkbox)
+        manual_crop_layout.addWidget(self.manual_crop_fixed_checkbox)
+        layout.addWidget(self.manual_crop_fixed_widget)
 
         # Save crop as ims or tif file selector
-        layout2 = QHBoxLayout()
+        self.save_crop_as_widget = QWidget()
+        layout2 = QHBoxLayout(self.save_crop_as_widget)
+        layout2.setContentsMargins(0, 0, 0, 0)
+        layout2.setSpacing(0)
         layout2.addWidget(QLabel("Save cropped files as:"))
         self.save_crop_as = QComboBox()
         self.save_crop_as.addItems([".ims", ".tif"])
         layout2.addWidget(self.save_crop_as)
         layout2.addStretch()  # Push everything to the left
-        layout.addLayout(layout2)
+        layout.addWidget(self.save_crop_as_widget)
+
+        self._toggle_crop_suboptions(self.do_crop_sample.isChecked())
 
         return layout
+
+    def _toggle_crop_suboptions(self, checked):
+        self.manual_crop_fixed_widget.setVisible(checked)
+        self.save_crop_as_widget.setVisible(checked)
 
     def _create_phenotype_settings_layout(self):
         layout = QVBoxLayout()
@@ -1549,26 +1566,9 @@ class ViewerWorker(QThread):
                     movie = ims(os.path.join(self.base_path, sample, input_file))
                     voxel_size = movie.resolution
                 else:
-                    with tifffile.TiffFile(
+                    movie, voxel_size, _, _ = load_tiff_movie_and_metadata(
                         os.path.join(self.base_path, sample, input_file)
-                    ) as tif:
-                        if tif.is_ome:
-                            import xml.etree.ElementTree as ET
-
-                            root = ET.fromstring(tif.ome_metadata)
-                            ns = root.tag.split("}")[0].lstrip("{")
-                            pixels = root.find(f".//{{{ns}}}Pixels")
-                            voxel_size = (
-                                float(pixels.get("PhysicalSizeZ", 1.0)),
-                                float(pixels.get("PhysicalSizeY", 1.0)),
-                                float(pixels.get("PhysicalSizeX", 1.0)),
-                            )
-                        else:
-                            voxel_size = (1.0, 1.0, 1.0)
-                        movie = tif.asarray()
-                    while movie.ndim < 5:
-                        movie = np.expand_dims(movie, axis=0)
-                    movie = np.transpose(movie, (0, 2, 1, 3, 4))  # TZCYX -> TCZYX
+                    )
 
                 print(voxel_size)
                 print(f"movie {movie.shape}")
