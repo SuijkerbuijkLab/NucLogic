@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 from libpysal.weights import KNN
 from esda.moran import Moran
-from alive_progress import alive_bar
 from imaris_ims_file_reader.ims import ims
 from PIL import Image
 import scipy.ndimage as ndimage
@@ -73,8 +72,7 @@ def crop(
     max_dims = [0, 0, 0, 0]
 
     # Loop over every frame in the movie to crop that frame.
-    with alive_bar(timepoints, title="Cropping frames") as bar:
-        for frame in range(timepoints):
+    for frame in range(timepoints):
 
             maskXY = np.max(organoid_only[frame, nuclei], axis=0) > 0
             coordsXY = np.where(maskXY)
@@ -188,12 +186,11 @@ def crop(
             cropped_movie.append(cropped_image_masked)
             for i in range(4):
                 max_dims[i] = max(max_dims[i], cropped_image_masked.shape[i])
-            bar()
 
-        cropped_movie = [pad_to_shape(stack, max_dims) for stack in cropped_movie]
-        cropped_movie = np.stack(cropped_movie, axis=0)
+    cropped_movie = [pad_to_shape(stack, max_dims) for stack in cropped_movie]
+    cropped_movie = np.stack(cropped_movie, axis=0)
 
-        return cropped_movie
+    return cropped_movie
 
 
 def get_coords(movie):

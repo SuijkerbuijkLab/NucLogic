@@ -7,6 +7,7 @@ from utils.find_input_file import find_input_file
 from utils.expand_mask import expand_mask
 from utils.get_time_interval import get_time_interval
 from utils.offset_image import offset_image
+from utils.compute_knn_features import compute_knn_features
 from imaris_ims_file_reader import ims
 from utils.tiff_metadata import load_tiff_movie_and_metadata
 
@@ -20,11 +21,12 @@ def add_advanced_statistics(
     cytoplasm_size=5,
     save_measurement_mask=False,
     user_voxel_size=(1.0, 1.0, 1.0),
+    knn=None,
 ):
     extra_props = extra_props or []
 
-    if not extra_props:
-        print("No extra properties selected. Nothing to add.")
+    if not extra_props and knn is None:
+        print("No extra properties selected and KNN is disabled. Nothing to add.")
         return
 
     def _is_intensity_property(prop_name):
@@ -229,6 +231,18 @@ def add_advanced_statistics(
                 time_props = _merge_overwrite(
                     time_props, bgsub_intensity_df, key="label"
                 )
+
+        if knn is not None:
+            time_props = compute_knn_features(
+                time_props,
+                k=knn,
+                position_columns=["z", "y", "x"],
+                get_phenotype_score=False,
+                label_column="label",
+                distance_column=f"knn_{knn}_avg_distance",
+                neighbors_column=f"knn_{knn}_neighbors",
+                add_cell_id=False,
+            )
 
         updated_timepoint_tables.append(time_props)
 

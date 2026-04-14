@@ -19,7 +19,6 @@ from utils.max_project import max_project
 from utils.compensate_voxel_size import compensate_voxel_size
 from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
-from utils.get_extra_mask_properties import get_extra_mask_properties
 from utils.expand_mask import expand_mask
 from utils.tiff_metadata import load_tiff_movie_and_metadata
 
@@ -38,22 +37,12 @@ def segment_organoid(
     do_crop_sample=False,
     save_frames=True,
     save_segmentation=True,
-    extra_props=None,  # List of extra properties to extract from the masks in addition to the default properties (label, z, y, x, bounding_box, volume)
     measure_intensity_in="Nuclei",
     cytoplasm_size=5,
     save_measurement_mask=False,
     user_voxel_size=(1.0, 1.0, 1.0),
 ):
     nuclei_channels = []
-    extra_props = extra_props or []
-
-    def _is_intensity_property(prop_name):
-        return (
-            prop_name.startswith("intensity_")
-            or prop_name.startswith("centroid_weighted")
-            or prop_name.startswith("moments_weighted")
-            or prop_name == "image_intensity"
-        )
 
     def _to_voxel_tuple(voxel_like):
         try:
@@ -75,8 +64,6 @@ def segment_organoid(
             return user_voxel
         return measured
 
-    intensity_props = [p for p in extra_props if _is_intensity_property(p)]
-    shape_props = [p for p in extra_props if not _is_intensity_property(p)]
     measure_region = measure_intensity_in.lower().strip()
 
     for i, channel_type in enumerate(channel_types):
@@ -279,24 +266,6 @@ def segment_organoid(
                 f"{channel.lower()}_background_subtracted",
             )
             channel_dfs[channel] = pd.merge(df_ch, df_ch_offset, on="label")
-
-        if shape_props:
-            extra_shape_df = get_extra_mask_properties(
-                segmented_stack_stitched, extra_props=shape_props
-            )
-            props = props.merge(extra_shape_df, on="label", how="left")
-
-        if intensity_props:
-            for ch_idx, channel in enumerate(channel_names):
-                if ch_idx >= frame.shape[0]:
-                    continue
-                extra_intensity_df = get_extra_mask_properties(
-                    mask_for_intensity,
-                    intensity_image=frame[ch_idx],
-                    extra_props=intensity_props,
-                    channel_name=f"{channel}_{region_tag}",
-                )
-                props = props.merge(extra_intensity_df, on="label", how="left")
 
         # Combine all channel dataframes into one dataframe for the timepoint
         df_timepoint = props.copy()

@@ -1,6 +1,7 @@
 from datetime import datetime
 import sys
 import os
+import shutil
 import torch
 from pathlib import Path
 import winreg
@@ -51,7 +52,6 @@ class MainWindow(QMainWindow):
         self.view_data_sample_list = None  # Separate list for View Data tab
         self.export_data_sample_list = None  # Separate list for Export Data tab
         self.samples_data = []  # Data structure holding samples
-        self.selected_model_path = None
         self._set_icon()
         self._setup_ui()
 
@@ -447,6 +447,22 @@ class MainWindow(QMainWindow):
         layout2.addStretch()  # Push everything to the left
         layout.addLayout(layout2)
 
+        layout_knn = QHBoxLayout()
+        layout_knn.addWidget(
+            QLabel("Calculate the mean internuclear distances to x KNN:")
+        )
+        self.knn_input = QLineEdit("None")
+        self.knn_input.setMaximumWidth(120)
+        layout_knn.addWidget(self.knn_input)
+        layout_knn.addStretch()
+        layout.addLayout(layout_knn)
+
+        self.calculate_phenotype_similarity_checkbox = QCheckBox(
+            "Also calculate phenotype similarity score from KNN neighbors"
+        )
+        self.calculate_phenotype_similarity_checkbox.setChecked(False)
+        layout.addWidget(self.calculate_phenotype_similarity_checkbox)
+
         layout_voxel_inputs = QHBoxLayout()
         layout_voxel_inputs.addWidget(
             QLabel(
@@ -506,6 +522,21 @@ class MainWindow(QMainWindow):
         extra_props = self.get_selected_advanced_statistics()
         advanced_statistics_only = self.advanced_statistics_only_checkbox.isChecked()
         save_measurement_mask = self.save_measurement_mask_checkbox.isChecked()
+        knn_text = self.knn_input.text().strip()
+        if knn_text == "" or knn_text.lower() == "none":
+            knn = None
+        else:
+            try:
+                knn = int(knn_text)
+            except ValueError as exc:
+                raise ValueError(
+                    "Invalid KNN value. Please enter None or a positive integer."
+                ) from exc
+            if knn < 1:
+                raise ValueError(
+                    "Invalid KNN value. Please enter None or a positive integer."
+                )
+
         try:
             voxel_z = float(self.voxel_size_z_input.text())
             voxel_x = float(self.voxel_size_x_input.text())
@@ -528,6 +559,8 @@ class MainWindow(QMainWindow):
             cytoplasm_size,
             save_measurement_mask,
             user_voxel_size,
+            knn,
+            self.calculate_phenotype_similarity_checkbox.isChecked(),
         )
 
     def _create_cropping_settings_layout(self):
@@ -836,63 +869,77 @@ class MainWindow(QMainWindow):
         model_setting_layout = QHBoxLayout()
         model_setting_layout.addWidget(QLabel("2D Segmentation model:"))
         self.model_combo_box = QComboBox()  # Store as instance variable
-        self.model_combo_box.addItems(
-            ["High quality imaging", "Low quality imaging", "Custom model"]
-        )
-        self.model_combo_box.currentTextChanged.connect(
-            self._on_model_selection_changed
-        )
+        self._refresh_model_options()
         model_setting_layout.addWidget(self.model_combo_box)
+
+        upload_button = QPushButton("Upload custom model")
+        upload_button.clicked.connect(self._upload_custom_model)
+        model_setting_layout.addWidget(upload_button)
         return model_setting_layout
 
-    def _on_model_selection_changed(self, selected_model):
-        """Handle model selection change"""
-        # Remove existing custom model section if present
-        if (
-            hasattr(self, "custom_model_layout")
-            and self.custom_model_layout is not None
-        ):
-            self._clear_layout(self.custom_model_layout)
-            self.advanced_layout.removeItem(self.custom_model_layout)
-            self.custom_model_layout = None
+    def _get_models_dir(self):
+        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
 
-        # Reset custom model path when switching models
-        self.selected_model_path = None
+    def _is_sam_support_file(self, entry_name):
+        lower_name = entry_name.lower()
+        return lower_name in {"sam2.1_hiera_s.yaml", "sam2.1_hiera_small.pt"}
 
-        # Add custom model section if selected
-        if selected_model == "Custom model":
-            self.custom_model_layout = self._create_custom_model_selection()
-            self.advanced_layout.insertLayout(1, self.custom_model_layout)
+    def _refresh_model_options(self, select_name=None):
+        models_dir = self._get_models_dir()
+        os.makedirs(models_dir, exist_ok=True)
 
-    def _create_custom_model_selection(self):
-        """Create UI for selecting a custom model file"""
-        layout = QHBoxLayout()
-        layout.addWidget(QLabel("Select custom model file:"))
+        if select_name is None and hasattr(self, "model_combo_box"):
+            select_name = self.model_combo_box.currentText()
 
-        self.model_file_label = QLineEdit()
-        self.model_file_label.setReadOnly(True)
-        self.model_file_label.setPlaceholderText("No file selected")
-        layout.addWidget(self.model_file_label)
+        model_entries = []
+        for entry in sorted(os.listdir(models_dir)):
+            if self._is_sam_support_file(entry):
+                continue
+            full_path = os.path.join(models_dir, entry)
+            if os.path.isdir(full_path) or os.path.isfile(full_path):
+                model_entries.append((entry, full_path))
 
-        browse_button = QPushButton("Browse")
-        browse_button.clicked.connect(self._browse_model_file)
-        layout.addWidget(browse_button)
+        self.model_combo_box.blockSignals(True)
+        self.model_combo_box.clear()
+        for display_name, full_path in model_entries:
+            self.model_combo_box.addItem(display_name, full_path)
 
-        return layout
+        if model_entries:
+            if select_name:
+                idx = self.model_combo_box.findText(select_name)
+                self.model_combo_box.setCurrentIndex(idx if idx >= 0 else 0)
+            else:
+                self.model_combo_box.setCurrentIndex(0)
+        self.model_combo_box.blockSignals(False)
 
-    def _browse_model_file(self):
-        """Open file dialog to select model file"""
-        file_filter = "All Files (*);;Model Files (*.pt *.pth *.onnx)"
-        file_path, _ = QFileDialog.getOpenFileName(
+    def _upload_custom_model(self):
+        file_filter = "Model Files (*.pt *.pth *.onnx *.npy);;All Files (*)"
+        src_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Model File",
+            "Select custom model file",
             "",
             file_filter,
             "All Files (*)",
         )
-        if file_path:
-            self.model_file_label.setText(file_path)
-            self.selected_model_path = file_path
+        if not src_path:
+            return
+
+        models_dir = self._get_models_dir()
+        os.makedirs(models_dir, exist_ok=True)
+
+        src_name = os.path.basename(src_path)
+        dst_path = os.path.join(models_dir, src_name)
+
+        if os.path.abspath(src_path) != os.path.abspath(dst_path):
+            if os.path.exists(dst_path):
+                stem, ext = os.path.splitext(src_name)
+                suffix = 1
+                while os.path.exists(os.path.join(models_dir, f"{stem}_{suffix}{ext}")):
+                    suffix += 1
+                dst_path = os.path.join(models_dir, f"{stem}_{suffix}{ext}")
+            shutil.copy2(src_path, dst_path)
+
+        self._refresh_model_options(select_name=os.path.basename(dst_path))
 
     def _create_save_individual_files(self):
         layout = QVBoxLayout()
@@ -920,19 +967,16 @@ class MainWindow(QMainWindow):
 
     def get_model_path(self):
         """Get the model path based on selected model"""
-        selected_model = self.model_combo_box.currentText()
+        model_path = self.model_combo_box.currentData()
+        if model_path and os.path.exists(model_path):
+            return model_path
 
-        model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+        selected_name = self.model_combo_box.currentText()
+        if not selected_name:
+            return None
 
-        if selected_model == "High quality imaging":
-            return os.path.join(model_path, "2d_high_quality_model")
-        elif selected_model == "Low quality imaging":
-            return os.path.join(model_path, "2d_low_quality_model")
-        elif selected_model == "Custom model":
-            if hasattr(self, "selected_model_path") and self.selected_model_path:
-                return self.selected_model_path
-            else:
-                return None  # No custom model selected
+        fallback_path = os.path.join(self._get_models_dir(), selected_name)
+        return fallback_path if os.path.exists(fallback_path) else None
 
     def get_sample_path_list(self):
         """Get list of selected samples"""
@@ -976,12 +1020,21 @@ class MainWindow(QMainWindow):
 
     def start_segmentation(self):
         """Start segmentation in a separate thread"""
+        sample_path_list = self.get_sample_path_list()
+        if not sample_path_list:
+            self.segmentation_summary_label.setText(
+                "No samples selected for segmentation."
+            )
+            self.segmentation_summary_label.setVisible(True)
+            return
+
+        self.progressbar.setRange(0, 100)
         self.progressbar.setVisible(True)
         self.progressbar.setValue(0)
         self.run_segmentation_btn.setEnabled(False)
         self.segmentation_summary_label.setVisible(False)
+        QApplication.processEvents()
 
-        sample_path_list = self.get_sample_path_list()
         model_path = self.get_model_path()
         channel_names, channel_types = self.get_channel_settings()
         breaking_threshold = self.get_breaking_threshold()
@@ -1012,15 +1065,27 @@ class MainWindow(QMainWindow):
                 cytoplasm_size,
                 save_measurement_mask,
                 user_voxel_size,
+                knn,
+                calculate_phenotype_similarity,
             ) = self.get_advanced_statistics_settings()
         except ValueError as e:
             self.segmentation_error(str(e))
             return
 
         manually_cropped_fixed_samples = []
-        if do_crop_sample and manual_crop_fixed:
+        if (
+            do_crop_sample
+            and manual_crop_fixed
+            and not phenotype_calling_only
+            and not advanced_statistics_only
+        ):
             try:
                 from main_functions.crop_sample import crop_sample
+
+                # Manual fixed-sample cropping happens in UI thread to allow interaction.
+                # Show indeterminate progress so users see work is ongoing.
+                self.progressbar.setRange(0, 0)
+                QApplication.processEvents()
 
                 for sample_path in sample_path_list:
                     was_cropped = crop_sample(
@@ -1034,6 +1099,11 @@ class MainWindow(QMainWindow):
                     )
                     if was_cropped:
                         manually_cropped_fixed_samples.append(sample_path)
+
+                # Restore determinate progress for worker phase.
+                self.progressbar.setRange(0, 100)
+                self.progressbar.setValue(0)
+                QApplication.processEvents()
             except Exception as e:
                 self.segmentation_error(str(e))
                 return
@@ -1063,6 +1133,8 @@ class MainWindow(QMainWindow):
             cytoplasm_size,
             save_measurement_mask,
             user_voxel_size,
+            knn,
+            calculate_phenotype_similarity,
             manually_cropped_fixed_samples,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
@@ -1075,6 +1147,8 @@ class MainWindow(QMainWindow):
     def segmentation_finished(self, elapsed_time):
         """Called when segmentation finishes"""
         self.run_segmentation_btn.setEnabled(True)
+        self.progressbar.setRange(0, 100)
+        self.progressbar.setValue(100)
 
         # Format the summary
         finish_time = datetime.now().strftime("%H:%M:%S")
@@ -1639,6 +1713,8 @@ class SegmentationWorker(QThread):
         cytoplasm_size,
         save_measurement_mask,
         user_voxel_size,
+        knn=None,
+        calculate_phenotype_similarity=False,
         manually_cropped_fixed_samples=None,
     ):
         super().__init__()
@@ -1666,7 +1742,12 @@ class SegmentationWorker(QThread):
         self.cytoplasm_size = cytoplasm_size
         self.save_measurement_mask = save_measurement_mask
         self.user_voxel_size = user_voxel_size
-        self.manually_cropped_fixed_samples = set(manually_cropped_fixed_samples or [])
+        self.knn = knn
+        self.calculate_phenotype_similarity = calculate_phenotype_similarity
+        self.manually_cropped_fixed_samples = {
+            os.path.normcase(os.path.normpath(p))
+            for p in (manually_cropped_fixed_samples or [])
+        }
 
     def run(self):
         try:
@@ -1676,11 +1757,23 @@ class SegmentationWorker(QThread):
             from main_functions.crop_sample import crop_sample
             from main_functions.split_phenotype_mask import split_phenotype_mask
             from main_functions.add_advanced_statistics import add_advanced_statistics
+            from main_functions.add_phenotype_similarity import add_phenotype_similarity
 
             start_time = datetime.now()
             loaded_cell_model = load_model(self.cell_model_path)
 
-            if self.do_crop_sample:
+            needs_auto_crop = (
+                self.do_crop_sample
+                and not self.phenotype_calling_only
+                and not self.advanced_statistics_only
+                and any(
+                    os.path.normcase(os.path.normpath(sample_path))
+                    not in self.manually_cropped_fixed_samples
+                    for sample_path in self.sample_path_list
+                )
+            )
+
+            if needs_auto_crop:
                 from sam2.build_sam import build_sam2_video_predictor
 
                 model_path = os.path.join(
@@ -1690,6 +1783,8 @@ class SegmentationWorker(QThread):
                     os.path.join(model_path, "sam2.1_hiera_s.yaml"),
                     os.path.join(model_path, "sam2.1_hiera_small.pt"),
                 )
+            else:
+                organoid_model = None
 
             failed_samples = []
             for idx, i in enumerate(self.sample_path_list):
@@ -1699,7 +1794,8 @@ class SegmentationWorker(QThread):
                         and not self.advanced_statistics_only
                     ):
                         if self.do_crop_sample:
-                            if i in self.manually_cropped_fixed_samples:
+                            normalized_i = os.path.normcase(os.path.normpath(i))
+                            if normalized_i in self.manually_cropped_fixed_samples:
                                 print(
                                     f"Skipping crop for {i}: fixed sample was manually cropped in UI thread."
                                 )
@@ -1721,12 +1817,25 @@ class SegmentationWorker(QThread):
                             self.do_crop_sample,
                             save_frames=self.save_frames,
                             save_segmentation=self.save_segmentation,
-                            extra_props=self.extra_props,
                             measure_intensity_in=self.measure_intensity_in,
                             cytoplasm_size=self.cytoplasm_size,
                             save_measurement_mask=self.save_measurement_mask,
                             user_voxel_size=self.user_voxel_size,
                         )
+
+                        if self.extra_props or self.knn is not None:
+                            print("Calculating advanced statistics...")
+                            add_advanced_statistics(
+                                i,
+                                self.extra_props,
+                                self.channel_names,
+                                do_crop_sample=self.do_crop_sample,
+                                measure_intensity_in=self.measure_intensity_in,
+                                cytoplasm_size=self.cytoplasm_size,
+                                save_measurement_mask=self.save_measurement_mask,
+                                user_voxel_size=self.user_voxel_size,
+                                knn=self.knn,
+                            )
                     if self.do_phenotype_calling:
                         print("Calculating phenotypes...")
                         calculate_phenotypes(
@@ -1748,7 +1857,25 @@ class SegmentationWorker(QThread):
                             cytoplasm_size=self.cytoplasm_size,
                             save_measurement_mask=self.save_measurement_mask,
                             user_voxel_size=self.user_voxel_size,
+                            knn=self.knn,
                         )
+
+                    if self.calculate_phenotype_similarity:
+                        if self.knn is None:
+                            print(
+                                "Skipping phenotype similarity score: KNN is disabled."
+                            )
+                        else:
+                            print("Calculating phenotype similarity score...")
+                            phenotype_column = None
+                            if self.do_phenotype_calling:
+                                phenotype_column = f"phenotype_{self.phenotype_1}_vs_{self.phenotype_2}"
+                            add_phenotype_similarity(
+                                i,
+                                knn=self.knn,
+                                phenotype_column=phenotype_column,
+                            )
+
                     if self.do_phenotype_calling and self.create_split_phenotype_mask:
                         print("Creating split phenotype mask...")
                         split_phenotype_mask(i, self.phenotype_1, self.phenotype_2)

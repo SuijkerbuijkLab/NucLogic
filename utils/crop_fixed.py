@@ -116,23 +116,73 @@ def crop_fixed(
             np.max(coordsXY[1]) + 1,
         )
 
-    # Load in the input image, which is either a ims or tiff
+    # Get a bounding box cropped version of the organoid.
+    # Do channel slicing one-by-one because ims reader does not support list-based
+    # indexing on the channel axis (e.g. movie[:, [0, 1], ...]).
+    if isinstance(nuclei, (list, tuple, np.ndarray)):
+        nuclei_list = [int(ch) for ch in nuclei]
+    else:
+        nuclei_list = [int(nuclei)]
+
+    if not nuclei_list:
+        raise ValueError(
+            "No nuclei channel configured. Please mark at least one channel as 'Nuclei marker'."
+        )
+
+    # Load in the input image, which is either a ims or tiff.
+    # Normalize to a consistent numpy layout: T,C,Z,Y,X.
     if input_file.endswith(".ims"):
-        movie = ims(input_file)  # T,C,Z,Y,X
-        while len(movie.shape) < 5:
-            movie = np.expand_dims(movie, axis=0)  # Add time dimension if missing
+        movie = ims(input_file)
+        movie = movie[:]
         print(f"Original movie shape: {movie.shape}")
     elif input_file.endswith(".tif"):
-        movie = tifffile.imread(input_file)  # T,Z,C,Y,X
-        while len(movie.shape) < 5:
-            movie = np.expand_dims(movie, axis=0)  # Add time dimension if missing
-        movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
+        movie = tifffile.imread(input_file)  # usually T,Z,C,Y,X
+        print(f"Original movie shape: {movie.shape}")
+    else:
+        raise ValueError("Unsupported input file for fixed cropping.")
 
-    # Get a bounding box cropped version of the organoid — always max-project over nuclei channels (handles 1 or 2)
-    nuclei_list = nuclei if isinstance(nuclei, list) else [nuclei]
-    ref = np.max(
-        movie[:, nuclei_list, :, row_min:row_max, col_min:col_max], axis=1
-    )  # (T, Z, Y, X)
+    if movie.ndim == 5:
+        # Assume already T,C,Z,Y,X
+        movie_tczyx = movie
+    elif movie.ndim == 4:
+        # Could be C,Z,Y,X (fixed 3D) OR T,C,Y,X (fixed 2D time).
+        if all(ch < movie.shape[0] for ch in nuclei_list):
+            # C,Z,Y,X -> add singleton time axis
+            movie_tczyx = movie[np.newaxis, ...]
+        elif all(ch < movie.shape[1] for ch in nuclei_list):
+            # T,C,Y,X -> add singleton Z axis
+            movie_tczyx = movie[:, :, np.newaxis, :, :]
+        else:
+            raise ValueError(
+                f"Could not infer channel axis for movie shape {movie.shape} with nuclei channels {nuclei_list}."
+            )
+    elif movie.ndim == 3:
+        # Z,Y,X -> single channel + single time
+        movie_tczyx = movie[np.newaxis, np.newaxis, ...]
+    else:
+        raise ValueError(
+            f"Unexpected movie shape {movie.shape}. Expected ZYX, CZYX, TCYX, or TCZYX."
+        )
+
+    # For TIFF path loaded as T,Z,C,Y,X, transpose to T,C,Z,Y,X when needed.
+    if (
+        input_file.endswith((".tif", ".tiff"))
+        and movie_tczyx.ndim == 5
+        and movie_tczyx.shape[2] <= 8
+        and movie_tczyx.shape[1] > 8
+    ):
+        movie_tczyx = np.transpose(movie_tczyx, (0, 2, 1, 3, 4))
+
+    channel_crops = []
+    for ch in nuclei_list:
+        if ch >= movie_tczyx.shape[1]:
+            raise ValueError(
+                f"Configured nuclei channel index {ch} is out of bounds for movie with {movie_tczyx.shape[1]} channels."
+            )
+        ch_crop = np.asarray(movie_tczyx[:, ch, :, row_min:row_max, col_min:col_max])
+        channel_crops.append(ch_crop)
+
+    ref = np.max(np.stack(channel_crops, axis=1), axis=1)  # (T, Z, Y, X)
 
     ref_crop = selected_mask[
         row_min:row_max, col_min:col_max
@@ -151,6 +201,8 @@ def crop_fixed(
     # Make an XZ projection used to determine relevant Z slices.
     # ref_masked is (T, Z, Y, X) -> collapse T and Y to get (Z, X).
     XZ = np.max(ref_masked, axis=(0, 2))
+    if XZ.ndim == 1:
+        XZ = XZ[np.newaxis, :]
 
     # Apply offset to enhance contrast and make background and signal more distinct
     XZ = offset_image(XZ, type="median")
@@ -160,6 +212,10 @@ def crop_fixed(
 
     # Step 1: Calculate Moran's I for each row
     for idx, row in enumerate(XZ):
+        row = np.atleast_1d(row)
+        if row.size < 2:
+            moran_values.append((idx, 0))
+            continue
         coords = np.arange(len(row)).reshape(-1, 1)
         w_1d = KNN.from_array(coords, k=2)
         moran = Moran(row, w_1d)
@@ -204,7 +260,9 @@ def crop_fixed(
             slice_max = min(max(max_block) + 2, ref.shape[1])
 
     # This time, crop the frame of the movie on all channels using corrext XYZ
-    cropped_image = movie[:, :, slice_min:slice_max, row_min:row_max, col_min:col_max]
+    cropped_image = movie_tczyx[
+        :, :, slice_min:slice_max, row_min:row_max, col_min:col_max
+    ]
 
     # On this cropped frame, make pixels outside the organoid black.
     # cropped_image has shape (T, C, Z, Y, X).
