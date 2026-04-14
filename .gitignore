@@ -9,4 +9,3 @@ env/
 */napari_paths.json
 */selected_paths.txt
 .history/
-models/*
