@@ -6,7 +6,8 @@ from utils.compute_knn_features import compute_phenotype_similarity_from_neighbo
 
 def add_phenotype_similarity(
     input_directory,
-    knn,
+    neighbors_column,
+    output_column,
     phenotype_column=None,
     label_column="label",
 ):
@@ -19,12 +20,11 @@ def add_phenotype_similarity(
         )
         return
 
-    if knn is None:
-        print("KNN is disabled. Skipping phenotype similarity calculation.")
+    if not neighbors_column:
+        print(
+            "No neighbors column provided. Skipping phenotype similarity calculation."
+        )
         return
-
-    neighbors_column = f"knn_{knn}_neighbors"
-    similarity_column = f"knn_{knn}_phenotype_similarity_score"
 
     properties = pd.read_csv(properties_path, sep="\t")
 
@@ -60,7 +60,7 @@ def add_phenotype_similarity(
                     neighbors_column=neighbors_column,
                     phenotype_column=phenotype_column,
                     label_column=label_column,
-                    output_column=similarity_column,
+                    output_column=output_column,
                 )
             )
         properties = pd.concat(updated, ignore_index=True)
@@ -70,10 +70,10 @@ def add_phenotype_similarity(
             neighbors_column=neighbors_column,
             phenotype_column=phenotype_column,
             label_column=label_column,
-            output_column=similarity_column,
+            output_column=output_column,
         )
 
     properties.to_csv(properties_path, sep="\t", index=False)
     print(
-        f"Added phenotype similarity score column '{similarity_column}' using neighbors in '{neighbors_column}'."
+        f"Added phenotype similarity score column '{output_column}' using neighbors in '{neighbors_column}'."
     )

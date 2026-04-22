@@ -121,10 +121,17 @@ def load_tiff_movie_and_metadata(input_file):
 
         loaded_movie = tif.asarray()
 
+    if loaded_movie.ndim < 3:
+        raise ValueError("Loaded TIFF movie must have at least 3 dimensions (Z, Y, X)")
+
     while loaded_movie.ndim < 5:
         loaded_movie = np.expand_dims(loaded_movie, axis=0)
-    loaded_movie = np.transpose(
-        loaded_movie, (0, 2, 1, 3, 4)
-    )  # from T,Z,C,Y,X to T,C,Z,Y,X
+
+    if (
+        loaded_movie.shape[1] > loaded_movie.shape[2]
+    ):  # if Z dimension is smaller than C, assume Z is the second dimension
+        loaded_movie = np.transpose(
+            loaded_movie, (0, 2, 1, 3, 4)
+        )  # from T,Z,C,Y,X to T,C,Z,Y,X
 
     return loaded_movie, voxel_size, time_interval, metadata_missing

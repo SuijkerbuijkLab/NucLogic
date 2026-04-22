@@ -19,7 +19,7 @@ from utils.max_project import max_project
 from utils.compensate_voxel_size import compensate_voxel_size
 from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
-from utils.expand_mask import expand_mask
+from utils.expand_mask import expand_mask_3d
 from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 
@@ -234,12 +234,12 @@ def segment_organoid(
             mask_for_intensity = segmented_stack_stitched
             region_tag = "nuclei"
         elif measure_region == "whole cell":
-            mask_for_intensity = expand_mask(
+            mask_for_intensity = expand_mask_3d(
                 segmented_stack_stitched, dilation_size=cytoplasm_size
             )
             region_tag = "whole_cell"
         elif measure_region == "cytoplasm":
-            whole_cell_mask = expand_mask(
+            whole_cell_mask = expand_mask_3d(
                 segmented_stack_stitched, dilation_size=cytoplasm_size
             )
             mask_for_intensity = np.where(

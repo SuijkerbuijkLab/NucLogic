@@ -4,10 +4,11 @@ import numpy as np
 import tifffile
 from utils.get_extra_mask_properties import get_extra_mask_properties
 from utils.find_input_file import find_input_file
-from utils.expand_mask import expand_mask
+from utils.expand_mask import expand_mask_3d
 from utils.get_time_interval import get_time_interval
 from utils.offset_image import offset_image
 from utils.compute_knn_features import compute_knn_features
+from utils.get_touching_neigbhours_3d import get_touching_neighbors_3d
 from imaris_ims_file_reader import ims
 from utils.tiff_metadata import load_tiff_movie_and_metadata
 
@@ -21,13 +22,37 @@ def add_advanced_statistics(
     cytoplasm_size=5,
     save_measurement_mask=False,
     user_voxel_size=(1.0, 1.0, 1.0),
+    calculate_neighbour_statistics=False,
+    use_knn_neighbours=False,
     knn=None,
+    use_touching_neighbours_3d=False,
+    touching_dilation_um=None,
 ):
     extra_props = extra_props or []
 
-    if not extra_props and knn is None:
-        print("No extra properties selected and KNN is disabled. Nothing to add.")
+    should_run_knn = (
+        calculate_neighbour_statistics and use_knn_neighbours and knn is not None
+    )
+    should_run_touching = (
+        calculate_neighbour_statistics
+        and use_touching_neighbours_3d
+        and touching_dilation_um is not None
+    )
+
+    if not extra_props and not should_run_knn and not should_run_touching:
+        print(
+            "No extra properties selected and neighbour statistics are disabled. Nothing to add."
+        )
         return
+
+    def _format_param_token(value):
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if numeric_value.is_integer():
+            return str(int(numeric_value))
+        return format(numeric_value, "g").replace(".", "p")
 
     def _is_intensity_property(prop_name):
         return (
@@ -94,25 +119,6 @@ def add_advanced_statistics(
             f"Unexpected segmented image shape {segmented_movie.shape}; expected TZYX or ZYX."
         )
 
-    measure_region = measure_intensity_in.lower().strip()
-    if measure_region == "nuclei":
-        mask_to_use = segmented_movie
-        region_tag = "nuclei"
-    elif measure_region == "whole cell":
-        mask_to_use = expand_mask(segmented_movie, dilation_size=cytoplasm_size)
-        region_tag = "whole_cell"
-    elif measure_region == "cytoplasm":
-        whole_cell_mask = expand_mask(segmented_movie, dilation_size=cytoplasm_size)
-        # Keep expanded cell labels only outside the nucleus to preserve per-cell labeling.
-        mask_to_use = np.where(segmented_movie == 0, whole_cell_mask, 0).astype(
-            whole_cell_mask.dtype
-        )
-        region_tag = "cytoplasm"
-    else:
-        raise ValueError(
-            "measure_intensity_in must be one of: 'Nuclei', 'Cytoplasm', 'Whole cell'."
-        )
-
     if do_crop_sample:
         input_file = [
             os.path.join(input_directory, f)
@@ -154,6 +160,33 @@ def add_advanced_statistics(
 
     voxel_size = _resolve_voxel_size(voxel_size, metadata_missing)
 
+    measure_region = measure_intensity_in.lower().strip()
+    if measure_region == "nuclei":
+        mask_to_use = segmented_movie
+        region_tag = "nuclei"
+    elif measure_region == "whole cell":
+        mask_to_use = expand_mask_3d(
+            segmented_movie,
+            dilation_size_um=float(cytoplasm_size),
+            voxel_size=voxel_size,
+        )
+        region_tag = "whole_cell"
+    elif measure_region == "cytoplasm":
+        whole_cell_mask = expand_mask_3d(
+            segmented_movie,
+            dilation_size_um=float(cytoplasm_size),
+            voxel_size=voxel_size,
+        )
+        # Keep expanded cell labels only outside the nucleus to preserve per-cell labeling.
+        mask_to_use = np.where(segmented_movie == 0, whole_cell_mask, 0).astype(
+            whole_cell_mask.dtype
+        )
+        region_tag = "cytoplasm"
+    else:
+        raise ValueError(
+            "measure_intensity_in must be one of: 'Nuclei', 'Cytoplasm', 'Whole cell'."
+        )
+
     if save_measurement_mask and measure_region != "nuclei":
         sample_name = os.path.basename(input_directory)
         tifffile.imwrite(
@@ -172,6 +205,40 @@ def add_advanced_statistics(
             compression="zlib",
             compressionargs={"level": 8},
         )
+
+    touching_expanded_movie = None
+    touching_prefix = None
+    if should_run_touching:
+        touching_token = _format_param_token(touching_dilation_um)
+        touching_prefix = f"touching_neighbour_{touching_token}um"
+        touching_expanded_movie = expand_mask_3d(
+            segmented_movie,
+            dilation_size_um=float(touching_dilation_um),
+            voxel_size=voxel_size,
+        )
+
+        sample_name = os.path.basename(input_directory)
+        touching_mask_path = os.path.join(
+            input_directory,
+            f"{sample_name}_segmented_{touching_prefix}.tif",
+        )
+        tifffile.imwrite(
+            touching_mask_path,
+            touching_expanded_movie,
+            bigtiff=True,
+            imagej=True,
+            resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
+            metadata={
+                "unit": "um",
+                "axes": "TZYX",
+                "spacing": voxel_size[0],
+                "finterval": time_interval,
+                "tunit": "h",
+            },
+            compression="zlib",
+            compressionargs={"level": 8},
+        )
+        print(f"Saved touching-neighbour expansion mask to {touching_mask_path}")
 
     n_timepoints = min(
         len(props["timepoint"].unique()),
@@ -232,17 +299,55 @@ def add_advanced_statistics(
                     time_props, bgsub_intensity_df, key="label"
                 )
 
-        if knn is not None:
+        if should_run_knn:
             time_props = compute_knn_features(
                 time_props,
                 k=knn,
                 position_columns=["z", "y", "x"],
                 get_phenotype_score=False,
                 label_column="label",
-                distance_column=f"knn_{knn}_avg_distance",
-                neighbors_column=f"knn_{knn}_neighbors",
+                distance_column=f"mean_distance_{knn}_KNN",
+                neighbors_column=f"neighbours_{knn}_KNN",
                 add_cell_id=False,
             )
+
+        if should_run_touching:
+            touching_mask_3d = touching_expanded_movie[timepoint_int]
+            touching_neighbors = get_touching_neighbors_3d(touching_mask_3d)
+
+            label_values = time_props["label"].tolist()
+            label_to_xyz = {
+                int(row.label): np.array([row.z, row.y, row.x], dtype=float)
+                for row in time_props.itertuples(index=False)
+            }
+
+            touching_rows = []
+            for raw_label in label_values:
+                label = int(raw_label)
+                neighbors = touching_neighbors.get(label, [])
+                mean_distance = np.nan
+                if neighbors and label in label_to_xyz:
+                    base_xyz = label_to_xyz[label]
+                    neighbor_distances = []
+                    for neighbor in neighbors:
+                        if neighbor not in label_to_xyz:
+                            continue
+                        distance = np.linalg.norm(base_xyz - label_to_xyz[neighbor])
+                        neighbor_distances.append(distance)
+                    if neighbor_distances:
+                        mean_distance = float(np.mean(neighbor_distances))
+
+                touching_rows.append(
+                    {
+                        "label": label,
+                        f"{touching_prefix}_neighbours": neighbors,
+                        f"{touching_prefix}_count": len(neighbors),
+                        f"mean_distance_{touching_prefix}": mean_distance,
+                    }
+                )
+
+            touching_df = pd.DataFrame(touching_rows)
+            time_props = _merge_overwrite(time_props, touching_df, key="label")
 
         updated_timepoint_tables.append(time_props)
 

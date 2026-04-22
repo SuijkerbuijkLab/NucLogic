@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
 
         layout_cytoplasm = QHBoxLayout()
         self.QLabel_cytoplasm_size = QLabel(
-            "Create cytoplasm by extending ... pixels outside of nucleus in XY:"
+            "Create cytoplasm by extending ... um outside of nucleus in 3D:"
         )
         self.QLabel_cytoplasm_size.setVisible(False)
         layout_cytoplasm.addWidget(self.QLabel_cytoplasm_size)
@@ -447,21 +447,85 @@ class MainWindow(QMainWindow):
         layout2.addStretch()  # Push everything to the left
         layout.addLayout(layout2)
 
-        layout_knn = QHBoxLayout()
-        layout_knn.addWidget(
-            QLabel("Calculate the mean internuclear distances to x KNN:")
+        self.calculate_neighbour_statistics_checkbox = QCheckBox(
+            "Calculate neighbours statistics"
         )
+        self.calculate_neighbour_statistics_checkbox.setChecked(False)
+        self.calculate_neighbour_statistics_checkbox.toggled.connect(
+            self._toggle_neighbour_statistics
+        )
+        layout.addWidget(self.calculate_neighbour_statistics_checkbox)
+
+        neighbour_sub_layout = QVBoxLayout()
+        neighbour_sub_layout.setSpacing(6)
+        neighbour_sub_layout.setContentsMargins(30, 0, 0, 0)
+
+        self.calculate_neighbours_knn_checkbox = QCheckBox(
+            "Calculate neighbours using KNN"
+        )
+        self.calculate_neighbours_knn_checkbox.setChecked(False)
+        self.calculate_neighbours_knn_checkbox.toggled.connect(
+            self._toggle_knn_neighbour_options
+        )
+        neighbour_sub_layout.addWidget(self.calculate_neighbours_knn_checkbox)
+
+        self.knn_neighbour_options_widget = QWidget()
+        knn_neighbour_options_layout = QVBoxLayout(self.knn_neighbour_options_widget)
+        knn_neighbour_options_layout.setContentsMargins(30, 0, 0, 0)
+        knn_neighbour_options_layout.setSpacing(6)
+
+        layout_knn = QHBoxLayout()
+        layout_knn.addWidget(QLabel("KNN value (None disables KNN):"))
         self.knn_input = QLineEdit("None")
         self.knn_input.setMaximumWidth(120)
         layout_knn.addWidget(self.knn_input)
         layout_knn.addStretch()
-        layout.addLayout(layout_knn)
+        knn_neighbour_options_layout.addLayout(layout_knn)
 
-        self.calculate_phenotype_similarity_checkbox = QCheckBox(
-            "Also calculate phenotype similarity score from KNN neighbors"
+        self.calculate_phenotype_similarity_knn_checkbox = QCheckBox(
+            "Calculate phenotype similarity score based on KNN"
         )
-        self.calculate_phenotype_similarity_checkbox.setChecked(False)
-        layout.addWidget(self.calculate_phenotype_similarity_checkbox)
+        self.calculate_phenotype_similarity_knn_checkbox.setChecked(False)
+        knn_neighbour_options_layout.addWidget(
+            self.calculate_phenotype_similarity_knn_checkbox
+        )
+        neighbour_sub_layout.addWidget(self.knn_neighbour_options_widget)
+
+        self.calculate_neighbours_touching_checkbox = QCheckBox(
+            "Calculate neighbours that touch in 3D"
+        )
+        self.calculate_neighbours_touching_checkbox.setChecked(False)
+        self.calculate_neighbours_touching_checkbox.toggled.connect(
+            self._toggle_touching_neighbour_options
+        )
+        neighbour_sub_layout.addWidget(self.calculate_neighbours_touching_checkbox)
+
+        self.touching_neighbour_options_widget = QWidget()
+        touching_options_layout = QVBoxLayout(self.touching_neighbour_options_widget)
+        touching_options_layout.setContentsMargins(30, 0, 0, 0)
+        touching_options_layout.setSpacing(6)
+
+        layout_touching_dilation = QHBoxLayout()
+        layout_touching_dilation.addWidget(
+            QLabel(
+                "Dilate nuclei by x um to find touching neighbours (based on voxel size):"
+            )
+        )
+        self.touching_dilation_um_input = QLineEdit("1.0")
+        self.touching_dilation_um_input.setMaximumWidth(120)
+        layout_touching_dilation.addWidget(self.touching_dilation_um_input)
+        layout_touching_dilation.addStretch()
+        touching_options_layout.addLayout(layout_touching_dilation)
+
+        self.calculate_phenotype_similarity_touching_checkbox = QCheckBox(
+            "Calculate phenotype similarity score based on 3D touching"
+        )
+        self.calculate_phenotype_similarity_touching_checkbox.setChecked(False)
+        touching_options_layout.addWidget(
+            self.calculate_phenotype_similarity_touching_checkbox
+        )
+        neighbour_sub_layout.addWidget(self.touching_neighbour_options_widget)
+        layout.addLayout(neighbour_sub_layout)
 
         layout_voxel_inputs = QHBoxLayout()
         layout_voxel_inputs.addWidget(
@@ -484,6 +548,16 @@ class MainWindow(QMainWindow):
         layout_voxel_inputs.addStretch()
         layout.addLayout(layout_voxel_inputs)
 
+        self._toggle_neighbour_statistics(
+            self.calculate_neighbour_statistics_checkbox.isChecked()
+        )
+        self._toggle_knn_neighbour_options(
+            self.calculate_neighbours_knn_checkbox.isChecked()
+        )
+        self._toggle_touching_neighbour_options(
+            self.calculate_neighbours_touching_checkbox.isChecked()
+        )
+
         return layout
 
     def _cytoplasm_measurement_toggled(self):
@@ -497,6 +571,26 @@ class MainWindow(QMainWindow):
             self.cytoplasm_size_input.setVisible(False)
             self.save_measurement_mask_checkbox.setVisible(False)
             self.save_measurement_mask_checkbox.setChecked(False)
+
+    def _toggle_neighbour_statistics(self, checked):
+        self.calculate_neighbours_knn_checkbox.setVisible(checked)
+        self.calculate_neighbours_touching_checkbox.setVisible(checked)
+        self.knn_neighbour_options_widget.setVisible(
+            checked and self.calculate_neighbours_knn_checkbox.isChecked()
+        )
+        self.touching_neighbour_options_widget.setVisible(
+            checked and self.calculate_neighbours_touching_checkbox.isChecked()
+        )
+
+    def _toggle_knn_neighbour_options(self, checked):
+        self.knn_neighbour_options_widget.setVisible(
+            checked and self.calculate_neighbour_statistics_checkbox.isChecked()
+        )
+
+    def _toggle_touching_neighbour_options(self, checked):
+        self.touching_neighbour_options_widget.setVisible(
+            checked and self.calculate_neighbour_statistics_checkbox.isChecked()
+        )
 
     def get_selected_advanced_statistics(self):
         return [
@@ -522,19 +616,60 @@ class MainWindow(QMainWindow):
         extra_props = self.get_selected_advanced_statistics()
         advanced_statistics_only = self.advanced_statistics_only_checkbox.isChecked()
         save_measurement_mask = self.save_measurement_mask_checkbox.isChecked()
-        knn_text = self.knn_input.text().strip()
-        if knn_text == "" or knn_text.lower() == "none":
-            knn = None
-        else:
-            try:
-                knn = int(knn_text)
-            except ValueError as exc:
+        calculate_neighbour_statistics = (
+            self.calculate_neighbour_statistics_checkbox.isChecked()
+        )
+        use_knn_neighbours = False
+        calculate_phenotype_similarity_knn = False
+        knn = None
+        use_touching_neighbours_3d = False
+        touching_dilation_um = None
+        calculate_phenotype_similarity_touching = False
+
+        if calculate_neighbour_statistics:
+            use_knn_neighbours = self.calculate_neighbours_knn_checkbox.isChecked()
+            use_touching_neighbours_3d = (
+                self.calculate_neighbours_touching_checkbox.isChecked()
+            )
+
+            if not use_knn_neighbours and not use_touching_neighbours_3d:
                 raise ValueError(
-                    "Invalid KNN value. Please enter None or a positive integer."
-                ) from exc
-            if knn < 1:
-                raise ValueError(
-                    "Invalid KNN value. Please enter None or a positive integer."
+                    "Please select at least one neighbour method (KNN and/or 3D touching)."
+                )
+
+            if use_knn_neighbours:
+                knn_text = self.knn_input.text().strip()
+                if knn_text == "" or knn_text.lower() == "none":
+                    raise ValueError(
+                        "KNN is enabled. Please enter a positive integer KNN value."
+                    )
+                try:
+                    knn = int(knn_text)
+                except ValueError as exc:
+                    raise ValueError(
+                        "Invalid KNN value. Please enter a positive integer."
+                    ) from exc
+                if knn < 1:
+                    raise ValueError(
+                        "Invalid KNN value. Please enter a positive integer."
+                    )
+                calculate_phenotype_similarity_knn = (
+                    self.calculate_phenotype_similarity_knn_checkbox.isChecked()
+                )
+
+            if use_touching_neighbours_3d:
+                try:
+                    touching_dilation_um = float(self.touching_dilation_um_input.text())
+                except ValueError as exc:
+                    raise ValueError(
+                        "Invalid 3D touching dilation value. Please enter a positive number in um."
+                    ) from exc
+                if touching_dilation_um <= 0:
+                    raise ValueError(
+                        "Invalid 3D touching dilation value. Please enter a positive number in um."
+                    )
+                calculate_phenotype_similarity_touching = (
+                    self.calculate_phenotype_similarity_touching_checkbox.isChecked()
                 )
 
         try:
@@ -559,8 +694,13 @@ class MainWindow(QMainWindow):
             cytoplasm_size,
             save_measurement_mask,
             user_voxel_size,
+            calculate_neighbour_statistics,
+            use_knn_neighbours,
             knn,
-            self.calculate_phenotype_similarity_checkbox.isChecked(),
+            calculate_phenotype_similarity_knn,
+            use_touching_neighbours_3d,
+            touching_dilation_um,
+            calculate_phenotype_similarity_touching,
         )
 
     def _create_cropping_settings_layout(self):
@@ -1065,8 +1205,13 @@ class MainWindow(QMainWindow):
                 cytoplasm_size,
                 save_measurement_mask,
                 user_voxel_size,
+                calculate_neighbour_statistics,
+                use_knn_neighbours,
                 knn,
-                calculate_phenotype_similarity,
+                calculate_phenotype_similarity_knn,
+                use_touching_neighbours_3d,
+                touching_dilation_um,
+                calculate_phenotype_similarity_touching,
             ) = self.get_advanced_statistics_settings()
         except ValueError as e:
             self.segmentation_error(str(e))
@@ -1133,8 +1278,13 @@ class MainWindow(QMainWindow):
             cytoplasm_size,
             save_measurement_mask,
             user_voxel_size,
+            calculate_neighbour_statistics,
+            use_knn_neighbours,
             knn,
-            calculate_phenotype_similarity,
+            calculate_phenotype_similarity_knn,
+            use_touching_neighbours_3d,
+            touching_dilation_um,
+            calculate_phenotype_similarity_touching,
             manually_cropped_fixed_samples,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
@@ -1713,8 +1863,13 @@ class SegmentationWorker(QThread):
         cytoplasm_size,
         save_measurement_mask,
         user_voxel_size,
+        calculate_neighbour_statistics=False,
+        use_knn_neighbours=False,
         knn=None,
-        calculate_phenotype_similarity=False,
+        calculate_phenotype_similarity_knn=False,
+        use_touching_neighbours_3d=False,
+        touching_dilation_um=None,
+        calculate_phenotype_similarity_touching=False,
         manually_cropped_fixed_samples=None,
     ):
         super().__init__()
@@ -1742,8 +1897,15 @@ class SegmentationWorker(QThread):
         self.cytoplasm_size = cytoplasm_size
         self.save_measurement_mask = save_measurement_mask
         self.user_voxel_size = user_voxel_size
+        self.calculate_neighbour_statistics = calculate_neighbour_statistics
+        self.use_knn_neighbours = use_knn_neighbours
         self.knn = knn
-        self.calculate_phenotype_similarity = calculate_phenotype_similarity
+        self.calculate_phenotype_similarity_knn = calculate_phenotype_similarity_knn
+        self.use_touching_neighbours_3d = use_touching_neighbours_3d
+        self.touching_dilation_um = touching_dilation_um
+        self.calculate_phenotype_similarity_touching = (
+            calculate_phenotype_similarity_touching
+        )
         self.manually_cropped_fixed_samples = {
             os.path.normcase(os.path.normpath(p))
             for p in (manually_cropped_fixed_samples or [])
@@ -1758,6 +1920,15 @@ class SegmentationWorker(QThread):
             from main_functions.split_phenotype_mask import split_phenotype_mask
             from main_functions.add_advanced_statistics import add_advanced_statistics
             from main_functions.add_phenotype_similarity import add_phenotype_similarity
+
+            def _format_param_token(value):
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    return str(value)
+                if numeric_value.is_integer():
+                    return str(int(numeric_value))
+                return format(numeric_value, "g").replace(".", "p")
 
             start_time = datetime.now()
             loaded_cell_model = load_model(self.cell_model_path)
@@ -1823,7 +1994,17 @@ class SegmentationWorker(QThread):
                             user_voxel_size=self.user_voxel_size,
                         )
 
-                        if self.extra_props or self.knn is not None:
+                        should_run_advanced_stats = bool(self.extra_props) or (
+                            self.calculate_neighbour_statistics
+                            and (
+                                (self.use_knn_neighbours and self.knn is not None)
+                                or (
+                                    self.use_touching_neighbours_3d
+                                    and self.touching_dilation_um is not None
+                                )
+                            )
+                        )
+                        if should_run_advanced_stats:
                             print("Calculating advanced statistics...")
                             add_advanced_statistics(
                                 i,
@@ -1834,7 +2015,11 @@ class SegmentationWorker(QThread):
                                 cytoplasm_size=self.cytoplasm_size,
                                 save_measurement_mask=self.save_measurement_mask,
                                 user_voxel_size=self.user_voxel_size,
+                                calculate_neighbour_statistics=self.calculate_neighbour_statistics,
+                                use_knn_neighbours=self.use_knn_neighbours,
                                 knn=self.knn,
+                                use_touching_neighbours_3d=self.use_touching_neighbours_3d,
+                                touching_dilation_um=self.touching_dilation_um,
                             )
                     if self.do_phenotype_calling:
                         print("Calculating phenotypes...")
@@ -1857,22 +2042,55 @@ class SegmentationWorker(QThread):
                             cytoplasm_size=self.cytoplasm_size,
                             save_measurement_mask=self.save_measurement_mask,
                             user_voxel_size=self.user_voxel_size,
+                            calculate_neighbour_statistics=self.calculate_neighbour_statistics,
+                            use_knn_neighbours=self.use_knn_neighbours,
                             knn=self.knn,
+                            use_touching_neighbours_3d=self.use_touching_neighbours_3d,
+                            touching_dilation_um=self.touching_dilation_um,
                         )
 
-                    if self.calculate_phenotype_similarity:
-                        if self.knn is None:
+                    phenotype_column = None
+                    if self.do_phenotype_calling:
+                        phenotype_column = (
+                            f"phenotype_{self.phenotype_1}_vs_{self.phenotype_2}"
+                        )
+
+                    if self.calculate_phenotype_similarity_knn:
+                        if not self.use_knn_neighbours or self.knn is None:
                             print(
-                                "Skipping phenotype similarity score: KNN is disabled."
+                                "Skipping KNN phenotype similarity score: KNN neighbours are disabled."
                             )
                         else:
-                            print("Calculating phenotype similarity score...")
-                            phenotype_column = None
-                            if self.do_phenotype_calling:
-                                phenotype_column = f"phenotype_{self.phenotype_1}_vs_{self.phenotype_2}"
+                            print(
+                                "Calculating phenotype similarity ratio based on KNN neighbours..."
+                            )
                             add_phenotype_similarity(
                                 i,
-                                knn=self.knn,
+                                neighbors_column=f"neighbours_{self.knn}_KNN",
+                                output_column=f"phenotype_similarity_ratio_{self.knn}_KNN",
+                                phenotype_column=phenotype_column,
+                            )
+
+                    if self.calculate_phenotype_similarity_touching:
+                        if (
+                            not self.use_touching_neighbours_3d
+                            or self.touching_dilation_um is None
+                        ):
+                            print(
+                                "Skipping 3D touching phenotype similarity score: touching neighbours are disabled."
+                            )
+                        else:
+                            touching_token = _format_param_token(
+                                self.touching_dilation_um
+                            )
+                            touching_prefix = f"touching_neighbour_{touching_token}um"
+                            print(
+                                "Calculating phenotype similarity ratio based on 3D touching neighbours..."
+                            )
+                            add_phenotype_similarity(
+                                i,
+                                neighbors_column=f"{touching_prefix}_neighbours",
+                                output_column=f"phenotype_similarity_ratio_{touching_prefix}",
                                 phenotype_column=phenotype_column,
                             )
 

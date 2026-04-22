@@ -1,6 +1,4 @@
 # Function to calculate the k-nearest neighbors for all cells in an organoid.
-
-
 import ast
 import numpy as np
 import sklearn.neighbors
@@ -11,6 +9,7 @@ def compute_knn_features(
     k=5,
     position_columns=["x", "y", "z"],
     get_phenotype_score=True,
+    phenotype_column="phenotype",
     label_column="label",
     distance_column="mean_knn_distance",
     neighbors_column=None,
@@ -65,7 +64,9 @@ def compute_knn_features(
     distances, indices = neighbours.kneighbors(coordinates)
     knn_distances = distances[:, 1:]  # Exclude the first column (distance to itself)
     knn_indices = indices[:, 1:]  # Exclude the first column (index of itself)
-    knn_neighbor_labels = [label_values[row_indices].tolist() for row_indices in knn_indices]
+    knn_neighbor_labels = [
+        label_values[row_indices].tolist() for row_indices in knn_indices
+    ]
 
     # Calculate the mean distance of every cell to its 5 nearest neighbours, which can measure density
     mean_knn_distance = [distance.mean() for distance in knn_distances]
@@ -81,22 +82,21 @@ def compute_knn_features(
     if not get_phenotype_score:
         return data
 
-    if "phenotype" not in data.columns:
+    if phenotype_column not in data.columns:
         data["phenotype_similarity_score"] = np.nan
         return data
 
     if label_column in data.columns:
         phenotype_lookup = data.drop_duplicates(subset=[label_column]).set_index(
             label_column
-        )["phenotype"]
+        )[phenotype_column]
         current_keys = data[label_column].to_numpy()
     else:
-        phenotype_lookup = data["phenotype"]
+        phenotype_lookup = data[phenotype_column]
         current_keys = data.index.to_numpy()
 
-    # Here we calculate a phenotype similarity score
-    # This means that each cell gets a score of 0 to 5 based on how many of its nearest neigbours have the same phenotype
-    # A score of 5 means that all 5 nearest neighbours have the same phenotype,
+    # Here we calculate a phenotype similarity ratio in [0, 1].
+    # 0 means none of the neighbors share the same phenotype, 1 means all neighbors do.
     phenotype_scores = []
     for current_key, nn_labels_row in zip(current_keys, data[neighbors_column]):
         score = calculate_phenotype_similarity_score(
@@ -121,11 +121,14 @@ def calculate_phenotype_similarity_score(current_key, nn_labels_row, phenotype_l
 
     # Get phenotypes of the nearest neighbors
     neighbor_phenotypes = phenotype_lookup.reindex(nn_labels_row)
+    valid_neighbor_phenotypes = neighbor_phenotypes.dropna()
+    if len(valid_neighbor_phenotypes) == 0:
+        return np.nan
 
     # Count how many neighbors have the same phenotype
-    same_phenotype_count = (neighbor_phenotypes == current_phenotype).sum()
+    same_phenotype_count = (valid_neighbor_phenotypes == current_phenotype).sum()
 
-    return same_phenotype_count
+    return float(same_phenotype_count) / float(len(valid_neighbor_phenotypes))
 
 
 def _normalize_neighbor_labels(value):
