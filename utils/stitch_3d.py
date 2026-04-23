@@ -91,7 +91,7 @@ def make_unique_mask(mask):
     for z in range(mask.shape[0]):
         # go over every unique number in the mask and create a new slice with a new unique number 1 higher
         slice = mask[z]
-        unique_slice = mask[z].copy()
+        unique_slice = mask[z].copy().astype(np.uint32)
         for val in range(1, slice.max() + 1):
             unique_slice[slice == val] = number
             number += 1

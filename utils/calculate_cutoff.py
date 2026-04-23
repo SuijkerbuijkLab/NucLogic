@@ -19,6 +19,8 @@ def calculate_cutoff(df, column):
 
     # Reshape the data into something we can use for kmeans
     ratios = df[column].to_numpy().reshape(-1, 1)
+    # Remove any NaN values from the ratios
+    ratios = ratios[~np.isnan(ratios)].reshape(-1, 1)
 
     # Run a Gaussian Mixture Model to find two different groups of cells
     gmm = GaussianMixture(n_components=2, random_state=0)

@@ -138,6 +138,7 @@ def segment_organoid(
         old_stdout = sys.stdout  # backup current stdout
         sys.stdout = open(os.devnull, "w")
         segmented_stack = segment(frame_nuclei, cell_model)
+        sys.stdout = old_stdout  # reset old stdout
         # print(segmented_stack.shape, np.unique(segmented_stack))
         # tifffile.imwrite(
         #     os.path.join(input_directory, f"segmented_stack_timepoint_{timepoint}.tif"),
@@ -166,7 +167,6 @@ def segment_organoid(
                 image_type_1="nuclei",
                 breaking_threshold=breaking_threshold,
             )
-        sys.stdout = old_stdout  # reset old stdout
 
         print(
             f"Found {len(np.unique(segmented_stack_stitched)) - 1} cells at timepoint {timepoint}"
