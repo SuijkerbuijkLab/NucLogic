@@ -235,12 +235,12 @@ def segment_organoid(
             region_tag = "nuclei"
         elif measure_region == "whole cell":
             mask_for_intensity = expand_mask_3d(
-                segmented_stack_stitched, dilation_size=cytoplasm_size
+                segmented_stack_stitched, dilation_size_um=cytoplasm_size
             )
             region_tag = "whole_cell"
         elif measure_region == "cytoplasm":
             whole_cell_mask = expand_mask_3d(
-                segmented_stack_stitched, dilation_size=cytoplasm_size
+                segmented_stack_stitched, dilation_size_um=cytoplasm_size
             )
             mask_for_intensity = np.where(
                 segmented_stack_stitched == 0, whole_cell_mask, 0
