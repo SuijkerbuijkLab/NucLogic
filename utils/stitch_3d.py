@@ -29,29 +29,47 @@ class cell_2d:
     centroid: tuple
     coords_set: set
     volume: int
+    shape_2d: tuple | None = None
 
     def __post_init__(self):
         self._intensities = {}
 
 
 def get_cell_properties_2d(image):
-    # Get the properties of every mask in the image
+    # Vectorized alternative to regionprops for label, centroid, volume, coords_set
+    nonzero = image != 0
+    if not np.any(nonzero):
+        return []
 
-    props = regionprops(image)
+    z, y, x = np.nonzero(nonzero)
+    labels = image[z, y, x]
+    order = np.argsort(labels)
+    labels_sorted = labels[order]
+    z_sorted = z[order]
+    y_sorted = y[order]
+    x_sorted = x[order]
 
+    unique_labels, idx, counts = np.unique(
+        labels_sorted, return_index=True, return_counts=True
+    )
+    z_sum = np.add.reduceat(z_sorted, idx)
+    y_sum = np.add.reduceat(y_sorted, idx)
+    x_sum = np.add.reduceat(x_sorted, idx)
+    centroids = np.vstack((z_sum / counts, y_sum / counts, x_sum / counts)).T
+
+    height, width = image.shape[1], image.shape[2]
     organoid = []
-
-    # For every mask found, get the label, centeroid, boundingbox, and volume
-    for prop in props:
-        # Pre-compute coordinate set for fast IOU calculations later
-        coords_2d = prop.coords[:, 1:]
-        coords_set = set(map(tuple, coords_2d))
-
+    for label, start, count, centroid in zip(unique_labels, idx, counts, centroids):
+        y_part = y_sorted[start : start + count]
+        x_part = x_sorted[start : start + count]
+        flat_indices = np.ravel_multi_index((y_part, x_part), (height, width))
+        coords_set = set(flat_indices.tolist())
         cell = cell_2d(
-            label=prop.label,
-            centroid=prop.centroid,  # (z, y, x)
+            label=int(label),
+            centroid=tuple(centroid),
             coords_set=coords_set,
-            volume=prop.area,
+            volume=int(count),
+            shape_2d=(height, width),
         )
         organoid.append(cell)
 
@@ -59,6 +77,11 @@ def get_cell_properties_2d(image):
 
 
 def properties_channel(organoid, mask, image, channel_type=None):
+    # print(
+    #     f"Calculating intensity properties for channel '{channel_type}'..."
+    #     if channel_type
+    #     else "Calculating intensity properties for image..."
+    # )
 
     try:  # SCIkit changed the name of this property at some point, so we try both just in case
         props_channel = regionprops_table(
@@ -79,27 +102,36 @@ def properties_channel(organoid, mask, image, channel_type=None):
         attr_name = f"intensity_{channel_type}" if channel_type else "intensity"
         setattr(cell, attr_name, intensity_dict.get(cell.label, 0))
 
+    # print(
+    #     f"Calculated intensity properties for channel '{channel_type}'."
+    #     if channel_type
+    #     else "Calculated intensity properties for image."
+    # )
+
     return organoid
 
 
 def make_unique_mask(mask):
     """Makes a fresh mask from a already stitched mask"""
+    print("Creating unique mask for properties calculation...")
 
-    unique_mask = []
-    number = 1
-    for z in range(mask.shape[0]):
-        # go over every unique number in the mask and create a new slice with a new unique number 1 higher
-        slice = mask[z]
-        unique_slice = mask[z].copy().astype(np.uint32)
-        for val in range(1, slice.max() + 1):
-            unique_slice[slice == val] = number
-            number += 1
-        unique_mask.append(unique_slice)
-    unique_mask = np.stack(unique_mask, axis=0)
+    mask_uint = mask.astype(np.uint32, copy=False)
+    z_slices = mask_uint.shape[0]
+    slice_max = mask_uint.reshape(z_slices, -1).max(axis=1).astype(np.uint32)
+    offsets = np.concatenate(([0], np.cumsum(slice_max[:-1], dtype=np.uint32)))
+    unique_mask = mask_uint.copy()
 
-    print(
-        f"Unique mask created with {number-1} unique segmented cells over {mask.shape[0]} slices."
-    )
+    for z, offset in enumerate(offsets):
+        if offset == 0:
+            continue
+        slice_data = unique_mask[z]
+        nonzero = slice_data != 0
+        if np.any(nonzero):
+            slice_data[nonzero] = slice_data[nonzero] + offset
+
+    label_counts = [np.unique(mask_uint[z]).size - 1 for z in range(z_slices)]
+    total_unique = int(np.sum(label_counts))
+    print(f"Unique mask created with {total_unique} unique cells.")
 
     return unique_mask
 
@@ -118,6 +150,8 @@ def get_2d_mask_properties(
         organoid = properties_channel(
             organoid, unique_mask, image2, channel_type=image_type_2
         )
+
+    print(f"Calculated 2D (intensity) properties for all cells")
 
     return organoid
 
@@ -161,12 +195,23 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
     y_array = np.array([c.centroid[1] for c in organoid_2d])
     x_array = np.array([c.centroid[2] for c in organoid_2d])
     coords_sets = {i: c.coords_set for i, c in enumerate(organoid_2d)}
+    shape_2d = organoid_2d[0].shape_2d
+    if shape_2d is None:
+        raise ValueError("shape_2d missing; ensure get_cell_properties_2d sets it.")
 
     # group by integer z to increase speed
     z_groups = {}
     for idx, z_val in enumerate(z_array):
         z_int = int(round(z_val))
         z_groups.setdefault(z_int, []).append(idx)
+
+    # build per-slice KDTree for nearest neighbor queries
+    z_trees = {}
+    z_indices = {}
+    for z_int, indices in z_groups.items():
+        coords = np.column_stack((x_array[indices], y_array[indices]))
+        z_trees[z_int] = scipy.spatial.cKDTree(coords)
+        z_indices[z_int] = np.array(indices, dtype=np.int64)
 
     labels_3d = np.full(n, -1, dtype=np.int32)
 
@@ -175,18 +220,23 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
         next_z = int(round(z_array[idx])) + 1
         if next_z not in z_groups:
             return
-        # get all cells that havent been stitched yet
-        candidates = [c for c in z_groups[next_z] if labels_3d[c] == -1]
-        if not candidates:
+        tree = z_trees[next_z]
+        idxs = z_indices[next_z]
+        if idxs.size == 0:
             return
-        cand_arr = np.array(candidates)
+        point = (x_array[idx], y_array[idx])
+        cand_pos = tree.query_ball_point(point, r=distance_threshold)
+        if not cand_pos:
+            return
+        cand_idx = idxs[np.array(cand_pos, dtype=np.int64)]
+        cand_idx = cand_idx[labels_3d[cand_idx] == -1]
+        if cand_idx.size == 0:
+            return
         dists = np.hypot(
-            x_array[cand_arr] - x_array[idx], y_array[cand_arr] - y_array[idx]
+            x_array[cand_idx] - x_array[idx], y_array[cand_idx] - y_array[idx]
         )
         closest_cell = np.argmin(dists)
-        if dists[closest_cell] > distance_threshold:
-            return
-        cand_idx = cand_arr[closest_cell]
+        cand_idx = int(cand_idx[closest_cell])
         if calculate_iou(coords_sets, idx, cand_idx) > iou_threshold:
             stitch_forward(cand_idx, current_label)
 
@@ -196,7 +246,7 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
             current_label += 1
             stitch_forward(i, current_label)
 
-    # build organoid_3d list
+    # build organoid_3d list (skip 3D coords to avoid heavy conversions)
     organoid_3d = []
     intensity_attrs = [a for a in organoid_2d[0].__dict__ if a.startswith("intensity")]
     for cell in np.unique(labels_3d):
@@ -213,16 +263,10 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
             for attr in intensity_attrs
         }
 
-        coords_3d = set()
-        for z_idx, (z, _, _) in enumerate(centroids_2d):
-            z_int = int(round(z))
-            for y, x in coords_set_2d[z_idx]:
-                coords_3d.add((z_int, int(y), int(x)))
-
         cell3d = cell_3d(
             label=cell,
             centroid=np.mean(centroids_2d, axis=0),
-            coords_set=coords_3d,
+            coords_set=set(),
             volume=sum(volumes_2d),
             labels_2d=labels_2d,
             centroids_2d=centroids_2d,
@@ -230,6 +274,7 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
             volumes_2d=volumes_2d,
             intensities_2d=intensities_2d,
         )
+        cell3d.shape_2d = shape_2d
         organoid_3d.append(cell3d)
 
     print(f"Completed IOU based stitching: {len(organoid_3d)} cells formed.")
@@ -240,13 +285,12 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
 def mask_from_organoid(organoid, shape):
     mask = np.zeros(shape, dtype=np.uint16)
     for cell in organoid:
-        for z_idx, centroid in enumerate(cell.centroids_2d):
-            z_int = int(round(centroid[0]))
+        for z_idx, (z, y, x) in enumerate(cell.centroids_2d):
+            z_int = int(round(z))
             if 0 <= z_int < shape[0]:
-                s = cell.coords_set_2d[z_idx]
-                if s:
-                    yx = np.array(list(s), dtype=np.int32)
-                    mask[z_int, yx[:, 0], yx[:, 1]] = cell.label
+                for yy, xx in cell.coords_set_2d[z_idx]:
+                    if 0 <= yy < shape[1] and 0 <= xx < shape[2]:
+                        mask[z_int, yy, xx] = cell.label
     return mask
 
 
@@ -294,12 +338,12 @@ def calculate_line_3d(z_positions, y_positions, x_positions, points=3):
 def calculate_point_line_distances(
     z_positions, y_positions, x_positions, line_function
 ):
-    distances = []
-    for z, x, y in zip(z_positions, x_positions, y_positions):
-        line_x, line_y = line_function(z)
-        dist = np.sqrt((x - line_x) ** 2 + (y - line_y) ** 2)
-        distances.append(dist)
-    return distances
+    z_arr = np.asarray(z_positions)
+    line_x, line_y = line_function(z_arr)
+    return np.sqrt(
+        (np.asarray(x_positions) - line_x) ** 2
+        + (np.asarray(y_positions) - line_y) ** 2
+    )
 
 
 def get_slope_changes(distances):
@@ -358,8 +402,11 @@ def get_IOU_break_scores(cell):
     return iou_break_score
 
 
-def get_break_scores(organoid):
+def get_break_scores(organoid, skip_labels=None):
+    skip_labels = skip_labels or set()
     for cell in organoid:
+        if cell.label in skip_labels and cell.break_scores is not None:
+            continue
         num_slices = len(cell.volumes_2d)
         if num_slices < 5:
             cell.break_scores = [0] * num_slices
@@ -409,17 +456,10 @@ def split_cell_at_index(cell, break_position, new_label):
     # Build parent lineage: existing parents + current label
     parent_lineage = (cell.parents or []) + [cell.label]
 
-    # Build 3D coords_set for bottom cell
-    coords_3d_bottom = set()
-    for z_idx in range(break_position):
-        z_int = int(round(cell.centroids_2d[z_idx][0]))
-        for y, x in cell.coords_set_2d[z_idx]:
-            coords_3d_bottom.add((z_int, int(y), int(x)))
-
     bottom_cell = cell_3d(
         label=cell.label,
         centroid=np.mean(cell.centroids_2d[:break_position], axis=0),
-        coords_set=coords_3d_bottom,
+        coords_set=set(),
         volume=sum(cell.volumes_2d[:break_position]),
         labels_2d=cell.labels_2d[:break_position],
         centroids_2d=cell.centroids_2d[:break_position],
@@ -430,20 +470,12 @@ def split_cell_at_index(cell, break_position, new_label):
         },
         parents=parent_lineage,
     )
-    bottom_cell.shape_2d = getattr(cell, "shape_2d", None)
 
-    # Build 3D coords_set for top cell
     max_z = len(cell.volumes_2d)
-    coords_3d_top = set()
-    for z_idx in range(break_position, max_z):
-        z_int = int(round(cell.centroids_2d[z_idx][0]))
-        for y, x in cell.coords_set_2d[z_idx]:
-            coords_3d_top.add((z_int, int(y), int(x)))
-
     top_cell = cell_3d(
         label=new_label,
         centroid=np.mean(cell.centroids_2d[break_position:max_z], axis=0),
-        coords_set=coords_3d_top,
+        coords_set=set(),
         volume=sum(cell.volumes_2d[break_position:max_z]),
         labels_2d=cell.labels_2d[break_position:max_z],
         centroids_2d=cell.centroids_2d[break_position:max_z],
@@ -454,19 +486,23 @@ def split_cell_at_index(cell, break_position, new_label):
         },
         parents=parent_lineage,
     )
-    top_cell.shape_2d = getattr(cell, "shape_2d", None)
 
+    bottom_cell.shape_2d = getattr(cell, "shape_2d", None)
+    top_cell.shape_2d = getattr(cell, "shape_2d", None)
     return bottom_cell, top_cell
 
 
 def break_stitching(organoid, breaking_threshold=2.5):
     new_organoid = []
     breaks_made = 0
+    broken_labels = set()
     new_label = max(cell.label for cell in organoid) + 1
     for cell in organoid:
         if len(cell.volumes_2d) < 7:
             new_organoid.append(cell)
             continue
+        # if cell.label == 103:
+        #     print(cell.break_scores)
         # Find indices where break score exceeds threshold
         break_scores = [score for score in cell.break_scores]
         break_scores[:3] = [0, 0, 0]  # First 3 slices get score 0
@@ -485,9 +521,11 @@ def break_stitching(organoid, breaking_threshold=2.5):
         )
         new_organoid.append(bottom_cell)
         new_organoid.append(top_cell)
+        broken_labels.add(cell.label)
+        broken_labels.add(new_label)
         new_label += 1
         breaks_made += 1
-    return new_organoid, breaks_made
+    return new_organoid, breaks_made, broken_labels
 
 
 def find_touching_pairs(organoid):
@@ -511,7 +549,7 @@ def find_touching_pairs(organoid):
             cell.touching_cells = []
             continue
 
-        _, indices = tree.query(cell.centroid, k=min(15, len(organoid)))
+        _, indices = tree.query(cell.centroid, k=min(5, len(organoid)))
         candidate_indices = indices[1:]
 
         touching_cells = []
@@ -559,30 +597,6 @@ def find_touching_cells(organoid):
             touching_pairs.add(pair)
 
     return list(touching_pairs)
-
-
-def _ensure_tuple_coords_2d(cell):
-    coords_set_2d = cell.coords_set_2d or []
-    first_set = next((s for s in coords_set_2d if s), None)
-    if not first_set:
-        return
-    sample = next(iter(first_set))
-    if not isinstance(sample, (int, np.integer)):
-        return
-    shape_2d = getattr(cell, "shape_2d", None)
-    if shape_2d is None:
-        raise ValueError("shape_2d missing for flat coords_set_2d")
-    width = shape_2d[1]
-
-    converted = []
-    for flat_set in coords_set_2d:
-        if not flat_set:
-            converted.append(set())
-            continue
-        flat = np.fromiter(flat_set, dtype=np.int64)
-        ys, xs = np.divmod(flat, width)
-        converted.append(set(zip(ys.tolist(), xs.tolist())))
-    cell.coords_set_2d = converted
 
 
 def calculate_split_coords(cell, index, pred_point_1, pred_point_2):
@@ -726,9 +740,6 @@ def split_single_cell_layer(cell_1, cell_2, z_to_predict=1, bottom_up=True):
     if len(cell_1.volumes_2d) <= 2 or len(cell_2.volumes_2d) <= 2:
         return None
 
-    _ensure_tuple_coords_2d(cell_1)
-    _ensure_tuple_coords_2d(cell_2)
-
     z_positions_1, y_positions_1, x_positions_1 = get_centroid_positions(
         cell_1.centroids_2d
     )
@@ -846,170 +857,184 @@ def _recalculate_cell_properties(cell):
     cell.centroid = np.mean(cell.centroids_2d, axis=0)
 
 
+import copy
+
+
 def split_organoid_cells(organoid):
-    print("Starting to split touching cells...")
+    # Convert flat-index coords_set_2d to (y, x) tuples if needed
+    for cell in organoid:
+        if not cell.coords_set_2d:
+            continue
+        first_set = next((s for s in cell.coords_set_2d if s), None)
+        if not first_set:
+            continue
+        sample = next(iter(first_set))
+        if isinstance(sample, (int, np.integer)):
+            shape_2d = getattr(cell, "shape_2d", None)
+            if shape_2d is None:
+                raise ValueError(
+                    f"Cell {cell.label} has flat-index coords_set_2d but no shape_2d for conversion"
+                )
+            width = shape_2d[1]
+            cell.coords_set_2d = [
+                (
+                    set(zip(*np.divmod(np.fromiter(s, dtype=np.int64), width)))
+                    if s
+                    else set()
+                )
+                for s in cell.coords_set_2d
+            ]
+
+    print("Finding touching cell pairs...")
     organoid = find_touching_pairs(organoid)
+
     touching_cells = find_touching_cells(organoid)
     print(f"Found {len(touching_cells)} pairs of touching cells.")
+
     number_of_splits = 0
+    cell_map = {c.label: c for c in organoid}
+    count = 0
     for pair in touching_cells:
-        cell_1 = next(c for c in organoid if c.label == pair[0])
-        cell_2 = next(c for c in organoid if c.label == pair[1])
+        count += 1
+        cell_1 = cell_map.get(pair[0])
+        cell_2 = cell_map.get(pair[1])
+        if cell_1 is None or cell_2 is None:
+            continue
         # Ensure cell_1 is below cell_2 (lower z centroid)
         if cell_1.centroid[0] > cell_2.centroid[0]:
             cell_1, cell_2 = cell_2, cell_1
         number_of_splits += split_multiple_cell_layers(cell_1, cell_2)
 
     print(f"Splitted {number_of_splits} touching cell pairs.")
-    return organoid
-
-
-def organoid_from_mask(mask):
-    """Reconstruct organoid list directly from mask by splitting coords by z-level"""
-    props = regionprops(mask)
-
-    organoid = []
-    for prop in props:
-        # Get 3D coordinates (z, y, x)
-        coords_3d = prop.coords
-
-        # Split coordinates by z-level
-        coords_by_z = {}
-        for z, y, x in coords_3d:
-            if z not in coords_by_z:
-                coords_by_z[z] = []
-            coords_by_z[z].append((y, x))
-
-        # Sort by z to maintain order
-        z_sorted = sorted(coords_by_z.keys())
-
-        # Build per-slice data
-        centroids_2d = []
-        coords_set_2d = []
-        volumes_2d = []
-
-        for z in z_sorted:
-            coords_2d = np.array(coords_by_z[z])
-            centroid_2d = np.mean(coords_2d, axis=0)
-
-            centroids_2d.append((z, centroid_2d[0], centroid_2d[1]))
-            coords_set_2d.append(set(map(tuple, coords_2d)))
-            volumes_2d.append(len(coords_2d))
-
-        cell = cell_3d(
-            label=prop.label,
-            centroid=prop.centroid,
-            coords_set=set(map(tuple, prop.coords)),
-            volume=prop.area,
-            centroids_2d=centroids_2d,
-            coords_set_2d=coords_set_2d,
-            volumes_2d=volumes_2d,
-        )
-
-        organoid.append(cell)
 
     return organoid
 
 
-def stitch_small_cells(organoid, max_slices=2, iou_threshold=0.9):
+def stitch_small_cells(organoid, max_slices=2, iou_threshold=0.9, knn=5):
     """Merge small cells (1-2 slices) with neighboring cells above or below"""
-    cells_to_remove = []
-    number_of_cells_stitched = 0
-    number_of_cells_removed = 0
+    from scipy.spatial import KDTree
 
     print(f"Stitching cells with {max_slices} or fewer slices...")
 
-    for cell in organoid:
-        if len(cell.volumes_2d) > max_slices:
-            continue  # Only process cells with max_slices or fewer
+    # z->slice-index map per cell for O(1) slice lookup
+    z_to_idx_maps = [
+        {int(round(c[0])): si for si, c in enumerate(cell.centroids_2d)}
+        for cell in organoid
+    ]
 
-        # Get the z positions of this cell's slices
-        z_positions = [int(round(c[0])) for c in cell.centroids_2d]
+    # z-group index with sets: O(1) add/discard for index maintenance after merges
+    z_to_cell_indices = {}
+    for i, z_map in enumerate(z_to_idx_maps):
+        for z in z_map:
+            z_to_cell_indices.setdefault(z, set()).add(i)
 
-        # Find neighboring cells in organoid that are above or below
-        candidates = []
-        for c in organoid:
-            if c.label == cell.label or len(c.volumes_2d) <= max_slices:
+    # Index-based large-cell set avoids repeated len(volumes_2d) checks in inner loop
+    large_cell_indices = {
+        i for i, cell in enumerate(organoid) if len(cell.volumes_2d) > max_slices
+    }
+
+    # Per-z KDTree over large-cell 2D (y, x) centroids for fast spatial lookup
+    z_kdtrees = {}
+    z_kd_idx = {}
+    for z, cell_set in z_to_cell_indices.items():
+        large_at_z = [j for j in cell_set if j in large_cell_indices]
+        if not large_at_z:
+            continue
+        pts = [
+            (
+                organoid[j].centroids_2d[z_to_idx_maps[j][z]][1],
+                organoid[j].centroids_2d[z_to_idx_maps[j][z]][2],
+            )
+            for j in large_at_z
+        ]
+        z_kdtrees[z] = KDTree(pts)
+        z_kd_idx[z] = large_at_z
+
+    cells_to_remove = set()
+    number_of_cells_stitched = 0
+    number_of_cells_removed = 0
+
+    for i, cell in enumerate(organoid):
+        if i in large_cell_indices or cell.label in cells_to_remove:
+            continue
+
+        merged_into = None
+        for z_pos, cell_si in z_to_idx_maps[i].items():
+            s1 = cell.coords_set_2d[cell_si]
+            len1 = len(s1)
+            if len1 == 0:
                 continue
+            cy = cell.centroids_2d[cell_si][1]
+            cx = cell.centroids_2d[cell_si][2]
+            for neighbor_z in (z_pos - 1, z_pos + 1):
+                kd = z_kdtrees.get(neighbor_z)
+                if kd is None:
+                    continue
+                cands = z_kd_idx[neighbor_z]
+                k_actual = min(knn, len(cands))
+                _, nn_idxs = kd.query((cy, cx), k=k_actual)
+                for nn_i in np.atleast_1d(nn_idxs):
+                    j = cands[nn_i]
+                    s2 = organoid[j].coords_set_2d[z_to_idx_maps[j][neighbor_z]]
+                    len2 = len(s2)
+                    if len2 == 0:
+                        continue
+                    intersection = len(s1 & s2)
+                    if intersection == 0:
+                        continue
+                    min_len = min(len1, len2)
+                    iou = (
+                        1.0
+                        if intersection == min_len
+                        else intersection / (len1 + len2 - intersection)
+                    )
+                    if iou > iou_threshold:
+                        merged_into = j
+                        break
+                if merged_into is not None:
+                    break
+            if merged_into is not None:
+                break
 
-            # Check if candidate cell is adjacent to any of the current cell's slices
-            for z_pos in z_positions:
-                # Check adjacent z-levels
-                for neighbor_z in [z_pos - 1, z_pos + 1]:
-                    # Get the slice index in the candidate cell at neighbor_z
-                    candidate_z_positions = [
-                        int(round(c_cent[0])) for c_cent in c.centroids_2d
-                    ]
-
-                    if neighbor_z in candidate_z_positions:
-                        # Found an adjacent slice, now check IOU
-                        candidate_slice_idx = candidate_z_positions.index(neighbor_z)
-                        cell_slice_idx = z_positions.index(z_pos)
-
-                        iou = calculate_iou(
-                            {
-                                0: cell.coords_set_2d[cell_slice_idx],
-                                1: c.coords_set_2d[candidate_slice_idx],
-                            },
-                            0,
-                            1,
-                        )
-
-                        if iou > iou_threshold:
-                            candidates.append(c)
-                            break  # Found a valid neighbor, no need to check other slices of this candidate
-
-                if c in candidates:
-                    break  # Already added this candidate
-
-        if not candidates:
-            # Only remove 1-slice cells, keep 2-slice cells
+        if merged_into is None:
             if len(cell.volumes_2d) == 1:
-                cells_to_remove.append(cell.label)
+                cells_to_remove.add(cell.label)
                 number_of_cells_removed += 1
             continue
 
         number_of_cells_stitched += 1
-        closest_neighbor = candidates[0]
+        closest_neighbor = organoid[merged_into]
+        neighbor_z_list = [int(round(c[0])) for c in closest_neighbor.centroids_2d]
 
-        # Add all of cell's slices to neighbor
-        for i in range(len(cell.coords_set_2d)):
-            # Find correct insertion position to maintain z-order
-            cell_z = int(round(cell.centroids_2d[i][0]))
-            neighbor_z_positions = [
-                int(round(c[0])) for c in closest_neighbor.centroids_2d
-            ]
-
-            # Find insertion index
-            insert_idx = len(neighbor_z_positions)
-            for idx, neighbor_z in enumerate(neighbor_z_positions):
-                if cell_z < neighbor_z:
-                    insert_idx = idx
-                    break
-
-            # Insert at correct position
-            closest_neighbor.coords_set_2d.insert(insert_idx, cell.coords_set_2d[i])
-            closest_neighbor.centroids_2d.insert(insert_idx, cell.centroids_2d[i])
-            closest_neighbor.volumes_2d.insert(insert_idx, cell.volumes_2d[i])
-
-            # Update 3D coords_set
-            closest_neighbor.coords_set.update(
-                {(cell_z, int(y), int(x)) for y, x in cell.coords_set_2d[i]}
+        for si in range(len(cell.coords_set_2d)):
+            cell_z = int(round(cell.centroids_2d[si][0]))
+            insert_idx = next(
+                (k for k, nz in enumerate(neighbor_z_list) if cell_z < nz),
+                len(neighbor_z_list),
             )
+            closest_neighbor.coords_set_2d.insert(insert_idx, cell.coords_set_2d[si])
+            closest_neighbor.centroids_2d.insert(insert_idx, cell.centroids_2d[si])
+            closest_neighbor.volumes_2d.insert(insert_idx, cell.volumes_2d[si])
+            neighbor_z_list.insert(insert_idx, cell_z)
 
-        # Update neighbor properties
+        # Rebuild z_to_idx_maps for merged-into cell (indices shifted after inserts)
+        z_to_idx_maps[merged_into] = {
+            int(round(c[0])): k for k, c in enumerate(closest_neighbor.centroids_2d)
+        }
+        # Transfer small cell z-slots in the group index to the merged-into cell
+        for z in z_to_idx_maps[i]:
+            z_group = z_to_cell_indices.get(z)
+            if z_group is not None:
+                z_group.discard(i)
+                z_group.add(merged_into)
+
         _recalculate_cell_properties(closest_neighbor)
+        cells_to_remove.add(cell.label)
 
-        # Mark cell for removal
-        cells_to_remove.append(cell.label)
-
-    # Remove merged cells from organoid
     organoid = [c for c in organoid if c.label not in cells_to_remove]
-
     print(
         f"Stitched {number_of_cells_stitched} small cells, and removed {number_of_cells_removed} cells without suitable neighbors."
     )
-
     return organoid
 
 
@@ -1022,7 +1047,7 @@ def stitch_3d(
     image_type_1=None,
     image2=None,
     image_type_2=None,
-    breaking_threshold=2.5,
+    breaking_threshold=2,
 ):
     print("Starting 3D stitching process...")
     organoid = get_2d_mask_properties(
@@ -1037,24 +1062,22 @@ def stitch_3d(
     # Iterative break and restitching
     max_iterations = 10
     iteration = 0
+    checked_labels = set()
     print("Starting iterative breaking of cells")
     while iteration < max_iterations:
-        organoid = get_break_scores(organoid)
-        organoid, breaks_made = break_stitching(
+        organoid = get_break_scores(organoid, skip_labels=checked_labels)
+        checked_labels = {cell.label for cell in organoid}
+        organoid, breaks_made, broken_labels = break_stitching(
             organoid, breaking_threshold=breaking_threshold
         )
+        checked_labels -= broken_labels
         if breaks_made == 0:
             break  # No more breaks made
 
         print(f"    Iteration {iteration + 1}: Made {breaks_made} breaks.")
         iteration += 1
 
-    # before_splitting = copy.deepcopy(organoid)
-    # before_splitting_mask = mask_from_organoid(before_splitting, shape=mask.shape)
     organoid = split_organoid_cells(organoid)
-
-    stitched_mask = mask_from_organoid(organoid, shape=mask.shape)
-    organoid = organoid_from_mask(stitched_mask)
 
     organoid = stitch_small_cells(organoid)
 
@@ -1062,4 +1085,4 @@ def stitch_3d(
 
     print(f"Final stitched mask has {len(organoid)} cells.")
 
-    return stitched_mask, organoid  # , before_splitting, before_splitting_mask
+    return stitched_mask
