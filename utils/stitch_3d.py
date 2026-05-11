@@ -1,9 +1,5 @@
-import tifffile
-import pandas as pd
 from skimage.measure import regionprops, regionprops_table
-import napari
 import numpy as np
-import os
 from dataclasses import dataclass
 import scipy.spatial
 
@@ -40,6 +36,7 @@ class cell_2d:
 
 def get_cell_properties_2d(image):
     # Get the properties of every mask in the image
+
     props = regionprops(image)
 
     organoid = []
@@ -62,6 +59,7 @@ def get_cell_properties_2d(image):
 
 
 def properties_channel(organoid, mask, image, channel_type=None):
+
     try:  # SCIkit changed the name of this property at some point, so we try both just in case
         props_channel = regionprops_table(
             mask, intensity_image=image, properties=["label", "intensity_mean"]
@@ -86,6 +84,7 @@ def properties_channel(organoid, mask, image, channel_type=None):
 
 def make_unique_mask(mask):
     """Makes a fresh mask from a already stitched mask"""
+
     unique_mask = []
     number = 1
     for z in range(mask.shape[0]):
@@ -97,6 +96,10 @@ def make_unique_mask(mask):
             number += 1
         unique_mask.append(unique_slice)
     unique_mask = np.stack(unique_mask, axis=0)
+
+    print(
+        f"Unique mask created with {number-1} unique segmented cells over {mask.shape[0]} slices."
+    )
 
     return unique_mask
 
@@ -237,12 +240,13 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
 def mask_from_organoid(organoid, shape):
     mask = np.zeros(shape, dtype=np.uint16)
     for cell in organoid:
-        for z_idx, (z, y, x) in enumerate(cell.centroids_2d):
-            z_int = int(round(z))
+        for z_idx, centroid in enumerate(cell.centroids_2d):
+            z_int = int(round(centroid[0]))
             if 0 <= z_int < shape[0]:
-                for yy, xx in cell.coords_set_2d[z_idx]:
-                    if 0 <= yy < shape[1] and 0 <= xx < shape[2]:
-                        mask[z_int, yy, xx] = cell.label
+                s = cell.coords_set_2d[z_idx]
+                if s:
+                    yx = np.array(list(s), dtype=np.int32)
+                    mask[z_int, yx[:, 0], yx[:, 1]] = cell.label
     return mask
 
 
@@ -394,8 +398,6 @@ def get_break_scores(organoid):
                 * (i_score**2)
                 * (IOU_score * 2)
             )
-            # if cell.label == 83:
-            #     print(f"v:{v_score:.2f}, i:{i_score:.2f}, up:{up_score:.2f}, down:{down_score:.2f}, IOU:{IOU_score:.2f}, final:{final_score:.2f}")
             final_scores.append(final_score)
 
         cell.break_scores = final_scores
@@ -428,6 +430,7 @@ def split_cell_at_index(cell, break_position, new_label):
         },
         parents=parent_lineage,
     )
+    bottom_cell.shape_2d = getattr(cell, "shape_2d", None)
 
     # Build 3D coords_set for top cell
     max_z = len(cell.volumes_2d)
@@ -451,6 +454,7 @@ def split_cell_at_index(cell, break_position, new_label):
         },
         parents=parent_lineage,
     )
+    top_cell.shape_2d = getattr(cell, "shape_2d", None)
 
     return bottom_cell, top_cell
 
@@ -463,8 +467,6 @@ def break_stitching(organoid, breaking_threshold=2.5):
         if len(cell.volumes_2d) < 7:
             new_organoid.append(cell)
             continue
-        # if cell.label == 103:
-        #     print(cell.break_scores)
         # Find indices where break score exceeds threshold
         break_scores = [score for score in cell.break_scores]
         break_scores[:3] = [0, 0, 0]  # First 3 slices get score 0
@@ -489,44 +491,57 @@ def break_stitching(organoid, breaking_threshold=2.5):
 
 
 def find_touching_pairs(organoid):
-    neighbor_offsets = [(-1, 0, 0), (1, 0, 0)]  # Only z-direction neighbors
-
     # Build spatial index using KDTree for fast nearest neighbor search
     centroids = np.array([cell.centroid for cell in organoid])
     tree = scipy.spatial.cKDTree(centroids)
+
+    z_to_coords_list = []
+    z_keys_list = []
+    for cell in organoid:
+        z_to_coords = {}
+        if cell.centroids_2d and cell.coords_set_2d:
+            for idx, centroid in enumerate(cell.centroids_2d):
+                z_int = int(round(centroid[0]))
+                z_to_coords[z_int] = cell.coords_set_2d[idx]
+        z_to_coords_list.append(z_to_coords)
+        z_keys_list.append(set(z_to_coords.keys()))
 
     for i, cell in enumerate(organoid):
         if len(cell.volumes_2d) <= 1:
             cell.touching_cells = []
             continue
 
-        # Query k=10 nearest neighbors (increase if needed, but 5-10 is usually enough)
-        distances, indices = tree.query(cell.centroid, k=min(5, len(organoid)))
-
-        # Skip self (first result is always self)
+        _, indices = tree.query(cell.centroid, k=min(15, len(organoid)))
         candidate_indices = indices[1:]
 
-        # Check only nearby candidates for actual touching
         touching_cells = []
-        current_boundary = cell.coords_set
+        z_to_coords = z_to_coords_list[i]
+        z_keys = z_keys_list[i]
+        if not z_to_coords:
+            cell.touching_cells = []
+            continue
 
         for idx in candidate_indices:
-            other_cell = organoid[idx]
-            other_coords = other_cell.coords_set
+            other_z_to_coords = z_to_coords_list[idx]
+            if not other_z_to_coords:
+                continue
 
-            # Fast boundary check using set operations
-            # Create neighbor coordinates for current cell
-            neighbor_coords = {
-                (z + dz, y, x)
-                for z, y, x in current_boundary
-                for dz, _, _ in neighbor_offsets
-            }
+            is_touching = False
+            for z in z_keys:
+                coords = z_to_coords.get(z)
+                if not coords:
+                    continue
+                coords_other = other_z_to_coords.get(z - 1)
+                if coords_other and (coords & coords_other):
+                    is_touching = True
+                    break
+                coords_other = other_z_to_coords.get(z + 1)
+                if coords_other and (coords & coords_other):
+                    is_touching = True
+                    break
 
-            # Check if any neighbors overlap with other cell
-            if neighbor_coords & other_coords:  # Set intersection
-                touching_cells.append(other_cell.label)
-
-                # Early exit if we found enough touching cells
+            if is_touching:
+                touching_cells.append(organoid[idx].label)
                 if len(touching_cells) >= 5:
                     break
 
@@ -544,6 +559,30 @@ def find_touching_cells(organoid):
             touching_pairs.add(pair)
 
     return list(touching_pairs)
+
+
+def _ensure_tuple_coords_2d(cell):
+    coords_set_2d = cell.coords_set_2d or []
+    first_set = next((s for s in coords_set_2d if s), None)
+    if not first_set:
+        return
+    sample = next(iter(first_set))
+    if not isinstance(sample, (int, np.integer)):
+        return
+    shape_2d = getattr(cell, "shape_2d", None)
+    if shape_2d is None:
+        raise ValueError("shape_2d missing for flat coords_set_2d")
+    width = shape_2d[1]
+
+    converted = []
+    for flat_set in coords_set_2d:
+        if not flat_set:
+            converted.append(set())
+            continue
+        flat = np.fromiter(flat_set, dtype=np.int64)
+        ys, xs = np.divmod(flat, width)
+        converted.append(set(zip(ys.tolist(), xs.tolist())))
+    cell.coords_set_2d = converted
 
 
 def calculate_split_coords(cell, index, pred_point_1, pred_point_2):
@@ -687,6 +726,9 @@ def split_single_cell_layer(cell_1, cell_2, z_to_predict=1, bottom_up=True):
     if len(cell_1.volumes_2d) <= 2 or len(cell_2.volumes_2d) <= 2:
         return None
 
+    _ensure_tuple_coords_2d(cell_1)
+    _ensure_tuple_coords_2d(cell_2)
+
     z_positions_1, y_positions_1, x_positions_1 = get_centroid_positions(
         cell_1.centroids_2d
     )
@@ -724,17 +766,16 @@ def split_single_cell_layer(cell_1, cell_2, z_to_predict=1, bottom_up=True):
     predict_x_1, predict_y_1 = line_1(target_z)
     predict_x_2, predict_y_2 = line_2(target_z)
 
-    # Check if predicted points are in cell_1's coords_set
+    # Check if predicted points are in cell_1's 2D coords at this z
+    coords_at_z = cell_1.coords_set_2d[z_idx]
     predicted_line_1_in_cell_1 = (
-        int(round(target_z)),
         int(round(predict_y_1)),
         int(round(predict_x_1)),
-    ) in cell_1.coords_set
+    ) in coords_at_z
     predicted_line_2_in_cell_1 = (
-        int(round(target_z)),
         int(round(predict_y_2)),
         int(round(predict_x_2)),
-    ) in cell_1.coords_set
+    ) in coords_at_z
 
     # print(predicted_line_1_in_cell_1, predicted_line_2_in_cell_1)
     # print(int(round(predict_y_1*0.64)), int(round(predict_x_1*0.64)), int(round(predict_y_2*0.64)), int(round(predict_x_2*0.64)))
@@ -761,9 +802,6 @@ def update_coords(cell_1, cell_2, z_idx, part_1_coords_2d, part_2_coords_2d, las
     """Update both cells after splitting cell_1 at its top"""
     cell_1.coords_set_2d[z_idx] = part_1_coords_2d
 
-    for y, x in part_2_coords_2d:
-        cell_1.coords_set.discard((last_z, int(y), int(x)))
-
     cell_1.volumes_2d[z_idx] = len(part_1_coords_2d)
     part_1_array = np.array(list(part_1_coords_2d))
     cell_1.centroids_2d[z_idx] = (last_z, *np.mean(part_1_array, axis=0))
@@ -776,9 +814,6 @@ def update_coords(cell_1, cell_2, z_idx, part_1_coords_2d, part_2_coords_2d, las
     cell_2.centroids_2d.append((last_z, *np.mean(part_2_array, axis=0)))
     cell_2.volumes_2d.append(len(part_2_coords_2d))
 
-    for y, x in part_2_coords_2d:
-        cell_2.coords_set.add((last_z, int(y), int(x)))
-
     _recalculate_cell_properties(cell_1)
     _recalculate_cell_properties(cell_2)
 
@@ -788,9 +823,6 @@ def update_coords_bottom(
 ):
     """Update both cells after splitting cell_2 at its bottom"""
     cell_2.coords_set_2d[z_idx] = part_1_coords_2d
-
-    for y, x in part_2_coords_2d:
-        cell_2.coords_set.discard((first_z, int(y), int(x)))
 
     cell_2.volumes_2d[z_idx] = len(part_1_coords_2d)
     part_1_array = np.array(list(part_1_coords_2d))
@@ -804,9 +836,6 @@ def update_coords_bottom(
     cell_1.centroids_2d.insert(0, (first_z, *np.mean(part_2_array, axis=0)))
     cell_1.volumes_2d.insert(0, len(part_2_coords_2d))
 
-    for y, x in part_2_coords_2d:
-        cell_1.coords_set.add((first_z, int(y), int(x)))
-
     _recalculate_cell_properties(cell_1)
     _recalculate_cell_properties(cell_2)
 
@@ -815,9 +844,6 @@ def _recalculate_cell_properties(cell):
     """Helper to recalculate volume and centroid after modification"""
     cell.volume = sum(cell.volumes_2d)
     cell.centroid = np.mean(cell.centroids_2d, axis=0)
-
-
-import copy
 
 
 def split_organoid_cells(organoid):
@@ -1006,7 +1032,6 @@ def stitch_3d(
         image2=image2,
         image_type_2=image_type_2,
     )
-    print(f"Initial organoid has {len(organoid)} 2d sliced cells.")
     organoid = IOU_stitching(organoid, distance_threshold=10, iou_threshold=0.3)
 
     # Iterative break and restitching

@@ -10,3 +10,4 @@ env/
 */selected_paths.txt
 .history/
 logs/
+.claude/

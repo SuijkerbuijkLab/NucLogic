@@ -138,6 +138,7 @@ def segment_organoid(
         old_stdout = sys.stdout  # backup current stdout
         sys.stdout = open(os.devnull, "w")
         segmented_stack = segment(frame_nuclei, cell_model)
+
         sys.stdout = old_stdout  # reset old stdout
         # print(segmented_stack.shape, np.unique(segmented_stack))
         # tifffile.imwrite(
@@ -152,7 +153,7 @@ def segment_organoid(
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
         if len(nuclei_channels) == 2:
-            segmented_stack_stitched, organoid = stitch_3d(
+            segmented_stack_stitched = stitch_3d(
                 segmented_stack,
                 image1=frame_nuclei_1,
                 image_type_1="nuclei_1",
@@ -161,7 +162,7 @@ def segment_organoid(
                 breaking_threshold=breaking_threshold,
             )
         else:
-            segmented_stack_stitched, organoid = stitch_3d(
+            segmented_stack_stitched = stitch_3d(
                 segmented_stack,
                 image1=frame_nuclei,
                 image_type_1="nuclei",
