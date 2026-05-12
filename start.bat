@@ -40,7 +40,7 @@ echo ERROR: conda not found. Please install Miniconda or Anaconda.
 pause
 exit /b 1
 :conda_found
-set "ENV_PATH=%CONDA%\envs\NucLogic"
+set "ENV_PATH=%CONDA%\envs\NucLogicEnv"
 
 REM Step 1: Activate Conda base
 echo Activating conda base from %CONDA%
