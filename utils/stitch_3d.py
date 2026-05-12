@@ -1083,6 +1083,8 @@ def stitch_3d(
 
     stitched_mask = mask_from_organoid(organoid, shape=mask.shape)
 
-    print(f"Final stitched mask has {len(organoid)} cells.")
+    print(
+        f"Final stitched mask has {len(np.unique([cell.label for cell in organoid]))} cells."
+    )
 
     return stitched_mask

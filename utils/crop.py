@@ -121,6 +121,9 @@ def crop(
 
             # Step 1: Calculate Moran's I for each row
             for idx, row in enumerate(XZ):
+                if np.std(row) == 0:
+                    moran_values.append((idx, 0))
+                    continue
                 coords = np.arange(len(row)).reshape(-1, 1)
                 w_1d = KNN.from_array(coords, k=2)
                 moran = Moran(row, w_1d)

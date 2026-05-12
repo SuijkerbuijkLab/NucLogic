@@ -5,64 +5,6 @@ set "SCRIPT_DIR=%~dp0"
 set "ENV_YML=%SCRIPT_DIR%miscellaneous\environment.yml"
 set "SAM2=C:\repos\sam2"
 
-REM Configure where log files are stored
-set "LOG_DIR=%SCRIPT_DIR%logs"
-
-REM Wrapper mode: run the script once and capture all output to a timestamped log file
-if defined LOG_WRAPPED goto :log_ready
-
-if not exist "%LOG_DIR%" (
-    mkdir "%LOG_DIR%"
-)
-
-set "TIMESTAMP="
-for /f %%I in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')" 2^>nul') do set "TIMESTAMP=%%I"
-if not defined TIMESTAMP (
-    set "TIMESTAMP=!DATE!_!TIME!"
-    set "TIMESTAMP=!TIMESTAMP: =0!"
-    set "TIMESTAMP=!TIMESTAMP::=-!"
-    set "TIMESTAMP=!TIMESTAMP:/=-!"
-    set "TIMESTAMP=!TIMESTAMP:.=-!"
-    set "TIMESTAMP=!TIMESTAMP:,=-!"
-)
-set "LOG_FILE=%LOG_DIR%\log_!TIMESTAMP!.txt"
-
-set "LOG_WRAPPED=1"
-echo Logging to "%LOG_FILE%"
-
-REM Download wtee.exe if not available
-if not exist "%SCRIPT_DIR%wtee.exe" if not exist "%SCRIPT_DIR%tee.exe" (
-    echo Downloading wtee.exe...
-    powershell -NoProfile -Command "& { Invoke-WebRequest -Uri 'https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/wintee/wtee.exe' -OutFile '%SCRIPT_DIR%wtee.exe' }"
-)
-
-set "WTEE="
-if exist "%SCRIPT_DIR%wtee.exe" set "WTEE=%SCRIPT_DIR%wtee.exe"
-if not defined WTEE if exist "%SCRIPT_DIR%tee.exe" set "WTEE=%SCRIPT_DIR%tee.exe"
-if not defined WTEE (
-    for /f "delims=" %%W in ('where wtee.exe 2^>nul') do (
-        set "WTEE=%%W"
-        goto :wtee_found
-    )
-)
-:wtee_found
-if not defined WTEE (
-    for /f "delims=" %%W in ('where tee.exe 2^>nul') do (
-        set "WTEE=%%W"
-        goto :wtee_found
-    )
-)
-
-if defined WTEE (
-    cmd /d /c "set LOG_WRAPPED=1& call "%~f0" %*" 2>&1 | "%WTEE%" "%LOG_FILE%"
-) else (
-    echo NOTE: wtee.exe not found, logging to file only.
-    cmd /d /c "set LOG_WRAPPED=1& call "%~f0" %*" > "%LOG_FILE%" 2>&1
-)
-exit /b %ERRORLEVEL%
-
-:log_ready
-
 REM Force UTF-8 output so progress bars and unicode don't crash
 chcp 65001 >nul
 set "PYTHONIOENCODING=utf-8"
@@ -98,7 +40,7 @@ echo ERROR: conda not found. Please install Miniconda or Anaconda.
 pause
 exit /b 1
 :conda_found
-set ENV_PATH=C:\Users\6331823\AppData\Local\anaconda3\envs\nuclei_segmenter
+set "ENV_PATH=%CONDA%\envs\NucLogic"
 
 REM Step 1: Activate Conda base
 echo Activating conda base from %CONDA%
@@ -154,4 +96,4 @@ set KMP_DUPLICATE_LIB_OK=TRUE
 
 REM Step 5: Run the app
 echo Starting NucLogic
-call python "PySide2\app.py"
+call python "launcher.py"

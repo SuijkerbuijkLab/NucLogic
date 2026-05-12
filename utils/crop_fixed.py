@@ -213,7 +213,7 @@ def crop_fixed(
     # Step 1: Calculate Moran's I for each row
     for idx, row in enumerate(XZ):
         row = np.atleast_1d(row)
-        if row.size < 2:
+        if row.size < 2 or np.std(row) == 0:
             moran_values.append((idx, 0))
             continue
         coords = np.arange(len(row)).reshape(-1, 1)
