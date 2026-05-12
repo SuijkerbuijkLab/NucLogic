@@ -80,7 +80,6 @@ def crop_sample(
     proj_XY = max_project(
         input_file,
         name=name,
-        fixed=is_fixed,
     )
 
     if is_fixed:

@@ -15,7 +15,6 @@ from utils.stitch_3d import stitch_3d
 from utils.properties_mask import properties_mask
 from utils.get_time_interval import get_time_interval
 from utils.find_input_file import find_input_file
-from utils.max_project import max_project
 from utils.compensate_voxel_size import compensate_voxel_size
 from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
@@ -227,6 +226,7 @@ def segment_organoid(
             )
 
         # Get properties of the masked nuclei, such as volume and location of every cell
+        print(f"Measuring mask properties for timepoint {timepoint}...")
         props = properties_mask(segmented_stack_stitched)
         # Compensate for voxel size to get real world xyz distance values instead of pixel values
         props = compensate_voxel_size(props, voxel_size)
@@ -235,11 +235,17 @@ def segment_organoid(
             mask_for_intensity = segmented_stack_stitched
             region_tag = "nuclei"
         elif measure_region == "whole cell":
+            print(
+                f"Expanding nuclei masks to whole cell masks with cytoplasm size {cytoplasm_size} um for timepoint {timepoint}..."
+            )
             mask_for_intensity = expand_mask_3d(
                 segmented_stack_stitched, dilation_size_um=cytoplasm_size
             )
             region_tag = "whole_cell"
         elif measure_region == "cytoplasm":
+            print(
+                f"Expanding nuclei masks to cytoplasm masks with cytoplasm size {cytoplasm_size} um for timepoint {timepoint}..."
+            )
             whole_cell_mask = expand_mask_3d(
                 segmented_stack_stitched, dilation_size_um=cytoplasm_size
             )
@@ -257,6 +263,9 @@ def segment_organoid(
 
         channel_dfs = {}  # Store channel dataframes during for loop
         for i, channel in enumerate(channel_names):
+            print(
+                f"Measuring properties for channel {channel} at timepoint {timepoint}..."
+            )
             df_ch = properties_channel(
                 mask_for_intensity, frame[i], f"{channel.lower()}_raw"
             )

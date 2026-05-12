@@ -1,36 +1,41 @@
-# Function to get properties from masked images and put them in a pandas df
-
+import numpy as np
 import pandas as pd
-from skimage.measure import regionprops
 
 
 def properties_mask(image):
+    image = np.asarray(image)
+    z, y, x = np.nonzero(image)
+    if z.size == 0:
+        return pd.DataFrame(columns=["label", "z", "y", "x", "bounding_box", "volume"])
 
-    # Get the properties of every mask in the image
-    props = regionprops(image)
+    labels = image[z, y, x]
+    order = np.argsort(labels, kind="stable")
+    labels_s = labels[order]
+    z_s, y_s, x_s = z[order], y[order], x[order]
 
-    data = []
+    unique_labels, idx, counts = np.unique(labels_s, return_index=True, return_counts=True)
 
-    # For every mask found, get the label, centeroid, boundingbox, and volume
-    for prop in props:
-        label = prop.label
-        centroid = prop.centroid  # (z, y, x)
-        bounding_box = prop.bbox  # (min_z, min_y, min_x, max_z, max_y, max_x)
-        volume = prop.area
+    z_mean = np.add.reduceat(z_s.astype(np.float64), idx) / counts
+    y_mean = np.add.reduceat(y_s.astype(np.float64), idx) / counts
+    x_mean = np.add.reduceat(x_s.astype(np.float64), idx) / counts
 
-        data.append(
-            {
-                "label": label,
-                "z": centroid[0],
-                "y": centroid[1],
-                "x": centroid[2],
-                "bounding_box": bounding_box,
-                "volume": volume,
-            }
-        )
+    z_min = np.minimum.reduceat(z_s, idx)
+    y_min = np.minimum.reduceat(y_s, idx)
+    x_min = np.minimum.reduceat(x_s, idx)
+    z_max = np.maximum.reduceat(z_s, idx)
+    y_max = np.maximum.reduceat(y_s, idx)
+    x_max = np.maximum.reduceat(x_s, idx)
 
-    # Make a pandas data frame from the data
-    columns = ["label", "z", "y", "x", "bounding_box", "volume"]
-    df_props = pd.DataFrame(data, columns=columns)
+    bboxes = list(zip(
+        z_min.tolist(), y_min.tolist(), x_min.tolist(),
+        (z_max + 1).tolist(), (y_max + 1).tolist(), (x_max + 1).tolist(),
+    ))
 
-    return df_props
+    return pd.DataFrame({
+        "label": unique_labels.astype(int),
+        "z": z_mean,
+        "y": y_mean,
+        "x": x_mean,
+        "bounding_box": bboxes,
+        "volume": counts.astype(int),
+    })

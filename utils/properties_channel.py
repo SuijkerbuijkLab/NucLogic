@@ -1,22 +1,21 @@
-# Function to get properties from masked images and corresponding channels and put them in a pd df
-
+import numpy as np
 import pandas as pd
-from skimage.measure import regionprops_table
 
 
 def properties_channel(mask, image, type=None):
+    labels = mask.ravel().astype(np.intp)
+    values = image.ravel().astype(np.float64)
 
-    # Get the properties of the mask for the channel you specified (image)
-    props_channel = regionprops_table(
-        mask, intensity_image=image, properties=["label", "mean_intensity"]
-    )
+    max_label = int(labels.max()) if labels.size > 0 else 0
+    col = f"{type.lower()}_mean_intensity" if type else "mean_intensity"
+    if max_label == 0:
+        return pd.DataFrame(columns=["label", col])
 
-    # Make this into a pandas dataframe and rename some variables to the name of the channel for later merging
-    props_channel = pd.DataFrame(props_channel).rename(
-        columns={
-            "label": "label",
-            "mean_intensity": f"{type.lower()}_mean_intensity",
-        }
-    )
+    sums = np.bincount(labels, weights=values, minlength=max_label + 1)
+    counts = np.bincount(labels, minlength=max_label + 1)
 
-    return props_channel
+    # Skip label 0 (background) and any gaps with no voxels
+    valid = np.where((counts > 0) & (np.arange(max_label + 1) > 0))[0]
+    means = sums[valid] / counts[valid]
+
+    return pd.DataFrame({"label": valid.astype(int), col: means})

@@ -50,7 +50,7 @@ def crop_organoid(
             raise ValueError("organoid_model must be provided when crop_existing=False")
 
         print("No cropped data found, starting cropping process...")
-        proj_XY = utils.max_project(file=ims_movie, name=name, fixed=False)
+        proj_XY = utils.max_project(file=ims_movie, name=name)
         proj_XY_name = os.path.join(os.path.dirname(ims_movie), f"{name}_projXY.tif")
         tifffile.imwrite(
             proj_XY_name,

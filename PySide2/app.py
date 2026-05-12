@@ -308,7 +308,12 @@ class MainWindow(QMainWindow):
         layout.addLayout(self._create_progress_bar())
 
         widget.setLayout(layout)
-        return widget
+
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        return scroll
 
     def _create_advanced_statistics_layout(self):
         layout = QVBoxLayout()
@@ -768,9 +773,6 @@ class MainWindow(QMainWindow):
     def _toggle_phenotype_settings(self, checked):
         """Toggle visibility of phenotype settings"""
         self.phenotype_settings_widget.setVisible(checked)
-        self.do_phenotype_calling_checkbox.setChecked(
-            checked
-        )  # Sync with main checkbox
 
     def _create_phenotype_settings(self):
         """Add UI elements for phenotype/cell-type calling settings here"""
