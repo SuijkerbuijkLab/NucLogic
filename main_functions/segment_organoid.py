@@ -120,6 +120,9 @@ def segment_organoid(
         range(loaded_movie.shape[0]), title="Segmenting organoid"
     ):
         frame = loaded_movie[timepoint]
+        if frame.ndim != 4:  # If no channel dimension, add one
+            frame = np.expand_dims(frame, axis=0)
+
         if len(nuclei_channels) == 2:
             frame_nuclei = frame[nuclei_channels]
             frame_nuclei = np.max(frame_nuclei, axis=0)
@@ -129,7 +132,8 @@ def segment_organoid(
             frame_nuclei = frame[
                 nuclei_channels[0]
             ]  # (Z, Y, X) — avoid extra leading dim
-        # print(f"frame shape {frame.shape}")
+        print(f"frame shape {frame.shape}")
+        print(f"frame nuclei shape {frame_nuclei.shape}")
         # print(f"Segmenting timepoint {timepoint} with shape {frame_nuclei.shape}...")
 
         # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array

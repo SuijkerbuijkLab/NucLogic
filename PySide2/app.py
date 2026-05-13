@@ -730,6 +730,13 @@ class MainWindow(QMainWindow):
         )
         self.manual_crop_fixed_checkbox.setChecked(False)
         manual_crop_layout.addWidget(self.manual_crop_fixed_checkbox)
+
+        self.skip_crop_existing_files_checkbox = QCheckBox(
+            "Skip cropping because cropped files already exist"
+        )
+        self.skip_crop_existing_files_checkbox.setChecked(False)
+        manual_crop_layout.addWidget(self.skip_crop_existing_files_checkbox)
+
         layout.addWidget(self.manual_crop_fixed_widget)
 
         # Save crop as ims or tif file selector
@@ -1196,6 +1203,7 @@ class MainWindow(QMainWindow):
             return
         do_crop_sample = self.do_crop_sample.isChecked()
         manual_crop_fixed = self.manual_crop_fixed_checkbox.isChecked()
+        skip_crop_existing_files = self.skip_crop_existing_files_checkbox.isChecked()
         save_crop_as = self.save_crop_as.currentText()
         save_frames = self.save_frames_checkbox.isChecked()
         save_segmentation = self.save_segmentation_checkbox.isChecked()
@@ -1225,6 +1233,7 @@ class MainWindow(QMainWindow):
             and manual_crop_fixed
             and not phenotype_calling_only
             and not advanced_statistics_only
+            and not skip_crop_existing_files
         ):
             try:
                 from main_functions.crop_sample import crop_sample
@@ -1271,6 +1280,7 @@ class MainWindow(QMainWindow):
             raw_or_background_subtracted,
             do_crop_sample,
             manual_crop_fixed,
+            skip_crop_existing_files,
             save_crop_as,
             save_frames,
             save_segmentation,
@@ -1856,6 +1866,7 @@ class SegmentationWorker(QThread):
         raw_or_background_subtracted,
         do_crop_sample,
         manual_crop_fixed,
+        skip_crop_existing_files,
         save_crop_as,
         save_frames,
         save_segmentation,
@@ -1890,6 +1901,7 @@ class SegmentationWorker(QThread):
         self.raw_or_background_subtracted = raw_or_background_subtracted
         self.do_crop_sample = do_crop_sample
         self.manual_crop_fixed = manual_crop_fixed
+        self.skip_crop_existing_files = skip_crop_existing_files
         self.save_crop_as = save_crop_as
         self.save_frames = save_frames
         self.save_segmentation = save_segmentation
@@ -1937,6 +1949,7 @@ class SegmentationWorker(QThread):
 
             needs_auto_crop = (
                 self.do_crop_sample
+                and not self.skip_crop_existing_files
                 and not self.phenotype_calling_only
                 and not self.advanced_statistics_only
                 and any(
@@ -1967,20 +1980,25 @@ class SegmentationWorker(QThread):
                         and not self.advanced_statistics_only
                     ):
                         if self.do_crop_sample:
-                            normalized_i = os.path.normcase(os.path.normpath(i))
-                            if normalized_i in self.manually_cropped_fixed_samples:
+                            if self.skip_crop_existing_files:
                                 print(
-                                    f"Skipping crop for {i}: fixed sample was manually cropped in UI thread."
+                                    f"Skipping crop for {i}: using existing cropped files."
                                 )
                             else:
-                                crop_sample(
-                                    i,
-                                    self.channel_types,
-                                    organoid_model,
-                                    manual_fixed=self.manual_crop_fixed,
-                                    save_as=self.save_crop_as,
-                                    user_voxel_size=self.user_voxel_size,
-                                )
+                                normalized_i = os.path.normcase(os.path.normpath(i))
+                                if normalized_i in self.manually_cropped_fixed_samples:
+                                    print(
+                                        f"Skipping crop for {i}: fixed sample was manually cropped in UI thread."
+                                    )
+                                else:
+                                    crop_sample(
+                                        i,
+                                        self.channel_types,
+                                        organoid_model,
+                                        manual_fixed=self.manual_crop_fixed,
+                                        save_as=self.save_crop_as,
+                                        user_voxel_size=self.user_voxel_size,
+                                    )
                         segment_organoid(
                             i,
                             loaded_cell_model,
