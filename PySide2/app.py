@@ -39,6 +39,7 @@ from PySide2.QtWidgets import (
     QCheckBox,
     QSizePolicy,
     QScrollArea,
+    QFrame,
 )
 import qdarktheme
 
@@ -293,38 +294,83 @@ class MainWindow(QMainWindow):
         list_widget = self._get_list_widget(self.sample_list)
         return [item.text() for item in list_widget.selectedItems()]
 
+    def _make_separator(self):
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        return line
+
     def _create_segment_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setAlignment(Qt.AlignTop)
-        layout.setSpacing(30)
+        outer_widget = QWidget()
+        outer_layout = QVBoxLayout()
+        outer_layout.setSpacing(0)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
 
-        layout.addLayout(self._create_channel_settings_menu())
-        layout.addLayout(self._create_cropping_settings_layout())
-        layout.addLayout(self._create_phenotype_settings_layout())
-        layout.addLayout(self._create_advanced_statistics_layout())
-        layout.addLayout(self._create_advanced_settings_layout())
-        layout.addLayout(self._create_run_segmentation_layout())
-        layout.addLayout(self._create_progress_bar())
-
-        widget.setLayout(layout)
+        # Scrollable settings area
+        settings_widget = QWidget()
+        settings_layout = QVBoxLayout()
+        settings_layout.setAlignment(Qt.AlignTop)
+        settings_layout.setSpacing(30)
+        settings_layout.setContentsMargins(9, 9, 9, 9)
+        settings_layout.addLayout(self._create_run_mode_layout())
+        settings_layout.addWidget(self._make_separator())
+        settings_layout.addLayout(self._create_channel_config_layout())
+        settings_layout.addWidget(self._make_separator())
+        settings_layout.addLayout(self._create_cropping_layout())
+        settings_layout.addWidget(self._make_separator())
+        settings_layout.addLayout(self._create_phenotype_settings_layout())
+        settings_layout.addWidget(self._make_separator())
+        settings_layout.addLayout(self._create_advanced_statistics_layout())
+        settings_layout.addWidget(self._make_separator())
+        settings_layout.addLayout(self._create_advanced_settings_layout())
+        settings_widget.setLayout(settings_layout)
 
         scroll = QScrollArea()
-        scroll.setWidget(widget)
+        scroll.setWidget(settings_widget)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        return scroll
+        outer_layout.addWidget(scroll, 1)
+
+        # Fixed bottom strip — always visible, never scrolled away
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout()
+        bottom_layout.setContentsMargins(9, 6, 9, 9)
+        bottom_layout.setSpacing(5)
+        bottom_layout.addLayout(self._create_run_segmentation_layout())
+        bottom_layout.addLayout(self._create_progress_bar())
+        bottom_widget.setLayout(bottom_layout)
+        outer_layout.addWidget(bottom_widget)
+
+        outer_widget.setLayout(outer_layout)
+        return outer_widget
+
+    def _create_run_mode_layout(self):
+        layout = QHBoxLayout()
+        layout.addWidget(QLabel("Run mode:"))
+        self.run_mode_combo = QComboBox()
+        self.run_mode_combo.addItems([
+            "Full pipeline",
+            "Phenotype/cell-type calling only",
+            "Statistics only",
+            "Statistics + phenotype/cell-type calling",
+        ])
+        layout.addWidget(self.run_mode_combo)
+        hint = QLabel("Controls which pipeline steps run — non-full-pipeline modes skip cropping & segmentation and work on already-segmented samples")
+        hint.setStyleSheet("font-style: italic;")
+        layout.addWidget(hint)
+        layout.addStretch()
+        return layout
 
     def _create_advanced_statistics_layout(self):
         layout = QVBoxLayout()
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignTop)
-        adv_stats_btn = QPushButton("Show advanced statistics settings")
-        adv_stats_btn.setCheckable(True)
-        adv_stats_btn.toggled.connect(self._toggle_advanced_statistics)
-        adv_stats_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        layout.addWidget(adv_stats_btn)
+        self.adv_stats_btn = QPushButton("Show advanced statistics settings")
+        self.adv_stats_btn.setCheckable(True)
+        self.adv_stats_btn.toggled.connect(self._toggle_advanced_statistics)
+        self.adv_stats_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(self.adv_stats_btn)
 
         # Create advanced statistics settings widget
         self.advanced_statistics_widget = QWidget()
@@ -337,8 +383,10 @@ class MainWindow(QMainWindow):
         return layout
 
     def _toggle_advanced_statistics(self, checked):
-        """Toggle visibility of advanced statistics settings"""
         self.advanced_statistics_widget.setVisible(checked)
+        self.adv_stats_btn.setText(
+            "Hide advanced statistics settings" if checked else "Show advanced statistics settings"
+        )
 
     def _create_advanced_statistics(self):
         layout = QVBoxLayout()
@@ -346,17 +394,13 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignTop)
 
-        layout.addWidget(
-            QLabel(
-                "Calculate extra statistics (Centroid, Bounding box, Volume, and Mean intensities are calculated by default."
-            )
-        )
-        self.advanced_statistics_only_checkbox = QCheckBox(
-            "Only add extra statistics data, skipping cropping & segmentation (only usefull for already segmented samples)"
-        )
-        layout.addWidget(self.advanced_statistics_only_checkbox)
+        # layout.addWidget(
+        #     QLabel(
+        #         "Calculate extra statistics (Centroid, Bounding box, Volume, and Mean intensities are calculated by default)."
+        #     )
+        # )
         layout1 = QHBoxLayout()
-        layout1.addWidget(QLabel("Calculate intensity data inside the:"))
+        layout1.addWidget(QLabel("Measure intensities inside the:"))
         self.nuclei_or_cytoplasm_checkbox = QComboBox()
         self.nuclei_or_cytoplasm_checkbox.addItems(
             ["Nuclei", "Cytoplasm", "Whole cell"]
@@ -373,12 +417,11 @@ class MainWindow(QMainWindow):
         measurement_sub_layout.setContentsMargins(30, 0, 0, 0)
 
         layout_cytoplasm = QHBoxLayout()
-        self.QLabel_cytoplasm_size = QLabel(
-            "Create cytoplasm by extending ... um outside of nucleus in 3D:"
-        )
+        self.QLabel_cytoplasm_size = QLabel("Extension radius (µm):")
         self.QLabel_cytoplasm_size.setVisible(False)
         layout_cytoplasm.addWidget(self.QLabel_cytoplasm_size)
         self.cytoplasm_size_input = QLineEdit("5")
+        self.cytoplasm_size_input.setMaximumWidth(90)
         self.cytoplasm_size_input.setVisible(False)
         layout_cytoplasm.addWidget(self.cytoplasm_size_input)
         layout_cytoplasm.addStretch()
@@ -395,11 +438,11 @@ class MainWindow(QMainWindow):
         measurement_sub_layout.addLayout(layout_mask)
 
         layout.addLayout(measurement_sub_layout)
-        layout.addWidget(
-            QLabel(
-                "Note: Phenotype/cell-type calling uses this same nuclei/cytoplasm/whole-cell intensity setting."
-            )
+        note_label = QLabel(
+            "Note: Phenotype/cell-type calling uses this same nuclei/cytoplasm/whole-cell intensity setting."
         )
+        note_label.setStyleSheet("font-style: italic;")
+        layout.addWidget(note_label)
 
         layout2 = QHBoxLayout()
         layout2.addWidget(QLabel("Additional properties to calculate (multi-select):"))
@@ -449,11 +492,20 @@ class MainWindow(QMainWindow):
             self.calculate_advanced_statistics_list.addItem(QListWidgetItem(item))
 
         layout2.addWidget(self.calculate_advanced_statistics_list)
-        layout2.addStretch()  # Push everything to the left
+        layout2.addStretch()
         layout.addLayout(layout2)
 
+        skimage_hint = QLabel(
+            'More information on these properties can be found in the '
+            '<a href="https://scikit-image.org/docs/stable/api/skimage.measure.html#skimage.measure.regionprops">'
+            'scikit-image documentation (skimage.measure.regionprops)</a>.'
+        )
+        skimage_hint.setStyleSheet("font-style: italic;")
+        skimage_hint.setOpenExternalLinks(True)
+        layout.addWidget(skimage_hint)
+
         self.calculate_neighbour_statistics_checkbox = QCheckBox(
-            "Calculate neighbours statistics"
+            "Calculate neighbour statistics"
         )
         self.calculate_neighbour_statistics_checkbox.setChecked(False)
         self.calculate_neighbour_statistics_checkbox.toggled.connect(
@@ -480,8 +532,9 @@ class MainWindow(QMainWindow):
         knn_neighbour_options_layout.setSpacing(6)
 
         layout_knn = QHBoxLayout()
-        layout_knn.addWidget(QLabel("KNN value (None disables KNN):"))
-        self.knn_input = QLineEdit("None")
+        layout_knn.addWidget(QLabel("Number of nearest neighbours (K):"))
+        self.knn_input = QLineEdit()
+        self.knn_input.setPlaceholderText("e.g. 5")
         self.knn_input.setMaximumWidth(120)
         layout_knn.addWidget(self.knn_input)
         layout_knn.addStretch()
@@ -511,11 +564,7 @@ class MainWindow(QMainWindow):
         touching_options_layout.setSpacing(6)
 
         layout_touching_dilation = QHBoxLayout()
-        layout_touching_dilation.addWidget(
-            QLabel(
-                "Dilate nuclei by x um to find touching neighbours (based on voxel size):"
-            )
-        )
+        layout_touching_dilation.addWidget(QLabel("Dilation radius (µm):"))
         self.touching_dilation_um_input = QLineEdit("1.0")
         self.touching_dilation_um_input.setMaximumWidth(120)
         layout_touching_dilation.addWidget(self.touching_dilation_um_input)
@@ -531,27 +580,6 @@ class MainWindow(QMainWindow):
         )
         neighbour_sub_layout.addWidget(self.touching_neighbour_options_widget)
         layout.addLayout(neighbour_sub_layout)
-
-        layout_voxel_inputs = QHBoxLayout()
-        layout_voxel_inputs.addWidget(
-            QLabel(
-                "If your Tiff/IMS input file doesn't have correct voxel size metadata, you can add it here (most often not needed):"
-            )
-        )
-        layout_voxel_inputs.addWidget(QLabel("Z:"))
-        self.voxel_size_z_input = QLineEdit("1.0")
-        self.voxel_size_z_input.setMaximumWidth(90)
-        layout_voxel_inputs.addWidget(self.voxel_size_z_input)
-        layout_voxel_inputs.addWidget(QLabel("X:"))
-        self.voxel_size_x_input = QLineEdit("1.0")
-        self.voxel_size_x_input.setMaximumWidth(90)
-        layout_voxel_inputs.addWidget(self.voxel_size_x_input)
-        layout_voxel_inputs.addWidget(QLabel("Y:"))
-        self.voxel_size_y_input = QLineEdit("1.0")
-        self.voxel_size_y_input.setMaximumWidth(90)
-        layout_voxel_inputs.addWidget(self.voxel_size_y_input)
-        layout_voxel_inputs.addStretch()
-        layout.addLayout(layout_voxel_inputs)
 
         self._toggle_neighbour_statistics(
             self.calculate_neighbour_statistics_checkbox.isChecked()
@@ -619,7 +647,8 @@ class MainWindow(QMainWindow):
                 )
 
         extra_props = self.get_selected_advanced_statistics()
-        advanced_statistics_only = self.advanced_statistics_only_checkbox.isChecked()
+        run_mode = self.run_mode_combo.currentText()
+        advanced_statistics_only = run_mode in ("Statistics only", "Statistics + phenotype/cell-type calling")
         save_measurement_mask = self.save_measurement_mask_checkbox.isChecked()
         calculate_neighbour_statistics = (
             self.calculate_neighbour_statistics_checkbox.isChecked()
@@ -644,9 +673,9 @@ class MainWindow(QMainWindow):
 
             if use_knn_neighbours:
                 knn_text = self.knn_input.text().strip()
-                if knn_text == "" or knn_text.lower() == "none":
+                if knn_text == "":
                     raise ValueError(
-                        "KNN is enabled. Please enter a positive integer KNN value."
+                        "KNN is enabled. Please enter a positive integer K value."
                     )
                 try:
                     knn = int(knn_text)
@@ -677,21 +706,25 @@ class MainWindow(QMainWindow):
                     self.calculate_phenotype_similarity_touching_checkbox.isChecked()
                 )
 
-        try:
-            voxel_z = float(self.voxel_size_z_input.text())
-            voxel_x = float(self.voxel_size_x_input.text())
-            voxel_y = float(self.voxel_size_y_input.text())
-        except ValueError as exc:
-            raise ValueError(
-                "Invalid voxel size override. Please enter valid float values for Z, X, and Y."
-            ) from exc
-
-        if voxel_z <= 0 or voxel_x <= 0 or voxel_y <= 0:
-            raise ValueError(
-                "Invalid voxel size override. Z, X, and Y must be positive values."
-            )
-
-        user_voxel_size = (voxel_z, voxel_y, voxel_x)
+        voxel_z_text = self.voxel_size_z_input.text().strip()
+        voxel_x_text = self.voxel_size_x_input.text().strip()
+        voxel_y_text = self.voxel_size_y_input.text().strip()
+        if voxel_z_text or voxel_x_text or voxel_y_text:
+            try:
+                voxel_z = float(voxel_z_text) if voxel_z_text else 1.0
+                voxel_x = float(voxel_x_text) if voxel_x_text else 1.0
+                voxel_y = float(voxel_y_text) if voxel_y_text else 1.0
+            except ValueError as exc:
+                raise ValueError(
+                    "Invalid voxel size override. Please enter valid float values for Z, X, and Y."
+                ) from exc
+            if voxel_z <= 0 or voxel_x <= 0 or voxel_y <= 0:
+                raise ValueError(
+                    "Invalid voxel size override. Z, X, and Y must be positive values."
+                )
+            user_voxel_size = (voxel_z, voxel_y, voxel_x)
+        else:
+            user_voxel_size = (1.0, 1.0, 1.0)
         return (
             extra_props,
             advanced_statistics_only,
@@ -708,67 +741,99 @@ class MainWindow(QMainWindow):
             calculate_phenotype_similarity_touching,
         )
 
+    def _create_cropping_layout(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignTop)
+        self.crop_config_btn = QPushButton("Show cropping settings")
+        self.crop_config_btn.setCheckable(True)
+        self.crop_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(self.crop_config_btn)
+
+        self.crop_config_widget = QWidget()
+        self.crop_config_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.crop_config_widget.setLayout(self._create_cropping_settings_layout())
+        self.crop_config_widget.setVisible(False)
+        layout.addWidget(self.crop_config_widget)
+
+        self.crop_config_btn.toggled.connect(self._toggle_crop_layout)
+        self.crop_config_btn.setChecked(True)  # start expanded
+        return layout
+
+    def _toggle_crop_layout(self, checked):
+        self.crop_config_widget.setVisible(checked)
+        self.crop_config_btn.setText(
+            "Hide cropping settings" if checked else "Show cropping settings"
+        )
+
     def _create_cropping_settings_layout(self):
         layout = QVBoxLayout()
         layout.setSpacing(0)
 
         # Crop samples before segmentation checkbox
-        self.do_crop_sample = QCheckBox(
-            "Crop samples before segmentation, this is done automatically for timelapses and manually for fixed samples"
-        )
+        self.do_crop_sample = QCheckBox("Crop samples before segmentation")
         self.do_crop_sample.setChecked(True)
         self.do_crop_sample.toggled.connect(self._toggle_crop_suboptions)
         layout.addWidget(self.do_crop_sample)
 
-        self.manual_crop_fixed_widget = QWidget()
-        manual_crop_layout = QVBoxLayout(self.manual_crop_fixed_widget)
-        manual_crop_layout.setContentsMargins(0, 0, 0, 0)
-        manual_crop_layout.setSpacing(0)
+        crop_hint = QLabel(
+            "Timelapses are cropped automatically; fixed samples can use manual or automatic cropping"
+        )
+        crop_hint.setStyleSheet("font-style: italic;")
+        layout.addWidget(crop_hint)
+
+        # All suboptions in one indented container — shown/hidden together
+        self.crop_suboptions_widget = QWidget()
+        sub_layout = QVBoxLayout(self.crop_suboptions_widget)
+        sub_layout.setContentsMargins(20, 2, 0, 0)
+        sub_layout.setSpacing(4)
 
         self.manual_crop_fixed_checkbox = QCheckBox(
             "For fixed samples: use manual cropping"
         )
         self.manual_crop_fixed_checkbox.setChecked(False)
-        manual_crop_layout.addWidget(self.manual_crop_fixed_checkbox)
+        sub_layout.addWidget(self.manual_crop_fixed_checkbox)
 
         self.skip_crop_existing_files_checkbox = QCheckBox(
-            "Skip cropping because cropped files already exist"
+            "Skip cropping — cropped files already exist"
         )
         self.skip_crop_existing_files_checkbox.setChecked(False)
-        manual_crop_layout.addWidget(self.skip_crop_existing_files_checkbox)
+        sub_layout.addWidget(self.skip_crop_existing_files_checkbox)
 
-        layout.addWidget(self.manual_crop_fixed_widget)
-
-        # Save crop as ims or tif file selector
-        self.save_crop_as_widget = QWidget()
-        layout2 = QHBoxLayout(self.save_crop_as_widget)
-        layout2.setContentsMargins(0, 0, 0, 0)
-        layout2.setSpacing(0)
-        layout2.addWidget(QLabel("Save cropped files as:"))
+        combo_row = QHBoxLayout()
+        combo_row.setContentsMargins(0, 2, 0, 0)
+        combo_row.addWidget(QLabel("Save cropped files as:"))
         self.save_crop_as = QComboBox()
         self.save_crop_as.addItems([".ims", ".tif"])
-        layout2.addWidget(self.save_crop_as)
-        layout2.addStretch()  # Push everything to the left
-        layout.addWidget(self.save_crop_as_widget)
+        combo_row.addWidget(self.save_crop_as)
+        combo_row.addStretch()
+        sub_layout.addLayout(combo_row)
 
+        crop_format_hint = QLabel(
+            "Use .ims if you work with Imaris; use .tif for universal compatibility"
+        )
+        crop_format_hint.setStyleSheet("font-style: italic;")
+        sub_layout.addWidget(crop_format_hint)
+
+        layout.addWidget(self.crop_suboptions_widget)
         self._toggle_crop_suboptions(self.do_crop_sample.isChecked())
 
         return layout
 
     def _toggle_crop_suboptions(self, checked):
-        self.manual_crop_fixed_widget.setVisible(checked)
-        self.save_crop_as_widget.setVisible(checked)
+        self.crop_suboptions_widget.setVisible(checked)
 
     def _create_phenotype_settings_layout(self):
         layout = QVBoxLayout()
         layout.setSpacing(0)
-        phenotype_settings_btn = QPushButton(
+        self.phenotype_settings_btn = QPushButton(
             "Show phenotype/cell-type calling settings"
         )
-        phenotype_settings_btn.setCheckable(True)
-        phenotype_settings_btn.toggled.connect(self._toggle_phenotype_settings)
-        phenotype_settings_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        layout.addWidget(phenotype_settings_btn)
+        self.phenotype_settings_btn.setCheckable(True)
+        self.phenotype_settings_btn.toggled.connect(self._toggle_phenotype_settings)
+        self.phenotype_settings_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(self.phenotype_settings_btn)
 
         # Create phenotype settings widget
         self.phenotype_settings_widget = QWidget()
@@ -778,8 +843,10 @@ class MainWindow(QMainWindow):
         return layout
 
     def _toggle_phenotype_settings(self, checked):
-        """Toggle visibility of phenotype settings"""
         self.phenotype_settings_widget.setVisible(checked)
+        self.phenotype_settings_btn.setText(
+            "Hide phenotype/cell-type calling settings" if checked else "Show phenotype/cell-type calling settings"
+        )
 
     def _create_phenotype_settings(self):
         """Add UI elements for phenotype/cell-type calling settings here"""
@@ -789,18 +856,19 @@ class MainWindow(QMainWindow):
         self.do_phenotype_calling_checkbox = QCheckBox(
             "Perform phenotype/cell-type calling"
         )
-        # self.do_phenotype_calling_checkbox.setChecked(False)
+        self.do_phenotype_calling_checkbox.toggled.connect(self._toggle_phenotype_daughters)
         layout.addWidget(self.do_phenotype_calling_checkbox)
 
-        self.phenotype_calling_only_checkbox = QCheckBox(
-            "Only add extra phenotype/cell-type calling data, skipping cropping & segmentation (only usefull for already segmented samples)"
-        )
-        layout.addWidget(self.phenotype_calling_only_checkbox)
+        # All daughter settings — indented, shown only when parent checkbox is checked
+        self.phenotype_daughters_widget = QWidget()
+        daughters_layout = QVBoxLayout(self.phenotype_daughters_widget)
+        daughters_layout.setContentsMargins(20, 4, 0, 0)
+        daughters_layout.setSpacing(8)
 
         self.create_split_phenotype_mask = QCheckBox(
             "Create an additional segmentation mask file that splits the called phenotypes/cell-types into different channels"
         )
-        layout.addWidget(self.create_split_phenotype_mask)
+        daughters_layout.addWidget(self.create_split_phenotype_mask)
 
         layout2 = QHBoxLayout()
         layout2.addWidget(QLabel("Calculating phenotype/cell-type based on"))
@@ -810,25 +878,27 @@ class MainWindow(QMainWindow):
         layout2.addWidget(self.phenotype_1)
         layout2.addWidget(QLabel("VS"))
         layout2.addWidget(self.phenotype_2)
-        layout2.addStretch()  # Push everything to the left
-        layout.addLayout(layout2)
+        layout2.addStretch()
+        daughters_layout.addLayout(layout2)
 
         layout3 = QHBoxLayout()
         layout3.addWidget(QLabel("Cutoff calculation method:"))
         self.calculate_cutoff = QComboBox()
         self.calculate_cutoff.addItems(
             [
-                "Calculate cutoff automatically (Usefull for populations that are roughly 50/50)",
-                "Use fixed cutoff of 0 (Phenotype attributed to brightest channel, usefull for populations with clear positive/negative)",
-                "Use custom cutoff value (User-defined float)",
+                "Automatic (best for ~50/50 populations)",
+                "Fixed at 0 (best for clear positive/negative)",
+                "Custom cutoff value (user-defined)",
             ]
         )
         self.calculate_cutoff.currentTextChanged.connect(self._toggle_custom_cutoff)
         layout3.addWidget(self.calculate_cutoff)
-        layout3.addStretch()  # Push everything to the left
-        layout.addLayout(layout3)
+        layout3.addStretch()
+        daughters_layout.addLayout(layout3)
 
-        layout_custom_cutoff = QHBoxLayout()
+        custom_cutoff_container = QWidget()
+        layout_custom_cutoff = QHBoxLayout(custom_cutoff_container)
+        layout_custom_cutoff.setContentsMargins(20, 0, 0, 0)
         self.custom_cutoff_label = QLabel("Custom cutoff value (log10 ratio):")
         self.custom_cutoff_label.setVisible(False)
         self.custom_cutoff_input = QLineEdit("0.0")
@@ -837,7 +907,7 @@ class MainWindow(QMainWindow):
         layout_custom_cutoff.addWidget(self.custom_cutoff_label)
         layout_custom_cutoff.addWidget(self.custom_cutoff_input)
         layout_custom_cutoff.addStretch()
-        layout.addLayout(layout_custom_cutoff)
+        daughters_layout.addWidget(custom_cutoff_container)
 
         layout4 = QHBoxLayout()
         layout4.addWidget(QLabel("Base phenotype/cell-type on:"))
@@ -846,10 +916,16 @@ class MainWindow(QMainWindow):
             ["Background subtracted mean intensity values", "Raw mean intensity values"]
         )
         layout4.addWidget(self.raw_or_background_subtracted)
-        layout4.addStretch()  # Push everything to the left
-        layout.addLayout(layout4)
+        layout4.addStretch()
+        daughters_layout.addLayout(layout4)
+
+        self.phenotype_daughters_widget.setVisible(False)
+        layout.addWidget(self.phenotype_daughters_widget)
 
         return layout
+
+    def _toggle_phenotype_daughters(self, checked):
+        self.phenotype_daughters_widget.setVisible(checked)
 
     def _toggle_custom_cutoff(self, selected_cutoff_method):
         show_custom = "custom cutoff" in selected_cutoff_method.lower()
@@ -890,11 +966,11 @@ class MainWindow(QMainWindow):
     def _create_advanced_settings_layout(self):
         layout = QVBoxLayout()
         layout.setSpacing(0)
-        adv_settings_btn = QPushButton("Show advanced segmentation settings")
-        adv_settings_btn.setCheckable(True)
-        adv_settings_btn.toggled.connect(self._toggle_advanced_settings)
-        adv_settings_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        layout.addWidget(adv_settings_btn)
+        self.adv_settings_btn = QPushButton("Show advanced segmentation settings")
+        self.adv_settings_btn.setCheckable(True)
+        self.adv_settings_btn.toggled.connect(self._toggle_advanced_settings)
+        self.adv_settings_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(self.adv_settings_btn)
 
         # Create advanced settings widget
         self.advanced_settings_widget = QWidget()
@@ -904,23 +980,80 @@ class MainWindow(QMainWindow):
         return layout
 
     def _toggle_advanced_settings(self, checked):
-        """Toggle visibility of advanced settings"""
         self.advanced_settings_widget.setVisible(checked)
+        self.adv_settings_btn.setText(
+            "Hide advanced segmentation settings" if checked else "Show advanced segmentation settings"
+        )
 
     def _create_advanced_settings(self):
         """Add UI elements for advanced settings here"""
         self.advanced_layout = QVBoxLayout()
         self.advanced_layout.setSpacing(10)
         self.advanced_layout.addLayout(self._create_model_settings())
-        self.advanced_layout.addLayout(self._create_save_individual_files())
+        
         breaking_threshold_layout = QHBoxLayout()
         breaking_threshold_layout.addWidget(
             QLabel("Breaking threshold for cell stitching:")
         )
         self.breaking_threshold_input = QLineEdit("2.5")
+        self.breaking_threshold_input.setMaximumWidth(90)
         breaking_threshold_layout.addWidget(self.breaking_threshold_input)
+        breaking_threshold_layout.addStretch()
         self.advanced_layout.addLayout(breaking_threshold_layout)
+
+        self.advanced_layout.addWidget(
+            QLabel(
+                "Voxel size override (Z / X / Y in µm) — only needed if your image file has incorrect or missing spatial metadata:"
+            )
+        )
+        layout_voxel = QHBoxLayout()
+        layout_voxel.addWidget(QLabel("Z:"))
+        self.voxel_size_z_input = QLineEdit()
+        self.voxel_size_z_input.setPlaceholderText("auto")
+        self.voxel_size_z_input.setMaximumWidth(90)
+        layout_voxel.addWidget(self.voxel_size_z_input)
+        layout_voxel.addWidget(QLabel("X:"))
+        self.voxel_size_x_input = QLineEdit()
+        self.voxel_size_x_input.setPlaceholderText("auto")
+        self.voxel_size_x_input.setMaximumWidth(90)
+        layout_voxel.addWidget(self.voxel_size_x_input)
+        layout_voxel.addWidget(QLabel("Y:"))
+        self.voxel_size_y_input = QLineEdit()
+        self.voxel_size_y_input.setPlaceholderText("auto")
+        self.voxel_size_y_input.setMaximumWidth(90)
+        layout_voxel.addWidget(self.voxel_size_y_input)
+        layout_voxel.addStretch()
+        self.advanced_layout.addLayout(layout_voxel)
+
+        self.advanced_layout.addLayout(self._create_save_individual_files())
+
         return self.advanced_layout
+
+    def _create_channel_config_layout(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignTop)
+        self.channel_config_btn = QPushButton("Show channel configuration")
+        self.channel_config_btn.setCheckable(True)
+        self.channel_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(self.channel_config_btn)
+
+        self.channel_config_widget = QWidget()
+        self.channel_config_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.channel_config_widget.setLayout(self._create_channel_settings_menu())
+        self.channel_config_widget.setVisible(False)
+        layout.addWidget(self.channel_config_widget)
+
+        self.channel_config_btn.toggled.connect(self._toggle_channel_config)
+        self.channel_config_btn.setChecked(True)  # start expanded
+        return layout
+
+    def _toggle_channel_config(self, checked):
+        self.channel_config_widget.setVisible(checked)
+        self.channel_config_btn.setText(
+            "Hide channel configuration" if checked else "Show channel configuration"
+        )
 
     def _create_channel_settings_menu(self):
         """Add UI elements for channel settings here"""
@@ -1154,7 +1287,8 @@ class MainWindow(QMainWindow):
                     "Invalid custom cutoff value. Please enter a valid float."
                 ) from exc
         raw_or_background_subtracted = self.raw_or_background_subtracted.currentText()
-        phenotype_calling_only = self.phenotype_calling_only_checkbox.isChecked()
+        run_mode = self.run_mode_combo.currentText()
+        phenotype_calling_only = run_mode in ("Phenotype/cell-type calling only", "Statistics + phenotype/cell-type calling")
         create_split_phenotype_mask = self.create_split_phenotype_mask.isChecked()
         return (
             do_calling,
@@ -1185,6 +1319,11 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
         model_path = self.get_model_path()
+        if model_path is None:
+            self.segmentation_error(
+                "No segmentation model found. Please upload a model in the advanced segmentation settings."
+            )
+            return
         channel_names, channel_types = self.get_channel_settings()
         breaking_threshold = self.get_breaking_threshold()
         try:
@@ -1239,7 +1378,11 @@ class MainWindow(QMainWindow):
                 from main_functions.crop_sample import crop_sample
 
                 # Manual fixed-sample cropping happens in UI thread to allow interaction.
-                # Show indeterminate progress so users see work is ongoing.
+                self.segmentation_summary_label.setStyleSheet("")
+                self.segmentation_summary_label.setText(
+                    "Manual cropping in progress — please interact with the crop window..."
+                )
+                self.segmentation_summary_label.setVisible(True)
                 self.progressbar.setRange(0, 0)
                 QApplication.processEvents()
 
@@ -1312,11 +1455,11 @@ class MainWindow(QMainWindow):
         self.progressbar.setRange(0, 100)
         self.progressbar.setValue(100)
 
-        # Format the summary
         finish_time = datetime.now().strftime("%H:%M:%S")
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
 
+        self.segmentation_summary_label.setStyleSheet("color: #44BB44;")
         summary_text = f"Segmented {len(self.get_selected_samples())} samples.\nSegmentation completed at {finish_time} (took {minutes}m {seconds}s)"
         self.segmentation_summary_label.setText(summary_text)
         self.segmentation_summary_label.setVisible(True)
@@ -1326,6 +1469,7 @@ class MainWindow(QMainWindow):
         self.run_segmentation_btn.setEnabled(True)
         self.progressbar.setVisible(False)
 
+        self.segmentation_summary_label.setStyleSheet("color: #FF4444;")
         self.segmentation_summary_label.setText(f"Error: {error_message}")
         self.segmentation_summary_label.setVisible(True)
 
