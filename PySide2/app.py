@@ -17,7 +17,7 @@ from utils.file_to_folder import file_to_folder
 from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 # Import PySide2 FIRST
-from PySide2.QtCore import Qt, QThread, Signal
+from PySide2.QtCore import Qt, QThread, QTimer, Signal
 from PySide2.QtGui import QIcon, QColor, QBrush
 from PySide2.QtWidgets import (
     QApplication,
@@ -300,6 +300,13 @@ class MainWindow(QMainWindow):
         line.setFrameShadow(QFrame.Sunken)
         return line
 
+    def _info_label(self, tooltip_text):
+        lbl = QLabel("ⓘ")
+        lbl.setToolTip(tooltip_text)
+        lbl.setStyleSheet("color: #5599CC; font-size: 20px;")
+        lbl.setCursor(Qt.PointingHandCursor)
+        return lbl
+
     def _create_segment_tab(self):
         outer_widget = QWidget()
         outer_layout = QVBoxLayout()
@@ -312,8 +319,6 @@ class MainWindow(QMainWindow):
         settings_layout.setAlignment(Qt.AlignTop)
         settings_layout.setSpacing(30)
         settings_layout.setContentsMargins(9, 9, 9, 9)
-        settings_layout.addLayout(self._create_run_mode_layout())
-        settings_layout.addWidget(self._make_separator())
         settings_layout.addLayout(self._create_channel_config_layout())
         settings_layout.addWidget(self._make_separator())
         settings_layout.addLayout(self._create_cropping_layout())
@@ -336,6 +341,7 @@ class MainWindow(QMainWindow):
         bottom_layout = QVBoxLayout()
         bottom_layout.setContentsMargins(9, 6, 9, 9)
         bottom_layout.setSpacing(5)
+        bottom_layout.addLayout(self._create_run_mode_layout())
         bottom_layout.addLayout(self._create_run_segmentation_layout())
         bottom_layout.addLayout(self._create_progress_bar())
         bottom_widget.setLayout(bottom_layout)
@@ -355,9 +361,9 @@ class MainWindow(QMainWindow):
             "Statistics + phenotype/cell-type calling",
         ])
         layout.addWidget(self.run_mode_combo)
-        hint = QLabel("Controls which pipeline steps run — non-full-pipeline modes skip cropping & segmentation and work on already-segmented samples")
-        hint.setStyleSheet("font-style: italic;")
-        layout.addWidget(hint)
+        layout.addWidget(self._info_label(
+            "Controls which pipeline steps run — non-full-pipeline modes skip cropping & segmentation and only work on already-segmented samples"
+        ))
         layout.addStretch()
         return layout
 
@@ -409,6 +415,9 @@ class MainWindow(QMainWindow):
             self._cytoplasm_measurement_toggled
         )
         layout1.addWidget(self.nuclei_or_cytoplasm_checkbox)
+        layout1.addWidget(self._info_label(
+            "Phenotype/cell-type calling uses this same nuclei/cytoplasm/whole-cell intensity setting."
+        ))
         layout1.addStretch()
         layout.addLayout(layout1)
 
@@ -438,14 +447,13 @@ class MainWindow(QMainWindow):
         measurement_sub_layout.addLayout(layout_mask)
 
         layout.addLayout(measurement_sub_layout)
-        note_label = QLabel(
-            "Note: Phenotype/cell-type calling uses this same nuclei/cytoplasm/whole-cell intensity setting."
-        )
-        note_label.setStyleSheet("font-style: italic;")
-        layout.addWidget(note_label)
 
         layout2 = QHBoxLayout()
         layout2.addWidget(QLabel("Additional properties to calculate (multi-select):"))
+        layout2.addWidget(self._info_label(
+            "Additional properties from skimage.measure.regionprops.\n"
+            "More info: https://scikit-image.org/docs/stable/api/skimage.measure.html#skimage.measure.regionprops"
+        ))
         self.calculate_advanced_statistics_list = QListWidget()
         self.calculate_advanced_statistics_list.setSelectionMode(
             QAbstractItemView.MultiSelection
@@ -495,15 +503,6 @@ class MainWindow(QMainWindow):
         layout2.addStretch()
         layout.addLayout(layout2)
 
-        skimage_hint = QLabel(
-            'More information on these properties can be found in the '
-            '<a href="https://scikit-image.org/docs/stable/api/skimage.measure.html#skimage.measure.regionprops">'
-            'scikit-image documentation (skimage.measure.regionprops)</a>.'
-        )
-        skimage_hint.setStyleSheet("font-style: italic;")
-        skimage_hint.setOpenExternalLinks(True)
-        layout.addWidget(skimage_hint)
-
         self.calculate_neighbour_statistics_checkbox = QCheckBox(
             "Calculate neighbour statistics"
         )
@@ -524,7 +523,16 @@ class MainWindow(QMainWindow):
         self.calculate_neighbours_knn_checkbox.toggled.connect(
             self._toggle_knn_neighbour_options
         )
-        neighbour_sub_layout.addWidget(self.calculate_neighbours_knn_checkbox)
+        self.knn_checkbox_row_widget = QWidget()
+        knn_row = QHBoxLayout(self.knn_checkbox_row_widget)
+        knn_row.setContentsMargins(0, 0, 0, 0)
+        knn_row.addWidget(self.calculate_neighbours_knn_checkbox)
+        knn_row.addWidget(self._info_label(
+            "K-Nearest Neighbours (KNN): finds the K cells whose centroids are closest in 3D space and treats them as neighbours. "
+            "This is a purely distance-based approach — cells do not need to be physically touching."
+        ))
+        knn_row.addStretch()
+        neighbour_sub_layout.addWidget(self.knn_checkbox_row_widget)
 
         self.knn_neighbour_options_widget = QWidget()
         knn_neighbour_options_layout = QVBoxLayout(self.knn_neighbour_options_widget)
@@ -544,9 +552,14 @@ class MainWindow(QMainWindow):
             "Calculate phenotype similarity score based on KNN"
         )
         self.calculate_phenotype_similarity_knn_checkbox.setChecked(False)
-        knn_neighbour_options_layout.addWidget(
-            self.calculate_phenotype_similarity_knn_checkbox
-        )
+        knn_sim_row = QHBoxLayout()
+        knn_sim_row.addWidget(self.calculate_phenotype_similarity_knn_checkbox)
+        knn_sim_row.addWidget(self._info_label(
+            "Calculates what fraction of a cell's K nearest neighbours share the same phenotype/cell-type. "
+            "A score of 1.0 means all neighbours are the same type; 0.0 means none are."
+        ))
+        knn_sim_row.addStretch()
+        knn_neighbour_options_layout.addLayout(knn_sim_row)
         neighbour_sub_layout.addWidget(self.knn_neighbour_options_widget)
 
         self.calculate_neighbours_touching_checkbox = QCheckBox(
@@ -556,7 +569,17 @@ class MainWindow(QMainWindow):
         self.calculate_neighbours_touching_checkbox.toggled.connect(
             self._toggle_touching_neighbour_options
         )
-        neighbour_sub_layout.addWidget(self.calculate_neighbours_touching_checkbox)
+        self.touching_checkbox_row_widget = QWidget()
+        touching_row = QHBoxLayout(self.touching_checkbox_row_widget)
+        touching_row.setContentsMargins(0, 0, 0, 0)
+        touching_row.addWidget(self.calculate_neighbours_touching_checkbox)
+        touching_row.addWidget(self._info_label(
+            "Dilates each nucleus mask outward by a given radius (in µm) using a Euclidean Distance Transform (EDT), "
+            "then checks which other nuclei overlap with the expanded region. "
+            "Cells that overlap are considered neighbours — mimicking physical contact between cells."
+        ))
+        touching_row.addStretch()
+        neighbour_sub_layout.addWidget(self.touching_checkbox_row_widget)
 
         self.touching_neighbour_options_widget = QWidget()
         touching_options_layout = QVBoxLayout(self.touching_neighbour_options_widget)
@@ -575,9 +598,14 @@ class MainWindow(QMainWindow):
             "Calculate phenotype similarity score based on 3D touching"
         )
         self.calculate_phenotype_similarity_touching_checkbox.setChecked(False)
-        touching_options_layout.addWidget(
-            self.calculate_phenotype_similarity_touching_checkbox
-        )
+        touching_sim_row = QHBoxLayout()
+        touching_sim_row.addWidget(self.calculate_phenotype_similarity_touching_checkbox)
+        touching_sim_row.addWidget(self._info_label(
+            "Calculates what fraction of a cell's touching neighbours share the same phenotype/cell-type. "
+            "A score of 1.0 means all touching neighbours are the same type; 0.0 means none are."
+        ))
+        touching_sim_row.addStretch()
+        touching_options_layout.addLayout(touching_sim_row)
         neighbour_sub_layout.addWidget(self.touching_neighbour_options_widget)
         layout.addLayout(neighbour_sub_layout)
 
@@ -606,8 +634,8 @@ class MainWindow(QMainWindow):
             self.save_measurement_mask_checkbox.setChecked(False)
 
     def _toggle_neighbour_statistics(self, checked):
-        self.calculate_neighbours_knn_checkbox.setVisible(checked)
-        self.calculate_neighbours_touching_checkbox.setVisible(checked)
+        self.knn_checkbox_row_widget.setVisible(checked)
+        self.touching_checkbox_row_widget.setVisible(checked)
         self.knn_neighbour_options_widget.setVisible(
             checked and self.calculate_neighbours_knn_checkbox.isChecked()
         )
@@ -775,13 +803,13 @@ class MainWindow(QMainWindow):
         self.do_crop_sample = QCheckBox("Crop samples before segmentation")
         self.do_crop_sample.setChecked(True)
         self.do_crop_sample.toggled.connect(self._toggle_crop_suboptions)
-        layout.addWidget(self.do_crop_sample)
-
-        crop_hint = QLabel(
-            "Timelapses are cropped automatically; fixed samples can use manual or automatic cropping"
-        )
-        crop_hint.setStyleSheet("font-style: italic;")
-        layout.addWidget(crop_hint)
+        crop_row = QHBoxLayout()
+        crop_row.addWidget(self.do_crop_sample)
+        crop_row.addWidget(self._info_label(
+            "Timelapses are cropped automatically; fixed samples can use manual or automatic cropping."
+        ))
+        crop_row.addStretch()
+        layout.addLayout(crop_row)
 
         # All suboptions in one indented container — shown/hidden together
         self.crop_suboptions_widget = QWidget()
@@ -807,14 +835,11 @@ class MainWindow(QMainWindow):
         self.save_crop_as = QComboBox()
         self.save_crop_as.addItems([".ims", ".tif"])
         combo_row.addWidget(self.save_crop_as)
+        combo_row.addWidget(self._info_label(
+            "Use .ims if you work with Imaris; use .tif for universal compatibility."
+        ))
         combo_row.addStretch()
         sub_layout.addLayout(combo_row)
-
-        crop_format_hint = QLabel(
-            "Use .ims if you work with Imaris; use .tif for universal compatibility"
-        )
-        crop_format_hint.setStyleSheet("font-style: italic;")
-        sub_layout.addWidget(crop_format_hint)
 
         layout.addWidget(self.crop_suboptions_widget)
         self._toggle_crop_suboptions(self.do_crop_sample.isChecked())
@@ -886,13 +911,18 @@ class MainWindow(QMainWindow):
         self.calculate_cutoff = QComboBox()
         self.calculate_cutoff.addItems(
             [
-                "Automatic (best for ~50/50 populations)",
-                "Fixed at 0 (best for clear positive/negative)",
-                "Custom cutoff value (user-defined)",
+                "Automatic",
+                "Fixed at 0",
+                "Custom cutoff value",
             ]
         )
         self.calculate_cutoff.currentTextChanged.connect(self._toggle_custom_cutoff)
         layout3.addWidget(self.calculate_cutoff)
+        layout3.addWidget(self._info_label(
+            "Automatic: finds the cutoff that best separates two populations — best when both are roughly equal in size.\n"
+            "Fixed at 0: uses a log10 ratio of 0 (equal intensity) as the cutoff — best when one population is clearly positive and the other negative.\n"
+            "Custom: lets you set the cutoff manually as a log10 ratio value."
+        ))
         layout3.addStretch()
         daughters_layout.addLayout(layout3)
 
@@ -916,6 +946,11 @@ class MainWindow(QMainWindow):
             ["Background subtracted mean intensity values", "Raw mean intensity values"]
         )
         layout4.addWidget(self.raw_or_background_subtracted)
+        layout4.addWidget(self._info_label(
+            "Raw: uses the raw pixel intensity values measured inside each nucleus/cell.\n"
+            "Background subtracted: subtracts an estimated background (the median pixel value of the whole image) from the raw value, "
+            "reducing the influence of uneven illumination or autofluorescence."
+        ))
         layout4.addStretch()
         daughters_layout.addLayout(layout4)
 
@@ -939,8 +974,34 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.segment_tab_label)
         self.run_segmentation_btn = QPushButton("Run segmentation")
         self.run_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.run_segmentation_btn.clicked.connect(self.start_segmentation)
-        layout.addWidget(self.run_segmentation_btn)
+        self.run_segmentation_btn.clicked.connect(lambda: self.start_segmentation())
+        self.stop_segmentation_btn = QPushButton("Stop after current sample")
+        self.stop_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.stop_segmentation_btn.setVisible(False)
+        self.stop_segmentation_btn.clicked.connect(self._request_stop)
+        self.continue_segmentation_btn = QPushButton("Continue segmentation")
+        self.continue_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.continue_segmentation_btn.setVisible(False)
+        self.continue_segmentation_btn.clicked.connect(self._continue_segmentation)
+        save_config_btn = QPushButton("Save configuration")
+        save_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        save_config_btn.clicked.connect(self.save_configuration)
+        load_config_btn = QPushButton("Load configuration")
+        load_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        load_config_btn.clicked.connect(self.load_configuration)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addWidget(self.run_segmentation_btn)
+        btn_row.addWidget(self.continue_segmentation_btn)
+        btn_row.addWidget(self.stop_segmentation_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self._info_label(
+            "Save all current settings to a JSON file so you can reload them later.\n"
+            "Useful for repeating the same analysis across experiments without re-entering every setting."
+        ))
+        btn_row.addWidget(save_config_btn)
+        btn_row.addWidget(load_config_btn)
+        layout.addLayout(btn_row)
         return layout
 
     def _update_segment_label(self):
@@ -998,14 +1059,23 @@ class MainWindow(QMainWindow):
         self.breaking_threshold_input = QLineEdit("2.5")
         self.breaking_threshold_input.setMaximumWidth(90)
         breaking_threshold_layout.addWidget(self.breaking_threshold_input)
+        breaking_threshold_layout.addWidget(self._info_label(
+            "Controls how aggressively the 3D stitching splits nuclei detected across Z-slices.\n"
+            "Lower value → more nuclei found, each smaller (less merging).\n"
+            "Higher value → fewer, larger nuclei (more merging across slices).\n"
+            "Default (2.5) works well for most datasets."
+        ))
         breaking_threshold_layout.addStretch()
         self.advanced_layout.addLayout(breaking_threshold_layout)
 
-        self.advanced_layout.addWidget(
-            QLabel(
-                "Voxel size override (Z / X / Y in µm) — only needed if your image file has incorrect or missing spatial metadata:"
-            )
-        )
+        voxel_label_row = QHBoxLayout()
+        voxel_label_row.addWidget(QLabel("Voxel size override (Z / X / Y in µm):"))
+        voxel_label_row.addWidget(self._info_label(
+            "Only needed if your image file has incorrect or missing spatial metadata.\n"
+            "Leave blank to use the voxel size read from the file automatically."
+        ))
+        voxel_label_row.addStretch()
+        self.advanced_layout.addLayout(voxel_label_row)
         layout_voxel = QHBoxLayout()
         layout_voxel.addWidget(QLabel("Z:"))
         self.voxel_size_z_input = QLineEdit()
@@ -1037,7 +1107,14 @@ class MainWindow(QMainWindow):
         self.channel_config_btn = QPushButton("Show channel configuration")
         self.channel_config_btn.setCheckable(True)
         self.channel_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        layout.addWidget(self.channel_config_btn)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+        btn_row.addWidget(self.channel_config_btn)
+        btn_row.addWidget(self._info_label(
+            "Configure ALL channels present in your image/movie — not only the channel(s) you want to segment."
+        ))
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
 
         self.channel_config_widget = QWidget()
         self.channel_config_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
@@ -1065,10 +1142,22 @@ class MainWindow(QMainWindow):
         self.channel_grid.setSpacing(10)
 
         # Header row
-        for text, col in [("Channel", 0), ("Type", 1), ("Name", 2)]:
+        for text, col in [("Channel", 0), ("Type", 1)]:
             lbl = QLabel(text)
             lbl.setStyleSheet("font-weight: bold;")
             self.channel_grid.addWidget(lbl, 0, col)
+        name_header_widget = QWidget()
+        name_header_row = QHBoxLayout(name_header_widget)
+        name_header_row.setContentsMargins(0, 0, 0, 0)
+        name_header_row.setSpacing(2)
+        name_lbl = QLabel("Name")
+        name_lbl.setStyleSheet("font-weight: bold;")
+        name_header_row.addWidget(name_lbl)
+        name_header_row.addWidget(
+            self._info_label("Name is only used to generate accurate file and column names in the output data.")
+        )
+        name_header_row.addStretch()
+        self.channel_grid.addWidget(name_header_widget, 0, 2)
 
         # Initial channel line
         self.channel_count = 1
@@ -1149,14 +1238,20 @@ class MainWindow(QMainWindow):
 
     def _create_model_settings(self):
         model_setting_layout = QHBoxLayout()
+        model_setting_layout.setSpacing(6)
         model_setting_layout.addWidget(QLabel("2D Segmentation model:"))
-        self.model_combo_box = QComboBox()  # Store as instance variable
+        self.model_combo_box = QComboBox()
         self._refresh_model_options()
         model_setting_layout.addWidget(self.model_combo_box)
-
         upload_button = QPushButton("Upload custom model")
         upload_button.clicked.connect(self._upload_custom_model)
         model_setting_layout.addWidget(upload_button)
+        model_setting_layout.addWidget(self._info_label(
+            "Pretrained 2D Cellpose segmentation models used to detect nuclei in each Z-slice. "
+            "The slices are then stitched into a full 3D segmentation. "
+            "You can upload a custom Cellpose model trained on your own data."
+        ))
+        model_setting_layout.addStretch()
         return model_setting_layout
 
     def _get_models_dir(self):
@@ -1301,9 +1396,11 @@ class MainWindow(QMainWindow):
             create_split_phenotype_mask,
         )
 
-    def start_segmentation(self):
+    def start_segmentation(self, sample_override=None, index_offset=0, total_count=None):
         """Start segmentation in a separate thread"""
-        sample_path_list = self.get_sample_path_list()
+        sample_path_list = sample_override if sample_override is not None else self.get_sample_path_list()
+        if total_count is None:
+            total_count = len(sample_path_list)
         if not sample_path_list:
             self.segmentation_summary_label.setText(
                 "No samples selected for segmentation."
@@ -1315,6 +1412,7 @@ class MainWindow(QMainWindow):
         self.progressbar.setVisible(True)
         self.progressbar.setValue(0)
         self.run_segmentation_btn.setEnabled(False)
+        self.continue_segmentation_btn.setVisible(False)
         self.segmentation_summary_label.setVisible(False)
         QApplication.processEvents()
 
@@ -1441,17 +1539,35 @@ class MainWindow(QMainWindow):
             touching_dilation_um,
             calculate_phenotype_similarity_touching,
             manually_cropped_fixed_samples,
+            index_offset=index_offset,
+            total_count=total_count,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
         self.worker.finished.connect(self.segmentation_finished)
-        self.worker.error_occurred.connect(
-            self.segmentation_error
-        )  # Connect error signal
+        self.worker.stopped.connect(self.segmentation_stopped)
+        self.worker.error_occurred.connect(self.segmentation_error)
+        self.worker.heartbeat.connect(self._on_worker_heartbeat)
+        self.stop_segmentation_btn.setVisible(True)
+        self.stop_segmentation_btn.setEnabled(True)
         self.worker.start()
+        import time as _time
+        self._segmentation_running = True
+        self._last_heartbeat_msg = "Starting..."
+        self._last_heartbeat_time = _time.time()
+        self._watchdog_timer = QTimer()
+        self._watchdog_timer.timeout.connect(self._watchdog_tick)
+        self._watchdog_timer.start(1_000)
 
     def segmentation_finished(self, elapsed_time):
         """Called when segmentation finishes"""
+        self._segmentation_running = False
+        if hasattr(self, "_watchdog_timer"):
+            self._watchdog_timer.stop()
         self.run_segmentation_btn.setEnabled(True)
+        self.stop_segmentation_btn.setVisible(False)
+        self.stop_segmentation_btn.setEnabled(True)
+        self.stop_segmentation_btn.setText("Stop after current sample")
+        self.continue_segmentation_btn.setVisible(False)
         self.progressbar.setRange(0, 100)
         self.progressbar.setValue(100)
 
@@ -1464,14 +1580,266 @@ class MainWindow(QMainWindow):
         self.segmentation_summary_label.setText(summary_text)
         self.segmentation_summary_label.setVisible(True)
 
+    def segmentation_stopped(self, elapsed_time, stopped_idx):
+        """Called when the user stops segmentation between samples"""
+        self._segmentation_running = False
+        if hasattr(self, "_watchdog_timer"):
+            self._watchdog_timer.stop()
+        self.run_segmentation_btn.setEnabled(True)
+        self.stop_segmentation_btn.setVisible(False)
+        self.stop_segmentation_btn.setEnabled(True)
+        self.stop_segmentation_btn.setText("Stop after current sample")
+        self.progressbar.setRange(0, 100)
+        minutes = int(elapsed_time // 60)
+        seconds = int(elapsed_time % 60)
+        remaining = []
+        continuation_offset = stopped_idx
+        continuation_total = stopped_idx
+        if hasattr(self, "worker"):
+            remaining = self.worker.sample_path_list[stopped_idx:]
+            continuation_offset = self.worker.index_offset + stopped_idx
+            continuation_total = self.worker.total_count
+        self._continuation_sample_paths = remaining
+        self._continuation_index_offset = continuation_offset
+        self._continuation_total_count = continuation_total
+        remaining_count = len(remaining)
+        self.continue_segmentation_btn.setVisible(remaining_count > 0)
+        self.segmentation_summary_label.setStyleSheet("color: #FFA500;")
+        remaining_text = f" {remaining_count} sample(s) remaining." if remaining_count > 0 else ""
+        self.segmentation_summary_label.setText(
+            f"Stopped by user after {minutes}m {seconds}s.{remaining_text}"
+        )
+        self.segmentation_summary_label.setVisible(True)
+
     def segmentation_error(self, error_message):
         """Called when an error occurs during segmentation"""
+        self._segmentation_running = False
+        if hasattr(self, "_watchdog_timer"):
+            self._watchdog_timer.stop()
         self.run_segmentation_btn.setEnabled(True)
+        self.stop_segmentation_btn.setVisible(False)
+        self.stop_segmentation_btn.setEnabled(True)
+        self.stop_segmentation_btn.setText("Stop after current sample")
+        self.continue_segmentation_btn.setVisible(False)
         self.progressbar.setVisible(False)
 
         self.segmentation_summary_label.setStyleSheet("color: #FF4444;")
         self.segmentation_summary_label.setText(f"Error: {error_message}")
         self.segmentation_summary_label.setVisible(True)
+
+    def _request_stop(self):
+        if hasattr(self, "worker"):
+            self.worker.stop()
+        self.stop_segmentation_btn.setEnabled(False)
+        self.stop_segmentation_btn.setText("Stopping after current sample…")
+
+    def _continue_segmentation(self):
+        paths = getattr(self, "_continuation_sample_paths", [])
+        if paths:
+            self.start_segmentation(
+                sample_override=paths,
+                index_offset=getattr(self, "_continuation_index_offset", 0),
+                total_count=getattr(self, "_continuation_total_count", len(paths)),
+            )
+
+    def _on_worker_heartbeat(self, msg):
+        import time
+        self._last_heartbeat_msg = msg
+        self._last_heartbeat_time = time.time()
+        self.segmentation_summary_label.setStyleSheet("")
+        self.segmentation_summary_label.setText(msg)
+        self.segmentation_summary_label.setVisible(True)
+
+    def _watchdog_tick(self):
+        import time
+        if not getattr(self, "_segmentation_running", False):
+            return
+        if hasattr(self, "worker") and not self.worker.isRunning():
+            self._watchdog_timer.stop()
+            self._segmentation_running = False
+            self.run_segmentation_btn.setEnabled(True)
+            self.stop_segmentation_btn.setVisible(False)
+            self.continue_segmentation_btn.setVisible(False)
+            self.progressbar.setVisible(False)
+            self.segmentation_summary_label.setStyleSheet("color: #FF4444;")
+            self.segmentation_summary_label.setText(
+                "Error: the segmentation process stopped unexpectedly. Check the terminal output for details."
+            )
+            self.segmentation_summary_label.setVisible(True)
+            return
+        elapsed = int(time.time() - self._last_heartbeat_time)
+        minutes, seconds = divmod(elapsed, 60)
+        self.segmentation_summary_label.setStyleSheet("")
+        self.segmentation_summary_label.setText(
+            f"{self._last_heartbeat_msg} ({minutes}m {seconds}s elapsed on this sample)"
+        )
+        self.segmentation_summary_label.setVisible(True)
+
+    def _create_config_buttons_layout(self):
+        layout = QHBoxLayout()
+        layout.setSpacing(8)
+        save_btn = QPushButton("Save configuration")
+        save_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        save_btn.clicked.connect(self.save_configuration)
+        load_btn = QPushButton("Load configuration")
+        load_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        load_btn.clicked.connect(self.load_configuration)
+        layout.addWidget(save_btn)
+        layout.addWidget(load_btn)
+        layout.addStretch()
+        return layout
+
+    def save_configuration(self):
+        import json
+        config = {
+            "model_name": self.model_combo_box.currentText(),
+            "model_path": self.model_combo_box.currentData() or "",
+            "channel_count": self.channel_count,
+            "channels": [
+                {"name": le.text(), "type": cb.currentText()}
+                for _, (_, cb, le) in sorted(self.channel_widgets.items())
+            ],
+            "do_crop_sample": self.do_crop_sample.isChecked(),
+            "manual_crop_fixed": self.manual_crop_fixed_checkbox.isChecked(),
+            "skip_crop_existing_files": self.skip_crop_existing_files_checkbox.isChecked(),
+            "save_crop_as": self.save_crop_as.currentText(),
+            "run_mode": self.run_mode_combo.currentText(),
+            "breaking_threshold": self.breaking_threshold_input.text(),
+            "voxel_z": self.voxel_size_z_input.text(),
+            "voxel_x": self.voxel_size_x_input.text(),
+            "voxel_y": self.voxel_size_y_input.text(),
+            "save_frames": self.save_frames_checkbox.isChecked(),
+            "save_segmentation": self.save_segmentation_checkbox.isChecked(),
+            "do_phenotype_calling": self.do_phenotype_calling_checkbox.isChecked(),
+            "create_split_phenotype_mask": self.create_split_phenotype_mask.isChecked(),
+            "phenotype_1": self.phenotype_1.currentText(),
+            "phenotype_2": self.phenotype_2.currentText(),
+            "cutoff_method": self.calculate_cutoff.currentText(),
+            "custom_cutoff": self.custom_cutoff_input.text(),
+            "raw_or_background_subtracted": self.raw_or_background_subtracted.currentText(),
+            "measure_intensity_in": self.nuclei_or_cytoplasm_checkbox.currentText(),
+            "cytoplasm_size": self.cytoplasm_size_input.text(),
+            "save_measurement_mask": self.save_measurement_mask_checkbox.isChecked(),
+            "calculate_neighbour_statistics": self.calculate_neighbour_statistics_checkbox.isChecked(),
+            "use_knn": self.calculate_neighbours_knn_checkbox.isChecked(),
+            "knn": self.knn_input.text(),
+            "phenotype_similarity_knn": self.calculate_phenotype_similarity_knn_checkbox.isChecked(),
+            "use_touching": self.calculate_neighbours_touching_checkbox.isChecked(),
+            "touching_dilation_um": self.touching_dilation_um_input.text(),
+            "phenotype_similarity_touching": self.calculate_phenotype_similarity_touching_checkbox.isChecked(),
+            "advanced_statistics": [
+                self.calculate_advanced_statistics_list.item(i).text()
+                for i in range(self.calculate_advanced_statistics_list.count())
+                if self.calculate_advanced_statistics_list.item(i).isSelected()
+            ],
+        }
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save configuration", "", "JSON (*.json)"
+        )
+        if path:
+            with open(path, "w") as f:
+                json.dump(config, f, indent=2)
+
+    def load_configuration(self):
+        import json
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load configuration", "", "JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path) as f:
+                config = json.load(f)
+        except Exception as e:
+            self.segmentation_summary_label.setStyleSheet("color: #FF4444;")
+            self.segmentation_summary_label.setText(f"Could not load configuration: {e}")
+            self.segmentation_summary_label.setVisible(True)
+            return
+
+        # Restore channels
+        while self.channel_count > 1:
+            self.delete_channel()
+        channels = config.get("channels", [])
+        if channels:
+            _, cb, le = self.channel_widgets[1]
+            le.setText(channels[0].get("name", "Channel_1"))
+            idx = cb.findText(channels[0].get("type", ""))
+            if idx >= 0:
+                cb.setCurrentIndex(idx)
+            for ch in channels[1:]:
+                self.add_channel()
+                _, cb, le = self.channel_widgets[self.channel_count]
+                le.setText(ch.get("name", f"Channel_{self.channel_count}"))
+                idx = cb.findText(ch.get("type", ""))
+                if idx >= 0:
+                    cb.setCurrentIndex(idx)
+        self._update_phenotype_combos()
+
+        # Restore model selection — try saved path first, then name, else keep default
+        saved_model_path = config.get("model_path", "")
+        saved_model_name = config.get("model_name", "")
+        self._refresh_model_options()
+        selected = False
+        if saved_model_path and os.path.exists(saved_model_path):
+            idx = self.model_combo_box.findText(saved_model_name)
+            if idx >= 0:
+                self.model_combo_box.setCurrentIndex(idx)
+                selected = True
+        if not selected and saved_model_name:
+            idx = self.model_combo_box.findText(saved_model_name)
+            if idx >= 0:
+                self.model_combo_box.setCurrentIndex(idx)
+
+        def _set_check(widget, key, default=False):
+            widget.setChecked(bool(config.get(key, default)))
+
+        def _set_combo(widget, key, default=""):
+            idx = widget.findText(str(config.get(key, default)))
+            if idx >= 0:
+                widget.setCurrentIndex(idx)
+
+        _set_check(self.do_crop_sample, "do_crop_sample", True)
+        _set_check(self.manual_crop_fixed_checkbox, "manual_crop_fixed")
+        _set_check(self.skip_crop_existing_files_checkbox, "skip_crop_existing_files")
+        _set_combo(self.save_crop_as, "save_crop_as", ".ims")
+        _set_combo(self.run_mode_combo, "run_mode", "Full pipeline")
+        self.breaking_threshold_input.setText(config.get("breaking_threshold", "2.5"))
+        self.voxel_size_z_input.setText(config.get("voxel_z", ""))
+        self.voxel_size_x_input.setText(config.get("voxel_x", ""))
+        self.voxel_size_y_input.setText(config.get("voxel_y", ""))
+        _set_check(self.save_frames_checkbox, "save_frames")
+        _set_check(self.save_segmentation_checkbox, "save_segmentation")
+        _set_check(self.do_phenotype_calling_checkbox, "do_phenotype_calling")
+        _set_check(self.create_split_phenotype_mask, "create_split_phenotype_mask")
+        _set_combo(self.phenotype_1, "phenotype_1")
+        _set_combo(self.phenotype_2, "phenotype_2")
+        _set_combo(self.calculate_cutoff, "cutoff_method")
+        self.custom_cutoff_input.setText(config.get("custom_cutoff", "0.0"))
+        _set_combo(self.raw_or_background_subtracted, "raw_or_background_subtracted")
+        _set_combo(self.nuclei_or_cytoplasm_checkbox, "measure_intensity_in", "Nuclei")
+        self.cytoplasm_size_input.setText(config.get("cytoplasm_size", "5"))
+        _set_check(self.save_measurement_mask_checkbox, "save_measurement_mask")
+        _set_check(self.calculate_neighbour_statistics_checkbox, "calculate_neighbour_statistics")
+        _set_check(self.calculate_neighbours_knn_checkbox, "use_knn")
+        self.knn_input.setText(config.get("knn", ""))
+        _set_check(self.calculate_phenotype_similarity_knn_checkbox, "phenotype_similarity_knn")
+        _set_check(self.calculate_neighbours_touching_checkbox, "use_touching")
+        self.touching_dilation_um_input.setText(config.get("touching_dilation_um", "1.0"))
+        _set_check(self.calculate_phenotype_similarity_touching_checkbox, "phenotype_similarity_touching")
+
+        selected = set(config.get("advanced_statistics", []))
+        for i in range(self.calculate_advanced_statistics_list.count()):
+            item = self.calculate_advanced_statistics_list.item(i)
+            item.setSelected(item.text() in selected)
+
+        # Re-trigger toggle slots so dependent sub-widgets show/hide correctly
+        self._cytoplasm_measurement_toggled()
+        self._toggle_crop_suboptions(self.do_crop_sample.isChecked())
+        self._toggle_phenotype_daughters(self.do_phenotype_calling_checkbox.isChecked())
+        self._toggle_neighbour_statistics(self.calculate_neighbour_statistics_checkbox.isChecked())
+        self._toggle_knn_neighbour_options(self.calculate_neighbours_knn_checkbox.isChecked())
+        self._toggle_touching_neighbour_options(self.calculate_neighbours_touching_checkbox.isChecked())
+        self._toggle_custom_cutoff(self.calculate_cutoff.currentText())
 
     def _setup_view_data_widgets(self):
         """Setup all widgets for View Data tab"""
@@ -1991,7 +2359,9 @@ class ViewerWorker(QThread):
 class SegmentationWorker(QThread):
     progress_updated = Signal(int)
     finished = Signal(float)
-    error_occurred = Signal(str)  # Add error signal
+    stopped = Signal(float, int)
+    error_occurred = Signal(str)
+    heartbeat = Signal(str)
 
     def __init__(
         self,
@@ -2028,9 +2398,14 @@ class SegmentationWorker(QThread):
         touching_dilation_um=None,
         calculate_phenotype_similarity_touching=False,
         manually_cropped_fixed_samples=None,
+        index_offset=0,
+        total_count=None,
     ):
         super().__init__()
+        self._stop_requested = False
         self.sample_path_list = sample_path_list
+        self.index_offset = index_offset
+        self.total_count = total_count if total_count is not None else len(sample_path_list)
         self.cell_model_path = cell_model_path
         self.channel_names = channel_names
         self.channel_types = channel_types
@@ -2069,6 +2444,9 @@ class SegmentationWorker(QThread):
             for p in (manually_cropped_fixed_samples or [])
         }
 
+    def stop(self):
+        self._stop_requested = True
+
     def run(self):
         try:
             from main_functions.segment_organoid import segment_organoid
@@ -2104,7 +2482,7 @@ class SegmentationWorker(QThread):
             )
 
             if needs_auto_crop:
-                from sam2.build_sam import build_sam2_video_predictor
+                from sam2.build_sam import build_sam2_video_predictor # type: ignore
 
                 model_path = os.path.join(
                     os.path.dirname(os.path.dirname(__file__)), "models"
@@ -2117,7 +2495,15 @@ class SegmentationWorker(QThread):
                 organoid_model = None
 
             failed_samples = []
+            stopped_at_idx = len(self.sample_path_list)
             for idx, i in enumerate(self.sample_path_list):
+                if self._stop_requested:
+                    stopped_at_idx = idx
+                    break
+                global_idx = self.index_offset + idx
+                self.heartbeat.emit(
+                    f"Processing sample {global_idx + 1} of {self.total_count}: {os.path.basename(i)}"
+                )
                 try:
                     if (
                         not self.phenotype_calling_only
@@ -2271,7 +2657,7 @@ class SegmentationWorker(QThread):
                     failed_samples.append(f"{i}: {sample_error}")
                     print(f"Skipping sample due to error: {i}")
                 finally:
-                    progress = int((idx + 1) / len(self.sample_path_list) * 100)
+                    progress = int((global_idx + 1) / self.total_count * 100)
                     self.progress_updated.emit(progress)
 
             if failed_samples:
@@ -2280,7 +2666,10 @@ class SegmentationWorker(QThread):
                     print(f" - {failed}")
 
             elapsed_time = (datetime.now() - start_time).total_seconds()
-            self.finished.emit(elapsed_time)
+            if self._stop_requested:
+                self.stopped.emit(elapsed_time, stopped_at_idx)
+            else:
+                self.finished.emit(elapsed_time)
         except Exception as e:
             import traceback
 
