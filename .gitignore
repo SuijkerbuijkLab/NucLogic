@@ -13,3 +13,5 @@ logs/
 .claude/
 models/*
 .pixi/
+github_token.txt
+tools/

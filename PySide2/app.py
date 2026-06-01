@@ -15,6 +15,8 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 from utils.file_to_folder import file_to_folder
 from utils.tiff_metadata import load_tiff_movie_and_metadata
+from utils.update_checker import UpdateChecker
+from utils.updater import Updater
 
 # Import PySide2 FIRST
 from PySide2.QtCore import Qt, QThread, QTimer, Signal
@@ -55,11 +57,74 @@ class MainWindow(QMainWindow):
         self.samples_data = []  # Data structure holding samples
         self._set_icon()
         self._setup_ui()
+        self._start_update_check()
 
     def _set_icon(self):
         icon_path = Path(__file__).parent / "www" / "organoid_segmenter.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
+
+    # ── Update system ─────────────────────────────────────────────────────────
+
+    def _create_update_banner(self):
+        self._update_banner = QFrame()
+        self._update_banner.setVisible(False)
+        self._update_banner.setStyleSheet(
+            "QFrame { background: #2a5298; border-radius: 0px; padding: 4px; }"
+            "QLabel { color: white; background: transparent; }"
+            "QPushButton { color: white; background: #1a3a78; border: 1px solid #4a72c8;"
+            " border-radius: 4px; padding: 3px 10px; }"
+            "QPushButton:hover { background: #1e4494; }"
+        )
+        row = QHBoxLayout(self._update_banner)
+        row.setContentsMargins(12, 4, 12, 4)
+
+        self._update_label = QLabel("")
+        row.addWidget(self._update_label, 1)
+
+        self._install_btn = QPushButton("Install Update")
+        self._install_btn.clicked.connect(self._install_update)
+        row.addWidget(self._install_btn)
+
+        dismiss_btn = QPushButton("✕")
+        dismiss_btn.setFixedWidth(28)
+        dismiss_btn.clicked.connect(lambda: self._update_banner.setVisible(False))
+        row.addWidget(dismiss_btn)
+
+        return self._update_banner
+
+    def _start_update_check(self):
+        self._update_checker = UpdateChecker()
+        self._update_checker.update_available.connect(self._on_update_available)
+        self._update_checker.check_failed.connect(
+            lambda msg: print(f"[update] check failed: {msg}")
+        )
+        self._update_checker.start()
+
+    def _on_update_available(self, version, url):
+        self._update_url = url
+        self._update_label.setText(f"NucLogic {version} is available")
+        self._update_banner.setVisible(True)
+
+    def _install_update(self):
+        self._install_btn.setEnabled(False)
+        self._update_label.setText("Downloading…")
+        self._updater = Updater(self._update_url)
+        self._updater.progress.connect(self._update_label.setText)
+        self._updater.finished.connect(self._on_update_finished)
+        self._updater.error.connect(self._on_update_error)
+        self._updater.start()
+
+    def _on_update_finished(self):
+        self._update_label.setText(
+            "Update complete — please restart NucLogic to apply it."
+        )
+
+    def _on_update_error(self, msg):
+        self._update_label.setText(f"Update failed: {msg}")
+        self._install_btn.setEnabled(True)
+
+    # ── End update system ─────────────────────────────────────────────────────
 
     def _setup_ui(self):
         tabs = QTabWidget()
@@ -81,7 +146,14 @@ class MainWindow(QMainWindow):
         self.export_data_widget.setLayout(self.export_data_layout)
         tabs.addTab(self.export_data_widget, "  Export Data  ")
         tabs.setStyleSheet("QTabBar::tab { padding: 10px 20px; }")
-        self.setCentralWidget(tabs)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addWidget(self._create_update_banner())
+        container_layout.addWidget(tabs)
+        self.setCentralWidget(container)
 
     def _create_load_data_tab(self):
         widget = QWidget()
