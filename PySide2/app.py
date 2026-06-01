@@ -15,7 +15,7 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 from utils.file_to_folder import file_to_folder
 from utils.tiff_metadata import load_tiff_movie_and_metadata
-from utils.update_checker import UpdateChecker
+from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
 
 # Import PySide2 FIRST
@@ -103,7 +103,8 @@ class MainWindow(QMainWindow):
 
     def _on_update_available(self, version, url):
         self._update_url = url
-        self._update_label.setText(f"NucLogic {version} is available")
+        current = _read_local_version()
+        self._update_label.setText(f"NucLogic {version} is available  (currently on: {current})")
         self._update_banner.setVisible(True)
 
     def _install_update(self):
