@@ -1,0 +1,51 @@
+[project]
+name = "NucLogic"
+version = "0.1.0"
+description = "NucLogic organoid segmentation desktop app"
+channels = ["conda-forge", "defaults"]
+platforms = ["win-64"]
+
+# ── Conda dependencies ────────────────────────────────────────────────────────
+[dependencies]
+python = "3.11.*"
+numpy = "*"
+scipy = "*"
+pandas = "*"
+tifffile = "*"
+scikit-learn = "*"
+scikit-image = "*"
+pyside2 = "*"
+pytables = "*"   # replaces PyPI 'tables' — bundles HDF5, avoids Windows link issues
+
+# ── PyPI dependencies ─────────────────────────────────────────────────────────
+[pypi-dependencies]
+torch = ">=2.5.1"
+torchvision = ">=0.20.1"
+torchaudio = "*"
+napari = "*"                    # WITHOUT [pyside2] extra — conda already provides PySide2
+imaris-ims-file-reader = "*"
+alive-progress = "*"
+libpysal = "*"
+esda = "*"
+matplotlib = "*"
+seaborn = "*"
+pyqtdarktheme = "*"
+opencv-python = "*"
+PyImarisWriter = "*"
+cellpose = "*"
+sam2 = { git = "https://github.com/facebookresearch/sam2.git" }
+
+# ── PyPI index configuration ──────────────────────────────────────────────────
+# PyTorch index listed first so uv prefers CUDA wheels over CPU-only PyPI builds
+[pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu128"]
+
+# ── Runtime environment variables ─────────────────────────────────────────────
+[activation.env]
+KMP_DUPLICATE_LIB_OK = "TRUE"   # suppress OpenMP conflict between numpy and torch
+PYTHONIOENCODING = "utf-8"
+PYTHONUTF8 = "1"
+
+# ── Tasks ─────────────────────────────────────────────────────────────────────
+[tasks]
+start = "python launcher.py"

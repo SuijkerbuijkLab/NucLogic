@@ -12,3 +12,4 @@ env/
 logs/
 .claude/
 models/*
+.pixi/

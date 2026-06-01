@@ -28,7 +28,7 @@ def crop(
     # nuclei may be a list (single or dual); always max-project over channel axis -> (T, H, W)
     nuclei_list = nuclei if isinstance(nuclei, list) else [nuclei]
     proj_XY_nuclei = np.max(proj_XY[:, nuclei_list, :, :], axis=1)
-    proj_XY_8bit = ((proj_XY_nuclei / proj_XY_nuclei.max()) * 255).astype(np.uint8)
+    proj_XY_8bit = ((proj_XY_nuclei / np.percentile(proj_XY_nuclei, 99.9)) * 255).astype(np.uint8)
 
     all_masks = segment_organoid(proj_XY_8bit, model)
 
@@ -164,6 +164,9 @@ def crop(
             cropped_image = movie[
                 frame, :, slice_min:slice_max, row_min:row_max, col_min:col_max
             ]
+            # ims reader squeezes C=1 to 3D (Z,Y,X); restore to (C,Z,Y,X)
+            if cropped_image.ndim == 3:
+                cropped_image = cropped_image[np.newaxis, :, :, :]
 
             # On this cropped frame, we again need to make it so that the pixels in the corners where no organoid is are actually black
             mask_crop = maskXY[

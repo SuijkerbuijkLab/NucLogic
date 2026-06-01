@@ -1869,6 +1869,26 @@ class MainWindow(QMainWindow):
         self.show_segmentation_checkbox.setChecked(True)
         analysis_section.addWidget(self.show_segmentation_checkbox)
 
+        self.show_phenotype_segmentations_checkbox = QCheckBox("Show split phenotype segmentations")
+        self.show_phenotype_segmentations_checkbox.setChecked(False)
+        self.show_phenotype_segmentations_checkbox.toggled.connect(
+            lambda checked: self.phenotype_color_widget.setVisible(checked)
+        )
+        analysis_section.addWidget(self.show_phenotype_segmentations_checkbox)
+
+        self._phenotype_color_combos = {}
+        self.phenotype_color_widget = QWidget()
+        pheno_color_vlayout = QVBoxLayout()
+        pheno_color_vlayout.setContentsMargins(20, 0, 0, 0)
+        pheno_color_vlayout.setSpacing(4)
+        self.phenotype_color_widget.setLayout(pheno_color_vlayout)
+        self.phenotype_color_widget.setVisible(False)
+        analysis_section.addWidget(self.phenotype_color_widget)
+
+        self._get_list_widget(self.view_data_sample_list).itemSelectionChanged.connect(
+            self._update_phenotype_color_rows
+        )
+
         self.view_data_layout.addLayout(analysis_section)
 
         # Buttons section
@@ -1884,6 +1904,48 @@ class MainWindow(QMainWindow):
         self.view_status_label.setVisible(False)
         button_section.addWidget(self.view_status_label)
         self.view_data_layout.addLayout(button_section)
+
+    _PHENOTYPE_COLORS = ["Gray", "Red", "Green", "Blue", "Cyan", "Magenta", "Yellow", "White"]
+    _PHENOTYPE_COLOR_MAP = {
+        "Gray": "gray", "Red": "red", "Green": "green", "Blue": "blue",
+        "Cyan": "cyan", "Magenta": "magenta", "Yellow": "yellow", "White": "white",
+    }
+
+    def _update_phenotype_color_rows(self):
+        list_widget = self._get_list_widget(self.view_data_sample_list)
+        selected = [item.text() for item in list_widget.selectedItems()]
+
+        seen = set()
+        phenotype_names = []
+        for sample in selected:
+            sample_dir = os.path.join(self.path_text.text(), sample)
+            if not os.path.isdir(sample_dir):
+                continue
+            for fname in sorted(os.listdir(sample_dir)):
+                if fname.startswith(f"{sample}_") and fname.endswith("_mask.tif"):
+                    name = fname[len(sample) + 1 : -len("_mask.tif")]
+                    if name not in seen:
+                        phenotype_names.append(name)
+                        seen.add(name)
+
+        layout = self.phenotype_color_widget.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._phenotype_color_combos = {}
+        for name in phenotype_names:
+            row_widget = QWidget()
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(QLabel(name))
+            combo = QComboBox()
+            combo.addItems(self._PHENOTYPE_COLORS)
+            row_layout.addWidget(combo)
+            row_widget.setLayout(row_layout)
+            layout.addWidget(row_widget)
+            self._phenotype_color_combos[name] = combo
 
     def _create_channel_viewing_menu(self):
         """Add UI elements for channel viewing here"""
@@ -1998,6 +2060,11 @@ class MainWindow(QMainWindow):
         if not selected:
             return
         show_segmentation = self.show_segmentation_checkbox.isChecked()
+        show_phenotype_segmentations = self.show_phenotype_segmentations_checkbox.isChecked()
+        phenotype_colors = {
+            name: self._PHENOTYPE_COLOR_MAP[combo.currentText()]
+            for name, combo in self._phenotype_color_combos.items()
+        }
         channel_names, channel_colors = self.get_channel_settings_viewing()
 
         self.view_button.setEnabled(False)
@@ -2010,6 +2077,8 @@ class MainWindow(QMainWindow):
             channel_names,
             channel_colors,
             show_segmentation,
+            show_phenotype_segmentations,
+            phenotype_colors,
         )
         self.viewer_worker.data_loaded.connect(self._launch_napari_viewer)
         self.viewer_worker.error_occurred.connect(self._viewer_error)
@@ -2021,9 +2090,12 @@ class MainWindow(QMainWindow):
         self.view_button.setEnabled(True)
         self.view_status_label.setVisible(False)
 
+        import numpy as np
+
         channel_names = data["channel_names"]
         channel_colors = data["channel_colors"]
         show_segmentation = data["show_segmentation"]
+        phenotype_colors = data.get("phenotype_colors", {})
 
         viewer = napari.Viewer(ndisplay=3)
         for sample_data in data["samples_data"]:
@@ -2064,6 +2136,31 @@ class MainWindow(QMainWindow):
                         iso_gradient_mode="smooth",
                     )
 
+            for pheno in sample_data.get("phenotype_masks", []):
+                mask = pheno["data"]
+                pheno_name = pheno["name"]
+                viewer.add_labels(
+                    mask,
+                    name=f"{sample} {pheno_name} mask",
+                    visible=True,
+                    blending="additive",
+                    rendering="iso_categorical",
+                    scale=voxel_size,
+                    iso_gradient_mode="smooth",
+                )
+                binary = (mask > 0).astype(np.uint8)
+                binary_color = phenotype_colors.get(pheno_name, "gray")
+                viewer.add_labels(
+                    binary,
+                    name=f"{sample} {pheno_name} binary",
+                    visible=True,
+                    blending="additive",
+                    rendering="iso_categorical",
+                    scale=voxel_size,
+                    iso_gradient_mode="smooth",
+                    colormap={0: "", 1: binary_color},
+                )
+
     def _viewer_error(self, error_message):
         self.view_button.setEnabled(True)
         self.view_status_label.setText(f"Error: {error_message}")
@@ -2085,6 +2182,10 @@ class MainWindow(QMainWindow):
         self.export_button = QPushButton("Export selected samples to TSV")
         self.export_button.clicked.connect(self.create_export_data)
         self.export_data_layout.addWidget(self.export_button)
+
+        self.export_summary_button = QPushButton("Export summary of selected samples to TSV")
+        self.export_summary_button.clicked.connect(self.create_export_summary)
+        self.export_data_layout.addWidget(self.export_summary_button)
 
         self.show_plots_button = QPushButton("Show Plots")
         self.show_plots_button.clicked.connect(self.show_plots)
@@ -2126,8 +2227,34 @@ class MainWindow(QMainWindow):
         self.export_worker.error_occurred.connect(self._export_error)
         self.export_worker.start()
 
+    def create_export_summary(self):
+        list_widget = self._get_list_widget(self.export_data_sample_list)
+        selected_samples = [item.text() for item in list_widget.selectedItems()]
+        if not selected_samples:
+            return
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Exported Summary",
+            "",
+            "TSV Files (*.tsv);;All Files (*)",
+        )
+        if not save_path:
+            return
+        self.export_summary_button.setEnabled(False)
+        self.export_worker = ExportSummaryWorker(
+            selected_samples, self.path_text.text(), save_path
+        )
+        self.export_worker.finished.connect(lambda: self.export_summary_button.setEnabled(True))
+        self.export_worker.error_occurred.connect(self._export_summary_error)
+        self.export_worker.start()
+
     def _export_error(self, error_message):
         self.export_button.setEnabled(True)
+        self.plot_status_label.setText(f"Export error: {error_message}")
+        self.plot_status_label.setVisible(True)
+
+    def _export_summary_error(self, error_message):
+        self.export_summary_button.setEnabled(True)
         self.plot_status_label.setText(f"Export error: {error_message}")
         self.plot_status_label.setVisible(True)
 
@@ -2223,17 +2350,69 @@ class ExportWorker(QThread):
         try:
             import pandas as pd
 
-            frames = []
+            data = []
             for sample in self.selected_samples:
                 prop_path = os.path.join(
                     self.base_path, sample, f"{sample}_properties.tsv"
                 )
                 if os.path.exists(prop_path):
-                    frames.append(pd.read_csv(prop_path, sep="\t"))
-            if frames:
-                pd.concat(frames, ignore_index=True).to_csv(
+                    data.append(pd.read_csv(prop_path, sep="\t"))
+            if data:
+                pd.concat(data, ignore_index=True).to_csv(
                     self.save_path, sep="\t", index=False
                 )
+            self.finished.emit()
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+class ExportSummaryWorker(QThread):
+    finished = Signal()
+    error_occurred = Signal(str)
+
+    def __init__(self, selected_samples, base_path, save_path):
+        super().__init__()
+        self.selected_samples = selected_samples
+        self.base_path = base_path
+        self.save_path = save_path
+
+    def run(self):
+        try:
+            import pandas as pd
+
+            data = []
+            for sample in self.selected_samples:
+                prop_path = os.path.join(
+                    self.base_path, sample, f"{sample}_properties.tsv"
+                )
+                if os.path.exists(prop_path):
+                    data.append(pd.read_csv(prop_path, sep="\t"))
+            if data:
+                data = pd.concat(data, ignore_index=True)
+                time_col = next(
+                    (col for col in ("time", "timepoint") if col in data.columns and data[col].nunique() > 1),
+                    None,
+                )
+                group_cols = ["sample"] + ([time_col] if time_col else [])
+                summary = (
+                    data.groupby(group_cols)
+                    .agg(cell_count=("label", "nunique"))
+                    .reset_index()
+                )
+                for pheno_col in [c for c in data.columns if c.startswith("phenotype_")]:
+                    expected = pheno_col[len("phenotype_"):].split("_vs_")
+                    counts = (
+                        data.groupby(group_cols + [pheno_col])
+                        .size()
+                        .unstack(fill_value=0)
+                        .reindex(columns=expected, fill_value=0)
+                        .rename(columns=lambda v: f"phenotype_{v}")
+                        .reset_index()
+                    )
+                    summary = summary.merge(counts, on=group_cols, how="left")
+                summary.to_csv(
+                    self.save_path, sep="\t", index=False
+                )
+
             self.finished.emit()
         except Exception as e:
             self.error_occurred.emit(str(e))
@@ -2270,7 +2449,8 @@ class ViewerWorker(QThread):
     error_occurred = Signal(str)
 
     def __init__(
-        self, selected, base_path, channel_names, channel_colors, show_segmentation
+        self, selected, base_path, channel_names, channel_colors, show_segmentation,
+        show_phenotype_segmentations=False, phenotype_colors=None
     ):
         super().__init__()
         self.selected = selected
@@ -2278,6 +2458,8 @@ class ViewerWorker(QThread):
         self.channel_names = channel_names
         self.channel_colors = channel_colors
         self.show_segmentation = show_segmentation
+        self.show_phenotype_segmentations = show_phenotype_segmentations
+        self.phenotype_colors = phenotype_colors or {}
 
     def run(self):
         try:
@@ -2332,12 +2514,23 @@ class ViewerWorker(QThread):
                     f"segmentation {segmentation.shape if segmentation is not None else 'None'}"
                 )
 
+                phenotype_masks = []
+                if self.show_phenotype_segmentations:
+                    sample_dir = os.path.join(self.base_path, sample)
+                    for fname in sorted(os.listdir(sample_dir)):
+                        if fname.startswith(f"{sample}_") and fname.endswith("_mask.tif"):
+                            pheno_name = fname[len(sample) + 1 : -len("_mask.tif")]
+                            mask = tifffile.imread(os.path.join(sample_dir, fname))
+                            phenotype_masks.append({"name": pheno_name, "data": mask})
+                            print(f"Loaded phenotype mask: {fname} ({pheno_name})")
+
                 samples_data.append(
                     {
                         "sample": sample,
                         "movie": movie,
                         "voxel_size": voxel_size,
                         "segmentation": segmentation,
+                        "phenotype_masks": phenotype_masks,
                     }
                 )
 
@@ -2347,6 +2540,7 @@ class ViewerWorker(QThread):
                     "channel_names": self.channel_names,
                     "channel_colors": self.channel_colors,
                     "show_segmentation": self.show_segmentation,
+                    "phenotype_colors": self.phenotype_colors,
                 }
             )
         except Exception as e:

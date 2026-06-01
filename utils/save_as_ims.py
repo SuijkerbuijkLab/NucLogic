@@ -15,7 +15,12 @@ def save_as_ims(
     channel_names=["Channel_1", "Channel_2", "Channel_3", "Channel_4", "Channel_5"],
 ):
     """Save a 5D numpy array as an IMS file using PyImarisWriter, Input as TCZYX."""
-    timestamps = np.arange(0, input_movie.shape[0] * time_interval, time_interval)
+
+    try:
+        timestamps = np.arange(0, input_movie.shape[0] * time_interval, time_interval)
+    except Exception as e:
+        print(f"Non fatal error calculating timestamps: {e}")
+        timestamps = np.arange(0, input_movie.shape[0] * 1, 1)  # fallback to 1h intervals
     # channel_colors = ["magenta", "green", "blue"]
     # channel_names = ["magenta", "green", "blue"]
 
