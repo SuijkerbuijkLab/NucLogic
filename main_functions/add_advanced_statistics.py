@@ -24,14 +24,14 @@ def add_advanced_statistics(
     user_voxel_size=(1.0, 1.0, 1.0),
     calculate_neighbour_statistics=False,
     use_knn_neighbours=False,
-    knn=None,
+    knn_list=None,
     use_touching_neighbours_3d=False,
     touching_dilation_um=None,
 ):
     extra_props = extra_props or []
 
     should_run_knn = (
-        calculate_neighbour_statistics and use_knn_neighbours and knn is not None
+        calculate_neighbour_statistics and use_knn_neighbours and bool(knn_list)
     )
     should_run_touching = (
         calculate_neighbour_statistics
@@ -300,16 +300,17 @@ def add_advanced_statistics(
                 )
 
         if should_run_knn:
-            time_props = compute_knn_features(
-                time_props,
-                k=knn,
-                position_columns=["z", "y", "x"],
-                get_phenotype_score=False,
-                label_column="label",
-                distance_column=f"mean_distance_{knn}_KNN",
-                neighbors_column=f"neighbours_{knn}_KNN",
-                add_cell_id=False,
-            )
+            for knn in knn_list:
+                time_props = compute_knn_features(
+                    time_props,
+                    k=knn,
+                    position_columns=["z", "y", "x"],
+                    get_phenotype_score=False,
+                    label_column="label",
+                    distance_column=f"mean_distance_{knn}_KNN",
+                    neighbors_column=f"neighbours_{knn}_KNN",
+                    add_cell_id=False,
+                )
 
         if should_run_touching:
             touching_mask_3d = touching_expanded_movie[timepoint_int]

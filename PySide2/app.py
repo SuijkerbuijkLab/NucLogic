@@ -634,8 +634,9 @@ class MainWindow(QMainWindow):
         knn_row.setContentsMargins(0, 0, 0, 0)
         knn_row.addWidget(self.calculate_neighbours_knn_checkbox)
         knn_row.addWidget(self._info_label(
-            "K-Nearest Neighbours (KNN): finds the K cells whose centroids are closest in 3D space and treats them as neighbours. "
-            "This is a purely distance-based approach — cells do not need to be physically touching."
+            "K-Nearest Neighbours (KNN): finds the K cells whose centroids are closest in 3D space and treats them as neighbours.\n"
+            "This is a purely distance-based approach — cells do not need to be physically touching.\n"
+            "If you want to compute statistics for multiple K values, input them separated by commas (e.g. 3,5,7)"
         ))
         knn_row.addStretch()
         neighbour_sub_layout.addWidget(self.knn_checkbox_row_widget)
@@ -646,10 +647,10 @@ class MainWindow(QMainWindow):
         knn_neighbour_options_layout.setSpacing(6)
 
         layout_knn = QHBoxLayout()
-        layout_knn.addWidget(QLabel("Number of nearest neighbours (K):"))
+        layout_knn.addWidget(QLabel("Number of neareist neighbours (K):"))
         self.knn_input = QLineEdit()
-        self.knn_input.setPlaceholderText("e.g. 5")
-        self.knn_input.setMaximumWidth(120)
+        self.knn_input.setPlaceholderText("e.g. 5 or 3,5,7")
+        self.knn_input.setMaximumWidth(200)
         layout_knn.addWidget(self.knn_input)
         layout_knn.addStretch()
         knn_neighbour_options_layout.addLayout(layout_knn)
@@ -681,7 +682,7 @@ class MainWindow(QMainWindow):
         touching_row.addWidget(self.calculate_neighbours_touching_checkbox)
         touching_row.addWidget(self._info_label(
             "Dilates each nucleus mask outward by a given radius (in µm) using a Euclidean Distance Transform (EDT), "
-            "then checks which other nuclei overlap with the expanded region. "
+            "then checks which other nuclei overlap with the expanded region.\n"
             "Cells that overlap are considered neighbours — mimicking physical contact between cells."
         ))
         touching_row.addStretch()
@@ -707,7 +708,7 @@ class MainWindow(QMainWindow):
         touching_sim_row = QHBoxLayout()
         touching_sim_row.addWidget(self.calculate_phenotype_similarity_touching_checkbox)
         touching_sim_row.addWidget(self._info_label(
-            "Calculates what fraction of a cell's touching neighbours share the same phenotype/cell-type. "
+            "Calculates what fraction of a cell's touching neighbours share the same phenotype/cell-type.\n"
             "A score of 1.0 means all touching neighbours are the same type; 0.0 means none are."
         ))
         touching_sim_row.addStretch()
@@ -789,7 +790,7 @@ class MainWindow(QMainWindow):
         )
         use_knn_neighbours = False
         calculate_phenotype_similarity_knn = False
-        knn = None
+        knn_list = None
         use_touching_neighbours_3d = False
         touching_dilation_um = None
         calculate_phenotype_similarity_touching = False
@@ -809,18 +810,19 @@ class MainWindow(QMainWindow):
                 knn_text = self.knn_input.text().strip()
                 if knn_text == "":
                     raise ValueError(
-                        "KNN is enabled. Please enter a positive integer K value."
+                        "KNN is enabled. Please enter one or more K values (e.g. 5 or 3,5,7)."
                     )
                 try:
-                    knn = int(knn_text)
+                    # make list of ints if multiple K values entered, otherwise single int
+                    if "," in knn_text:
+                        knn_list = [int(k.strip()) for k in knn_text.split(",")]
+                    else:
+                        knn_list = [int(knn_text)]
+
                 except ValueError as exc:
                     raise ValueError(
                         "Invalid KNN value. Please enter a positive integer."
                     ) from exc
-                if knn < 1:
-                    raise ValueError(
-                        "Invalid KNN value. Please enter a positive integer."
-                    )
                 calculate_phenotype_similarity_knn = (
                     self.calculate_phenotype_similarity_knn_checkbox.isChecked()
                 )
@@ -868,7 +870,7 @@ class MainWindow(QMainWindow):
             user_voxel_size,
             calculate_neighbour_statistics,
             use_knn_neighbours,
-            knn,
+            knn_list,
             calculate_phenotype_similarity_knn,
             use_touching_neighbours_3d,
             touching_dilation_um,
@@ -1353,8 +1355,8 @@ class MainWindow(QMainWindow):
         upload_button.clicked.connect(self._upload_custom_model)
         model_setting_layout.addWidget(upload_button)
         model_setting_layout.addWidget(self._info_label(
-            "Pretrained 2D Cellpose segmentation models used to detect nuclei in each Z-slice. "
-            "The slices are then stitched into a full 3D segmentation. "
+            "Pretrained 2D Cellpose segmentation models used to detect nuclei in each Z-slice.\n"
+            "The slices are then stitched into a full 3D segmentation.\n"
             "You can upload a custom Cellpose model trained on your own data."
         ))
         model_setting_layout.addStretch()
@@ -1560,7 +1562,7 @@ class MainWindow(QMainWindow):
                 user_voxel_size,
                 calculate_neighbour_statistics,
                 use_knn_neighbours,
-                knn,
+                knn_list,
                 calculate_phenotype_similarity_knn,
                 use_touching_neighbours_3d,
                 touching_dilation_um,
@@ -1639,7 +1641,7 @@ class MainWindow(QMainWindow):
             user_voxel_size,
             calculate_neighbour_statistics,
             use_knn_neighbours,
-            knn,
+            knn_list,
             calculate_phenotype_similarity_knn,
             use_touching_neighbours_3d,
             touching_dilation_um,
@@ -2692,7 +2694,7 @@ class SegmentationWorker(QThread):
         user_voxel_size,
         calculate_neighbour_statistics=False,
         use_knn_neighbours=False,
-        knn=None,
+        knn_list=None,
         calculate_phenotype_similarity_knn=False,
         use_touching_neighbours_3d=False,
         touching_dilation_um=None,
@@ -2732,7 +2734,7 @@ class SegmentationWorker(QThread):
         self.user_voxel_size = user_voxel_size
         self.calculate_neighbour_statistics = calculate_neighbour_statistics
         self.use_knn_neighbours = use_knn_neighbours
-        self.knn = knn
+        self.knn_list = knn_list
         self.calculate_phenotype_similarity_knn = calculate_phenotype_similarity_knn
         self.use_touching_neighbours_3d = use_touching_neighbours_3d
         self.touching_dilation_um = touching_dilation_um
@@ -2847,7 +2849,7 @@ class SegmentationWorker(QThread):
                         should_run_advanced_stats = bool(self.extra_props) or (
                             self.calculate_neighbour_statistics
                             and (
-                                (self.use_knn_neighbours and self.knn is not None)
+                                (self.use_knn_neighbours and self.knn_list is not None)
                                 or (
                                     self.use_touching_neighbours_3d
                                     and self.touching_dilation_um is not None
@@ -2867,7 +2869,7 @@ class SegmentationWorker(QThread):
                                 user_voxel_size=self.user_voxel_size,
                                 calculate_neighbour_statistics=self.calculate_neighbour_statistics,
                                 use_knn_neighbours=self.use_knn_neighbours,
-                                knn=self.knn,
+                                knn_list=self.knn_list,
                                 use_touching_neighbours_3d=self.use_touching_neighbours_3d,
                                 touching_dilation_um=self.touching_dilation_um,
                             )
@@ -2894,7 +2896,7 @@ class SegmentationWorker(QThread):
                             user_voxel_size=self.user_voxel_size,
                             calculate_neighbour_statistics=self.calculate_neighbour_statistics,
                             use_knn_neighbours=self.use_knn_neighbours,
-                            knn=self.knn,
+                            knn_list=self.knn_list,
                             use_touching_neighbours_3d=self.use_touching_neighbours_3d,
                             touching_dilation_um=self.touching_dilation_um,
                         )
@@ -2906,7 +2908,7 @@ class SegmentationWorker(QThread):
                         )
 
                     if self.calculate_phenotype_similarity_knn:
-                        if not self.use_knn_neighbours or self.knn is None:
+                        if not self.use_knn_neighbours or self.knn_list is None:
                             print(
                                 "Skipping KNN phenotype similarity score: KNN neighbours are disabled."
                             )
@@ -2914,12 +2916,13 @@ class SegmentationWorker(QThread):
                             print(
                                 "Calculating phenotype similarity ratio based on KNN neighbours..."
                             )
-                            add_phenotype_similarity(
-                                i,
-                                neighbors_column=f"neighbours_{self.knn}_KNN",
-                                output_column=f"phenotype_similarity_ratio_{self.knn}_KNN",
-                                phenotype_column=phenotype_column,
-                            )
+                            for knn in self.knn_list:
+                                add_phenotype_similarity(
+                                    i,
+                                    neighbors_column=f"neighbours_{knn}_KNN",
+                                    output_column=f"phenotype_similarity_ratio_{knn}_KNN",
+                                    phenotype_column=phenotype_column,
+                                )
 
                     if self.calculate_phenotype_similarity_touching:
                         if (
