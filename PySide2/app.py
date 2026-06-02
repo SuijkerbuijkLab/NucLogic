@@ -20,8 +20,8 @@ from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
 
 # Import PySide2 FIRST
-from PySide2.QtCore import Qt, QThread, QTimer, Signal
-from PySide2.QtGui import QIcon, QColor, QBrush
+from PySide2.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide2.QtGui import QDesktopServices, QIcon, QColor, QBrush
 from PySide2.QtWidgets import (
     QApplication,
     QLabel,
@@ -114,6 +114,11 @@ class MainWindow(QMainWindow):
         self._update_label = QLabel("")
         row.addWidget(self._update_label, 1)
 
+        self._release_notes_btn = QPushButton("Release notes")
+        self._release_notes_btn.setVisible(False)
+        self._release_notes_btn.clicked.connect(self._open_release_notes)
+        row.addWidget(self._release_notes_btn)
+
         self._install_btn = QPushButton("Install Update")
         self._install_btn.clicked.connect(self._install_update)
         row.addWidget(self._install_btn)
@@ -133,11 +138,19 @@ class MainWindow(QMainWindow):
         )
         self._update_checker.start()
 
-    def _on_update_available(self, version, url):
+    def _on_update_available(self, version, url, html_url):
         self._update_url = url
         current = _read_local_version()
         self._update_label.setText(f"NucLogic {version} is available  (currently on: {current})")
+        if html_url:
+            self._release_notes_html_url = html_url
+            self._release_notes_btn.setVisible(True)
         self._update_banner.setVisible(True)
+
+    def _open_release_notes(self):
+        url = getattr(self, "_release_notes_html_url", "")
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def _install_update(self):
         self._install_btn.setEnabled(False)

@@ -28,7 +28,7 @@ def _parse_version(v):
 
 
 class UpdateChecker(QThread):
-    update_available = Signal(str, str)   # (new_version, zipball_url)
+    update_available = Signal(str, str, str)   # (new_version, zipball_url, html_url)
     up_to_date = Signal()
     check_failed = Signal(str)
 
@@ -44,6 +44,7 @@ class UpdateChecker(QThread):
 
             tag = data.get("tag_name", "")
             zipball = data.get("zipball_url", "")
+            html_url = data.get("html_url", "")
             if not tag:
                 self.check_failed.emit("No tag_name in release response")
                 return
@@ -51,7 +52,7 @@ class UpdateChecker(QThread):
             remote = _parse_version(tag)
             local = _parse_version(_read_local_version())
             if remote > local:
-                self.update_available.emit(tag.lstrip("v"), zipball)
+                self.update_available.emit(tag.lstrip("v"), zipball, html_url)
             else:
                 self.up_to_date.emit()
         except Exception as e:
