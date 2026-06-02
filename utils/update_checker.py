@@ -10,7 +10,7 @@ _API_URL = f"https://api.github.com/repos/{_REPO}/releases/latest"
 
 
 def _read_local_version():
-    p = _PROJECT_ROOT / "version.txt"
+    p = _PROJECT_ROOT / "miscellaneous" / "version.txt"
     return p.read_text().strip() if p.exists() else "0.0.0"
 
 

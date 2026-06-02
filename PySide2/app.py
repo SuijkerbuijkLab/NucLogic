@@ -4,7 +4,8 @@ import os
 import shutil
 import torch
 from pathlib import Path
-import winreg
+if sys.platform == "win32":
+    import winreg
 
 import tifffile
 import matplotlib
@@ -58,11 +59,42 @@ class MainWindow(QMainWindow):
         self._set_icon()
         self._setup_ui()
         self._start_update_check()
+        self._check_gpu()
 
     def _set_icon(self):
         icon_path = Path(__file__).parent / "www" / "organoid_segmenter.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
+
+    # ── GPU warning ───────────────────────────────────────────────────────────
+
+    def _create_gpu_warning_banner(self):
+        self._gpu_banner = QFrame()
+        self._gpu_banner.setVisible(False)
+        self._gpu_banner.setStyleSheet(
+            "QFrame { background: #8B5E00; border-radius: 0px; padding: 4px; }"
+            "QLabel { color: white; background: transparent; }"
+            "QPushButton { color: white; background: #6b4700; border: 1px solid #c48a00;"
+            " border-radius: 4px; padding: 3px 10px; }"
+            "QPushButton:hover { background: #7a5200; }"
+        )
+        row = QHBoxLayout(self._gpu_banner)
+        row.setContentsMargins(12, 4, 12, 4)
+
+        label = QLabel("⚠  No GPU found — segmentation will be extremely slow.")
+        row.addWidget(label, 1)
+
+        dismiss_btn = QPushButton("✕")
+        dismiss_btn.setFixedWidth(28)
+        dismiss_btn.clicked.connect(lambda: self._gpu_banner.setVisible(False))
+        row.addWidget(dismiss_btn)
+
+        return self._gpu_banner
+
+    def _check_gpu(self):
+        if not torch.cuda.is_available():
+            print("[gpu] No CUDA-capable GPU found. Running in CPU mode.")
+            self._gpu_banner.setVisible(True)
 
     # ── Update system ─────────────────────────────────────────────────────────
 
@@ -152,6 +184,7 @@ class MainWindow(QMainWindow):
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
+        container_layout.addWidget(self._create_gpu_warning_banner())
         container_layout.addWidget(self._create_update_banner())
         container_layout.addWidget(tabs)
         self.setCentralWidget(container)
@@ -2945,7 +2978,9 @@ class SegmentationWorker(QThread):
 
 
 def get_windows_theme():
-    """Detect if Windows is in dark mode"""
+    """Return True if the OS is in dark mode, False for light mode."""
+    if sys.platform != "win32":
+        return True  # default to dark on Linux
     try:
         registry_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
         registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path)
@@ -2954,7 +2989,7 @@ def get_windows_theme():
         return value == 0  # 0 = dark mode, 1 = light mode
     except Exception as e:
         print(f"Could not detect Windows theme: {e}")
-        return False  # Default to light mode
+        return False
 
 
 def get_additional_qss(size=12):

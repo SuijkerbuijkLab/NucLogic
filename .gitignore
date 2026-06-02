@@ -11,7 +11,11 @@ env/
 .history/
 logs/
 .claude/
-models/*
 .pixi/
 github_token.txt
 tools/
+models/*
+!models/sam2.1_hiera_s.yaml
+!models/sam2.1_hiera_small.pt
+!models/2d_high_quality_model
+!models/2d_low_quality_model

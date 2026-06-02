@@ -48,7 +48,8 @@ class TeeStream:
 
 
 if __name__ == "__main__":
-    log_dir = os.path.join(os.path.dirname(__file__), "logs")
+    _project_root = os.path.dirname(os.path.dirname(__file__))
+    log_dir = os.path.join(_project_root, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, f"log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt")
 
@@ -58,5 +59,5 @@ if __name__ == "__main__":
 
     print(f"Logging to {log_path}")
 
-    app_path = os.path.join(os.path.dirname(__file__), "PySide2", "app.py")
+    app_path = os.path.join(os.path.dirname(__file__), "app.py")
     runpy.run_path(app_path, run_name="__main__")

@@ -3,7 +3,7 @@ name = "NucLogic"
 version = "0.1.0"
 description = "NucLogic organoid segmentation desktop app"
 channels = ["conda-forge"]
-platforms = ["win-64"]
+platforms = ["win-64", "linux-64"]
 
 # ── Conda dependencies ────────────────────────────────────────────────────────
 [dependencies]
@@ -49,4 +49,4 @@ PYTHONUTF8 = "1"
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 [tasks]
-start = "python launcher.py"
+start = "python PySide2/launcher.py"
