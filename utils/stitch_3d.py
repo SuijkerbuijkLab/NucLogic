@@ -136,11 +136,21 @@ def make_unique_mask(mask):
     return unique_mask
 
 
+def filter_big_2d_cells(organoid_2d, size_2d_filter_multiplier = 15):
+    # Filter out 2D cells that are multiplier times bigger than the median cell size in that slice, 
+    # as these are likely mistakes by cellpose 2D in empty slices.
+    # since cellpose SAM is size agnostic.
+    median_size = np.median([cell.volume for cell in organoid_2d])
+    threshold = size_2d_filter_multiplier * median_size
+    return [cell for cell in organoid_2d if cell.volume <= threshold]
+
+
 def get_2d_mask_properties(
-    mask, image1, image_type_1=None, image2=None, image_type_2=None
+    mask, image1, image_type_1=None, image2=None, image_type_2=None, size_2d_filter_multiplier=15
 ):
     unique_mask = make_unique_mask(mask)
     organoid = get_cell_properties_2d(unique_mask)
+    organoid = filter_big_2d_cells(organoid, size_2d_filter_multiplier)
 
     organoid = properties_channel(
         organoid, unique_mask, image1, channel_type=image_type_1
@@ -1048,6 +1058,7 @@ def stitch_3d(
     image2=None,
     image_type_2=None,
     breaking_threshold=2,
+    size_2d_filter_multiplier=15,
 ):
     print("Starting 3D stitching process...")
     organoid = get_2d_mask_properties(
@@ -1056,6 +1067,7 @@ def stitch_3d(
         image_type_1=image_type_1,
         image2=image2,
         image_type_2=image_type_2,
+        size_2d_filter_multiplier=size_2d_filter_multiplier
     )
     organoid = IOU_stitching(organoid, distance_threshold=10, iou_threshold=0.3)
 

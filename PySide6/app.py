@@ -10,7 +10,7 @@ if sys.platform == "win32":
 import tifffile
 import matplotlib
 
-matplotlib.use("Qt5Agg")
+matplotlib.use("qtagg")
 
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
@@ -19,10 +19,10 @@ from utils.tiff_metadata import load_tiff_movie_and_metadata
 from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
 
-# Import PySide2 FIRST
-from PySide2.QtCore import Qt, QThread, QTimer, QUrl, Signal
-from PySide2.QtGui import QDesktopServices, QIcon, QColor, QBrush
-from PySide2.QtWidgets import (
+# Import PySide6 FIRST
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QColor, QBrush
+from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QMainWindow,
@@ -308,7 +308,7 @@ class MainWindow(QMainWindow):
 
         # List widget
         sample_list = QListWidget()
-        sample_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        sample_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
         sample_list.itemSelectionChanged.connect(self._update_segment_label)
         layout.addWidget(sample_list)
 
@@ -415,14 +415,14 @@ class MainWindow(QMainWindow):
 
     def _make_separator(self):
         line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
         return line
 
     def _info_label(self, tooltip_text):
         lbl = QLabel("ⓘ")
         lbl.setToolTip(tooltip_text)
-        lbl.setStyleSheet("color: #5599CC; font-size: 20px;")
+        lbl.setStyleSheet("color: #5599CC; font-size: 14px;")
         lbl.setCursor(Qt.PointingHandCursor)
         return lbl
 
@@ -494,13 +494,13 @@ class MainWindow(QMainWindow):
         self.adv_stats_btn = QPushButton("Show advanced statistics settings")
         self.adv_stats_btn.setCheckable(True)
         self.adv_stats_btn.toggled.connect(self._toggle_advanced_statistics)
-        self.adv_stats_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.adv_stats_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.adv_stats_btn)
 
         # Create advanced statistics settings widget
         self.advanced_statistics_widget = QWidget()
         self.advanced_statistics_widget.setSizePolicy(
-            QSizePolicy.Preferred, QSizePolicy.Maximum
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
         self.advanced_statistics_widget.setLayout(self._create_advanced_statistics())
         self.advanced_statistics_widget.setVisible(False)
@@ -575,7 +575,7 @@ class MainWindow(QMainWindow):
         ))
         self.calculate_advanced_statistics_list = QListWidget()
         self.calculate_advanced_statistics_list.setSelectionMode(
-            QAbstractItemView.MultiSelection
+            QAbstractItemView.SelectionMode.MultiSelection
         )
         self.calculate_advanced_statistics_list.setMaximumHeight(180)
 
@@ -897,11 +897,11 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignTop)
         self.crop_config_btn = QPushButton("Show cropping settings")
         self.crop_config_btn.setCheckable(True)
-        self.crop_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.crop_config_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.crop_config_btn)
 
         self.crop_config_widget = QWidget()
-        self.crop_config_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.crop_config_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.crop_config_widget.setLayout(self._create_cropping_settings_layout())
         self.crop_config_widget.setVisible(False)
         layout.addWidget(self.crop_config_widget)
@@ -978,7 +978,7 @@ class MainWindow(QMainWindow):
         )
         self.phenotype_settings_btn.setCheckable(True)
         self.phenotype_settings_btn.toggled.connect(self._toggle_phenotype_settings)
-        self.phenotype_settings_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.phenotype_settings_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.phenotype_settings_btn)
 
         # Create phenotype settings widget
@@ -1094,21 +1094,21 @@ class MainWindow(QMainWindow):
         self.segment_tab_label = QLabel("Selected 0 samples for segmentation")
         layout.addWidget(self.segment_tab_label)
         self.run_segmentation_btn = QPushButton("Run segmentation")
-        self.run_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.run_segmentation_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.run_segmentation_btn.clicked.connect(lambda: self.start_segmentation())
         self.stop_segmentation_btn = QPushButton("Stop after current sample")
-        self.stop_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.stop_segmentation_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.stop_segmentation_btn.setVisible(False)
         self.stop_segmentation_btn.clicked.connect(self._request_stop)
         self.continue_segmentation_btn = QPushButton("Continue segmentation")
-        self.continue_segmentation_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.continue_segmentation_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.continue_segmentation_btn.setVisible(False)
         self.continue_segmentation_btn.clicked.connect(self._continue_segmentation)
         save_config_btn = QPushButton("Save configuration")
-        save_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        save_config_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         save_config_btn.clicked.connect(self.save_configuration)
         load_config_btn = QPushButton("Load configuration")
-        load_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        load_config_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         load_config_btn.clicked.connect(self.load_configuration)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
@@ -1151,7 +1151,7 @@ class MainWindow(QMainWindow):
         self.adv_settings_btn = QPushButton("Show advanced segmentation settings")
         self.adv_settings_btn.setCheckable(True)
         self.adv_settings_btn.toggled.connect(self._toggle_advanced_settings)
-        self.adv_settings_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.adv_settings_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.adv_settings_btn)
 
         # Create advanced settings widget
@@ -1188,6 +1188,21 @@ class MainWindow(QMainWindow):
         ))
         breaking_threshold_layout.addStretch()
         self.advanced_layout.addLayout(breaking_threshold_layout)
+
+        size_filter_layout = QHBoxLayout()
+        size_filter_layout.addWidget(QLabel("2D size filter multiplier:"))
+        self.size_2d_filter_input = QLineEdit("15")
+        self.size_2d_filter_input.setMaximumWidth(90)
+        size_filter_layout.addWidget(self.size_2d_filter_input)
+        size_filter_layout.addWidget(self._info_label(
+            "Filters out 2D segmented cells larger than this multiple of the median 2D cell size.\n"
+            "CellposeSAM can produce very large detections in empty slices because its size agnostic — this removes them before 3D stitching.\n"
+            "Higher value → less filtering (keeps more large cells).\n"
+            "Lower value → more filtering (removes large cells sooner).\n"
+            "Default (15) works well for most datasets."
+        ))
+        size_filter_layout.addStretch()
+        self.advanced_layout.addLayout(size_filter_layout)
 
         voxel_label_row = QHBoxLayout()
         voxel_label_row.addWidget(QLabel("Voxel size override (Z / X / Y in µm):"))
@@ -1227,7 +1242,7 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignTop)
         self.channel_config_btn = QPushButton("Show channel configuration")
         self.channel_config_btn.setCheckable(True)
-        self.channel_config_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.channel_config_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
         btn_row.addWidget(self.channel_config_btn)
@@ -1238,7 +1253,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_row)
 
         self.channel_config_widget = QWidget()
-        self.channel_config_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.channel_config_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.channel_config_widget.setLayout(self._create_channel_settings_menu())
         self.channel_config_widget.setVisible(False)
         layout.addWidget(self.channel_config_widget)
@@ -1486,7 +1501,13 @@ class MainWindow(QMainWindow):
         try:
             return float(self.breaking_threshold_input.text())
         except ValueError:
-            return 2.5  # Default value if input is invalid
+            return 2.5
+
+    def get_size_2d_filter_multiplier(self):
+        try:
+            return float(self.size_2d_filter_input.text())
+        except ValueError:
+            return 15
 
     def get_phenotype_calling_settings(self):
         """Get phenotype calling settings"""
@@ -1545,6 +1566,7 @@ class MainWindow(QMainWindow):
             return
         channel_names, channel_types = self.get_channel_settings()
         breaking_threshold = self.get_breaking_threshold()
+        size_2d_filter_multiplier = self.get_size_2d_filter_multiplier()
         try:
             (
                 do_phenotype_calling,
@@ -1632,6 +1654,7 @@ class MainWindow(QMainWindow):
             channel_names,
             channel_types,
             breaking_threshold,
+            size_2d_filter_multiplier,
             do_phenotype_calling,
             phenotype_calling_only,
             create_split_phenotype_mask,
@@ -1800,10 +1823,10 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
         layout.setSpacing(8)
         save_btn = QPushButton("Save configuration")
-        save_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        save_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         save_btn.clicked.connect(self.save_configuration)
         load_btn = QPushButton("Load configuration")
-        load_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        load_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         load_btn.clicked.connect(self.load_configuration)
         layout.addWidget(save_btn)
         layout.addWidget(load_btn)
@@ -1826,6 +1849,7 @@ class MainWindow(QMainWindow):
             "save_crop_as": self.save_crop_as.currentText(),
             "run_mode": self.run_mode_combo.currentText(),
             "breaking_threshold": self.breaking_threshold_input.text(),
+            "size_2d_filter_multiplier": self.size_2d_filter_input.text(),
             "voxel_z": self.voxel_size_z_input.text(),
             "voxel_x": self.voxel_size_x_input.text(),
             "voxel_y": self.voxel_size_y_input.text(),
@@ -1925,6 +1949,7 @@ class MainWindow(QMainWindow):
         _set_combo(self.save_crop_as, "save_crop_as", ".ims")
         _set_combo(self.run_mode_combo, "run_mode", "Full pipeline")
         self.breaking_threshold_input.setText(config.get("breaking_threshold", "2.5"))
+        self.size_2d_filter_input.setText(config.get("size_2d_filter_multiplier", "15"))
         self.voxel_size_z_input.setText(config.get("voxel_z", ""))
         self.voxel_size_x_input.setText(config.get("voxel_x", ""))
         self.voxel_size_y_input.setText(config.get("voxel_y", ""))
@@ -2207,6 +2232,7 @@ class MainWindow(QMainWindow):
 
     def _launch_napari_viewer(self, data):
         import napari
+        import napari.viewer  # force lazy-loaded submodule to resolve before shiboken2 interferes
 
         self.view_button.setEnabled(True)
         self.view_status_label.setVisible(False)
@@ -2414,7 +2440,7 @@ class MainWindow(QMainWindow):
         def add_figure(fig):
             canvas = FigureCanvasQTAgg(fig)
             canvas.setStyleSheet("background: transparent;")
-            canvas.setAttribute(Qt.WA_TranslucentBackground)
+            canvas.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             canvas.setMinimumHeight(400)
             self.plot_container_layout.addWidget(canvas)
             plt.close(fig)
@@ -2685,6 +2711,7 @@ class SegmentationWorker(QThread):
         channel_names,
         channel_types,
         breaking_threshold,
+        size_2d_filter_multiplier,
         do_phenotype_calling,
         phenotype_calling_only,
         create_split_phenotype_mask,
@@ -2725,6 +2752,7 @@ class SegmentationWorker(QThread):
         self.channel_names = channel_names
         self.channel_types = channel_types
         self.breaking_threshold = breaking_threshold
+        self.size_2d_filter_multiplier = size_2d_filter_multiplier
         self.do_phenotype_calling = do_phenotype_calling
         self.phenotype_calling_only = phenotype_calling_only
         self.create_split_phenotype_mask = create_split_phenotype_mask
@@ -2850,6 +2878,7 @@ class SegmentationWorker(QThread):
                             self.channel_types,
                             self.channel_names,
                             self.breaking_threshold,
+                            self.size_2d_filter_multiplier,
                             self.do_crop_sample,
                             save_frames=self.save_frames,
                             save_segmentation=self.save_segmentation,
@@ -3052,4 +3081,4 @@ if __name__ == "__main__":
 
     window = MainWindow()
     window.show()
-    app.exec_()
+    app.exec()

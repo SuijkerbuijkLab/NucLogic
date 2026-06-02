@@ -13,7 +13,9 @@ https://github.com/user-attachments/assets/044b71ff-695d-489e-83bf-30c1071486dc
 
 # Installation instructions
 
-1. Get the repository using one of the two options below:
+1. Make sure you have Git installed on your computer (download [here](https://git-scm.com/install/)).  
+
+2. Get the repository using one of the two options below:
 
    **Option A — Clone with git (recommended, models download automatically):**  
    Make sure [git](https://git-scm.com/downloads) is installed on your computer. Open a terminal in the folder where you want to install the software (on windows, use file explorer to navigate to a install location of your choice, right click, and select "open in terminal") and run:
@@ -25,7 +27,7 @@ https://github.com/user-attachments/assets/044b71ff-695d-489e-83bf-30c1071486dc
    **Option B — Download as zip (download models manually):**  
    Use the green code button above to download the zip and extract it to a folder of your choice. Then manually download the raw model files by going into the *models* folder on this page, opening each of *2d_high_quality_model*, *2d_low_quality_model*, *sam2.1_hiera_s.yaml* and *sam2.1_hiera_small.pt* and clicking *Download raw file*. Place these in the *models* folder you extracted in this step.
 
-2. **Windows:** Start the software by double clicking **NucLogic.bat**. You can create a shortcut of the NucLogic.bat file and save this on your desktop for easy access.  
+3. **Windows:** Start the software by double clicking **NucLogic.bat**. You can create a shortcut of the NucLogic.bat file and save this on your desktop for easy access.  
    **Linux:** Run **Linux_NucLogic.sh** from a terminal (`bash Linux_NucLogic.sh`).  
    The first time you do this it will take some time, as it sets up the environment automatically. You will use the same file to start the app next time.
 

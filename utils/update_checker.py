@@ -2,7 +2,7 @@ from pathlib import Path
 import urllib.request
 import json
 
-from PySide2.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 _REPO = "SebastianVanDijk/organoid_segmenter"

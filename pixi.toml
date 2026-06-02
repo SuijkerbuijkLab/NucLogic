@@ -14,7 +14,7 @@ pandas = "*"
 tifffile = "*"
 scikit-learn = "*"
 scikit-image = "*"
-pyside2 = "*"
+pyside6 = "*"
 pytables = "*"   # replaces PyPI 'tables' — bundles HDF5, avoids Windows link issues
 
 # ── PyPI dependencies ─────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ pytables = "*"   # replaces PyPI 'tables' — bundles HDF5, avoids Windows link 
 torch = ">=2.5.1"
 torchvision = ">=0.20.1"
 torchaudio = "*"
-napari = "*"                    # WITHOUT [pyside2] extra — conda already provides PySide2
+napari = { version = "*", extras = ["pyside6"] }
 imaris-ims-file-reader = "*"
 alive-progress = "*"
 libpysal = "*"
@@ -49,4 +49,4 @@ PYTHONUTF8 = "1"
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 [tasks]
-start = "python PySide2/launcher.py"
+start = "python PySide6/launcher.py"

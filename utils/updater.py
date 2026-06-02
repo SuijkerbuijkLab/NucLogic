@@ -5,7 +5,7 @@ import shutil
 import zipfile
 import urllib.request
 
-from PySide2.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -65,8 +65,29 @@ class Updater(QThread):
                 else:
                     shutil.copy2(item, dest)
 
-            # --- Run pixi install to sync any new dependencies ---
-            self.progress.emit("Syncing dependencies (pixi install)…")
+            # --- Detect whether pixi.toml changed ---
+            new_pixi_toml = source_root / "pixi.toml"
+            current_pixi_toml = _PROJECT_ROOT / "pixi.toml"
+            pixi_toml_changed = (
+                new_pixi_toml.exists()
+                and (
+                    not current_pixi_toml.exists()
+                    or new_pixi_toml.read_bytes() != current_pixi_toml.read_bytes()
+                )
+            )
+
+            if pixi_toml_changed:
+                # Wipe the old environment so pixi rebuilds cleanly.
+                # Stale packages (e.g. pyside2 after a pyside6 migration) would
+                # otherwise remain and cause crashes.
+                self.progress.emit("Dependencies changed — clearing old environment…")
+                envs_dir = _PROJECT_ROOT / ".pixi" / "envs"
+                if envs_dir.exists():
+                    shutil.rmtree(envs_dir, ignore_errors=True)
+                self.progress.emit("Rebuilding environment — this may take a few minutes…")
+            else:
+                self.progress.emit("Syncing dependencies (pixi install)…")
+
             pixi_exe = _PROJECT_ROOT / "tools" / "pixi.exe"
             if not pixi_exe.exists():
                 pixi_exe = "pixi"  # fall back to PATH

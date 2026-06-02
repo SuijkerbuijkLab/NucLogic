@@ -32,7 +32,8 @@ def segment_organoid(
     cell_model,  # Model that is used to segment cells
     channel_types,
     channel_names,  # Names of the different channels
-    breaking_threshold=2.5,  # Threshold for breaking cells in the stitch_3d function
+    breaking_threshold=2.5,
+    size_2d_filter_multiplier=15,
     do_crop_sample=False,
     save_frames=True,
     save_segmentation=True,
@@ -163,6 +164,7 @@ def segment_organoid(
                 image2=frame_nuclei_2,
                 image_type_2="nuclei_2",
                 breaking_threshold=breaking_threshold,
+                size_2d_filter_multiplier=size_2d_filter_multiplier,
             )
         else:
             segmented_stack_stitched = stitch_3d(
@@ -170,6 +172,7 @@ def segment_organoid(
                 image1=frame_nuclei,
                 image_type_1="nuclei",
                 breaking_threshold=breaking_threshold,
+                size_2d_filter_multiplier=size_2d_filter_multiplier,
             )
 
         print(
