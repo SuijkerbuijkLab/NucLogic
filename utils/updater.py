@@ -16,7 +16,7 @@ def _read_token():
 
 
 # Files/folders that must never be overwritten by an update
-_PRESERVE = {".pixi", "tools", "github_token.txt", "logs"}
+_PRESERVE = {".pixi", "tools", "github_token.txt", "logs", "models"}
 
 
 class Updater(QThread):
