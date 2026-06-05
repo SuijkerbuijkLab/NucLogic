@@ -1,6 +1,6 @@
 [workspace]
 name = "NucLogic"
-version = "0.1.0"
+version = "0.0.4"
 description = "NucLogic organoid segmentation desktop app"
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64"]

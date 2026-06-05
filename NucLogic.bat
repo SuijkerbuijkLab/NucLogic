@@ -73,11 +73,10 @@ if not exist "%~dp0.pixi\envs\default" (
     icacls "%~dp0." /grant "*S-1-5-32-545:(OI)(CI)F" /T /C /Q
     if !ERRORLEVEL! NEQ 0 (
         echo.
-        echo WARNING: some files could not be granted access. Other users may hit
-        echo "access denied" errors when launching. Try re-running NucLogic.bat
-        echo as administrator ^(right-click ^> Run as administrator^).
-        echo.
-        pause
+        echo WARNING: some files could not be granted access ^(often just a file
+        echo briefly locked by antivirus/indexing^). If other users hit "access
+        echo denied" errors when launching, re-run NucLogic.bat as administrator
+        echo ^(right-click ^> Run as administrator^).
     )
 )
 

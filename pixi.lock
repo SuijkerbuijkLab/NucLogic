@@ -314,6 +314,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e7/e7/80988e32bf6f73919a113473a604f5a8f09094de312b9d52b79c2df7612b/jupyter_core-5.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ec/d6/baac76fc04a6532883de3d8722c7f921dae94d10965e7ffba9e38e42a251/typer-0.26.5-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/ed/2f/1046d464ad1db29a4f6c70ba4e19b39baa8a6542c719eaa4e765108f07f1/hdf5plugin-6.0.0-py3-none-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/82/7a9d0550484a62c6da82858ee9419f3dd1ccc9aa1c26a1e43da3ecd20b0d/natsort-8.4.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl
@@ -526,6 +527,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/59/8c/57e832b7af6d7c5abe66eb3fbe3a3a32f4d11ea23a1aa7131371035be991/certifi-2026.5.20-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5e/f5/0c41cb68dcae6b7de4fac4188a3a9589e21fb31df21ea3a2e888db95e6c9/soupsieve-2.8.4-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/60/97/891a0971e1e4a8c5d2b20bbe0e524dc04548d2307fee33cdeba148fd4fc7/comm-0.2.3-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/61/b3/75478bdfee85533777de4204373f563aa7a1074355300743c3aedc33cac5/hdf5plugin-6.0.0-py3-none-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/63/bd/b31abc8fcaab163e0b9501020309dd9094b47d609035a23e6ec0a0a8ba10/darkdetect-0.7.1-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/69/18/36503ea63e1ecd0a95590d7b6b8b7d227a1e4541a154e1612a231def1bdc/graphemeu-0.7.2-py3-none-any.whl
@@ -5854,6 +5856,26 @@ packages:
   requires_dist:
   - pytest ; extra == 'test'
   requires_python: '>=3.8'
+- pypi: https://files.pythonhosted.org/packages/61/b3/75478bdfee85533777de4204373f563aa7a1074355300743c3aedc33cac5/hdf5plugin-6.0.0-py3-none-win_amd64.whl
+  name: hdf5plugin
+  version: 6.0.0
+  sha256: 99866f90be1ceac5519e6e038669564be326c233618d59ba1f38c9dd8c32099e
+  requires_dist:
+  - h5py>=3.0.0
+  - ipython ; extra == 'doc'
+  - nbsphinx ; extra == 'doc'
+  - sphinx ; extra == 'doc'
+  - sphinx-autodoc-typehints ; extra == 'doc'
+  - sphinx-rtd-theme ; extra == 'doc'
+  - numpy<2 ; python_full_version == '3.9.*' and extra == 'test'
+  - blosc2>=2.5.1 ; extra == 'test'
+  - blosc2-grok>=0.2.2 ; extra == 'test'
+  - hdf5plugin[doc,test] ; extra == 'dev'
+  - bandit ; extra == 'dev'
+  - black ; extra == 'dev'
+  - flake8 ; extra == 'dev'
+  - isort ; extra == 'dev'
+  requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/63/bd/b31abc8fcaab163e0b9501020309dd9094b47d609035a23e6ec0a0a8ba10/darkdetect-0.7.1-py2.py3-none-any.whl
   name: darkdetect
   version: 0.7.1
@@ -7069,6 +7091,26 @@ packages:
   - annotated-doc>=0.0.2
   - colorama ; sys_platform == 'win32'
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/ed/2f/1046d464ad1db29a4f6c70ba4e19b39baa8a6542c719eaa4e765108f07f1/hdf5plugin-6.0.0-py3-none-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
+  name: hdf5plugin
+  version: 6.0.0
+  sha256: 79e0524d18ddc41c0cf2e1bb2e529d4e154c286f6a1bd85f3d44019d2a17574a
+  requires_dist:
+  - h5py>=3.0.0
+  - ipython ; extra == 'doc'
+  - nbsphinx ; extra == 'doc'
+  - sphinx ; extra == 'doc'
+  - sphinx-autodoc-typehints ; extra == 'doc'
+  - sphinx-rtd-theme ; extra == 'doc'
+  - numpy<2 ; python_full_version == '3.9.*' and extra == 'test'
+  - blosc2>=2.5.1 ; extra == 'test'
+  - blosc2-grok>=0.2.2 ; extra == 'test'
+  - hdf5plugin[doc,test] ; extra == 'dev'
+  - bandit ; extra == 'dev'
+  - black ; extra == 'dev'
+  - flake8 ; extra == 'dev'
+  - isort ; extra == 'dev'
+  requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/ef/82/7a9d0550484a62c6da82858ee9419f3dd1ccc9aa1c26a1e43da3ecd20b0d/natsort-8.4.0-py3-none-any.whl
   name: natsort
   version: 8.4.0

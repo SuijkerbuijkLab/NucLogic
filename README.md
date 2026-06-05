@@ -20,7 +20,7 @@ https://github.com/user-attachments/assets/044b71ff-695d-489e-83bf-30c1071486dc
    **Option A — Clone with git (recommended, models download automatically):**  
    Make sure [git](https://git-scm.com/downloads) is installed on your computer. Open a terminal in the folder where you want to install the software (on windows, use file explorer to navigate to a install location of your choice, right click, and select "open in terminal") and run:
    ```
-   git clone https://github.com/SebastianVanDijk/organoid_segmenter.git
+   git clone https://github.com/SebastianVanDijk/NucLogic.git
    ```
    This downloads everything including the model files into a new *NucLogic* folder.
 
