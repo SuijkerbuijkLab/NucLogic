@@ -32,6 +32,55 @@ set "PIXI=%~dp0tools\pixi.exe"
 
 :pixi_found
 cd /d "%~dp0"
+
+REM ── First-time setup ─────────────────────────────────────────────────────────
+REM When the environment doesn't exist yet, build it and grant every user on this
+REM PC full access to the install folder. The permissions are INHERITABLE (the
+REM (OI)(CI) flags), so files created later by the in-app updater — even when it
+REM wipes and rebuilds .pixi\envs — automatically inherit them. That means this
+REM step does NOT need to run again after an update.
+if not exist "%~dp0.pixi\envs\default" (
+    REM First-time setup needs admin rights for takeown/icacls below. If we're not
+    REM elevated, relaunch this script as administrator and let that copy do the
+    REM setup. Normal launches (env already built) never reach here, so regular
+    REM users can start the app without admin.
+    net session >nul 2>&1
+    if !ERRORLEVEL! NEQ 0 (
+        echo First-time setup needs administrator rights to grant all users access.
+        echo Requesting elevation ^(a User Account Control prompt will appear^)...
+        powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+        exit /b
+    )
+
+    echo First run detected. Building the environment, this may take several minutes...
+    "%PIXI%" install
+    if !ERRORLEVEL! NEQ 0 (
+        echo.
+        echo ERROR: pixi install failed with exit code !ERRORLEVEL!.
+        pause
+        exit /b !ERRORLEVEL!
+    )
+
+    echo Granting all users full access to the installation...
+    REM Take ownership first so the DACL can be rewritten even on files created
+    REM by another account or with restrictive permissions. Requires admin rights;
+    REM if it fails, the icacls warning below will tell the user to elevate.
+    takeown /F "%~dp0." /R /D Y >nul 2>&1
+
+    REM *S-1-5-32-545 is the BUILTIN\Users SID ^(locale-independent^).
+    REM /T recurse, /C continue past locked files, /Q hide per-file success spam
+    REM ^(errors are still shown^).
+    icacls "%~dp0." /grant "*S-1-5-32-545:(OI)(CI)F" /T /C /Q
+    if !ERRORLEVEL! NEQ 0 (
+        echo.
+        echo WARNING: some files could not be granted access. Other users may hit
+        echo "access denied" errors when launching. Try re-running NucLogic.bat
+        echo as administrator ^(right-click ^> Run as administrator^).
+        echo.
+        pause
+    )
+)
+
 echo Starting NucLogic via pixi...
 "%PIXI%" run start
 if %ERRORLEVEL% NEQ 0 (

@@ -9,6 +9,7 @@ if sys.platform == "win32":
 
 import tifffile
 import matplotlib
+import hdf5plugin  # registers LZ4/shuffle HDF5 filters for all IMS reads in this process
 
 matplotlib.use("qtagg")
 

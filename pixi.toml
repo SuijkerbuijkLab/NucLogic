@@ -24,6 +24,7 @@ torchvision = ">=0.20.1"
 torchaudio = "*"
 napari = { version = "*", extras = ["pyside6"] }
 imaris-ims-file-reader = "*"
+hdf5plugin = "*"
 alive-progress = "*"
 libpysal = "*"
 esda = "*"
