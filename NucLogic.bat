@@ -3,6 +3,12 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 chcp 65001 >nul
 
+REM Use one shared package cache inside the install folder instead of each user's
+REM (or the elevated admin's) %LOCALAPPDATA%\rattler. This keeps the cache on the
+REM same drive as the environment (required for rattler's hardlink/rename step),
+REM makes it shared across all accounts, and gets covered by the icacls grant below.
+set "PIXI_CACHE_DIR=%~dp0pixi_cache"
+
 REM Look for pixi bundled inside the project first (works for any user account)
 set "PIXI_LOCAL=%~dp0tools\pixi.exe"
 if exist "%PIXI_LOCAL%" (
