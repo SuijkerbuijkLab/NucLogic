@@ -9,6 +9,7 @@ import tifffile
 from esda.moran import Moran
 from imaris_ims_file_reader.ims import ims
 from libpysal.weights import KNN
+from skimage.filters import threshold_triangle 
 
 from .offset_image import offset_image
 
@@ -29,11 +30,12 @@ def crop_fixed(
 
     if not manual:
         # Apply gaussian filter to smooth the image and make thresholding more robust
-        frame = ndimage.gaussian_filter(proj_XY, sigma=(3, 3))
+        proj_XY_8bit = ((proj_XY / np.percentile(proj_XY, 99.8)) * 255).astype(np.uint8)
+        frame = ndimage.gaussian_filter(proj_XY_8bit, sigma=3)
 
         # Apply threshold (you can tweak the value)
-        median = np.median(frame)
-        _, binary_mask = cv2.threshold(frame, median + 5, 255, cv2.THRESH_BINARY)
+        threshold_value = threshold_triangle(frame)
+        _, binary_mask = cv2.threshold(frame, threshold_value, 255, cv2.THRESH_BINARY)
 
         binary_mask = ndimage.binary_dilation(binary_mask, iterations=5)
 

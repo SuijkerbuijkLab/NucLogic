@@ -307,8 +307,11 @@ def mask_from_organoid(organoid, shape):
 def break_score(values, i):
     # Calculate intensity-based anomalies by getting a score that resembles high-low-high intensity value patterns
     # Calculate ratio between slice i and below i, and i and above i
-    values_bottom = max(values[:i])
-    values_top = max(values[i + 1 :])
+    bottom = values[max(0, i - 2):i]
+    top = values[i + 1:min(len(values), i + 3)]
+
+    values_bottom = max(bottom) if len(bottom) else values[i]
+    values_top = max(top) if len(top) else values[i]
     ratio_1 = values_bottom / values[i]
     ratio_2 = values[i] / values_top
 
@@ -399,7 +402,7 @@ def get_line_break_scores(z_positions, y_positions, x_positions):
         z_positions, y_positions, x_positions, line
     )
     break_score = abs(get_slope_changes(distances))
-    return break_score
+    return break_score, distances
 
 
 def get_IOU_break_scores(cell):
@@ -431,13 +434,15 @@ def get_break_scores(organoid, skip_labels=None):
         z_positions, y_positions, x_positions = get_centroid_positions(
             cell.centroids_2d
         )
-        break_score_up = get_line_break_scores(z_positions, y_positions, x_positions)
+        break_score_up, distances_up = get_line_break_scores(z_positions, y_positions, x_positions)
         # pad 1 at start and remove last to match and better represent breaks between slices
         break_score_up = np.concatenate([[0], break_score_up[:-1]])
         # Calculate line-based break scores (from top_down)
-        break_score_down = get_line_break_scores(
+        break_score_down, distances_down = get_line_break_scores(
             z_positions[::-1], y_positions[::-1], x_positions[::-1]
-        )[::-1]
+        )
+        break_score_down = break_score_down[::-1]
+        distances_down = distances_down[::-1]
         IOU_break_score = get_IOU_break_scores(cell)
 
         # Calculate final break scores
@@ -451,11 +456,23 @@ def get_break_scores(organoid, skip_labels=None):
         ):
             final_score = (
                 np.max([up_score, down_score])
-                * v_score
+                * (IOU_score * 3)
+                + v_score
                 * (i_score**2)
-                * (IOU_score * 2)
+                
             )
             final_scores.append(final_score)
+        
+        # if cell.label == 166:
+        #     print(f"Cell {cell.label} break scores:")
+        #     print(f"  Volume break scores: {volumes_break_score}")
+        #     print(f"  Intensity break scores: {intensity_break_score}")
+        #     print(f"  Line break scores (up): {break_score_up}")
+        #     print(f"  Line distances (up): {distances_up}")
+        #     print(f"  Line break scores (down): {break_score_down}")
+        #     print(f"  Line distances (down): {distances_down}")
+        #     print(f"  IOU break scores: {IOU_break_score}")
+        #     print(f"  Final break scores: {final_scores}")
 
         cell.break_scores = final_scores
 
@@ -511,7 +528,7 @@ def break_stitching(organoid, breaking_threshold=2.5):
         if len(cell.volumes_2d) < 7:
             new_organoid.append(cell)
             continue
-        # if cell.label == 103:
+        # if cell.label == 166:
         #     print(cell.break_scores)
         # Find indices where break score exceeds threshold
         break_scores = [score for score in cell.break_scores]
@@ -677,9 +694,13 @@ def check_split_cells(cell, index, pred_point_1, pred_point_2):
     original_y = original_centroid[1]  # y is at index 1
     original_x = original_centroid[2]  # x is at index 2
 
-    original_distance = np.sqrt(
+    original_distance_1 = np.sqrt(
         (original_y - pred_point_1[0]) ** 2 + (original_x - pred_point_1[1]) ** 2
     )
+    original_distance_2 = np.sqrt(
+        (original_y - pred_point_2[0]) ** 2 + (original_x - pred_point_2[1]) ** 2
+    )
+    average_original_distance = (original_distance_1 + original_distance_2) / 2
 
     part_1_coords, part_2_coords = calculate_split_coords(
         cell, index, pred_point_1, pred_point_2
@@ -693,13 +714,13 @@ def check_split_cells(cell, index, pred_point_1, pred_point_2):
         part_1_coords, part_2_coords, pred_point_1, pred_point_2
     )
 
-    if avg_new_distance < original_distance:
+    if avg_new_distance < average_original_distance:
         # print(
-        #     f"    ✓ Splitting improves fit! cell {cell.label} (reduction: {original_distance - avg_new_distance:.2f})"
+        #     f"    ✓ Splitting improves fit! cell {cell.label} (reduction: {average_original_distance - avg_new_distance:.2f})"
         # )
         return (part_1_coords, part_2_coords)
     else:
-        # print(f"    ✗ Splitting does not improve fit: increase of {avg_new_distance:.2f} >= {original_distance:.2f}")
+        # print(f"    ✗ Splitting does not improve fit: increase of {avg_new_distance:.2f} >= {average_original_distance:.2f}")
         return None
 
 
@@ -815,8 +836,41 @@ def split_single_cell_layer(cell_1, cell_2, z_to_predict=1, bottom_up=True):
         return None
 
     part_1_coords, part_2_coords = split_results
+
+    # Connectivity guard: the donated piece (part_2) must actually overlap the
+    # receiving cell's interface slice. Without this, a half-plane cut can carve a
+    # chunk out of cell_1's interior and relabel it cell_2 even though it forms an
+    # island unconnected to cell_2's body. cell_2's interface slice is its bottom
+    # (index 0) when splitting cell_1 from below, else its top (index -1).
+    if cell_2.coords_set_2d:
+        neighbor_slice = cell_2.coords_set_2d[0 if bottom_up else -1]
+        part_2_set = set(map(tuple, part_2_coords))
+        if not (part_2_set & neighbor_slice):
+            # print(f"  ✗ Split piece does not touch cell {cell_2.label}'s body")
+            return None
+
     target_z_int = int(round(target_z))
     return part_1_coords, part_2_coords, z_idx, target_z_int
+
+
+def _insert_slice_in_z_order(cell, z, coords_2d, label):
+    """Insert a donated 2D slice into a cell, keeping all per-slice lists sorted by z.
+
+    The previous code blindly appended (or inserted at index 0), which left
+    centroids_2d non-monotonic in z. get_centroid_positions / calculate_line_3d
+    assume z-ordered input (note the [::-1] reversals), so an out-of-order point
+    corrupted the line fit on the z_to_predict=2 round and misplaced the split.
+    """
+    centroid = (z, *np.mean(np.array(list(coords_2d)), axis=0))
+
+    pos = 0
+    while pos < len(cell.centroids_2d) and cell.centroids_2d[pos][0] < z:
+        pos += 1
+
+    cell.coords_set_2d.insert(pos, coords_2d)
+    cell.labels_2d.insert(pos, label)
+    cell.centroids_2d.insert(pos, centroid)
+    cell.volumes_2d.insert(pos, len(coords_2d))
 
 
 def update_coords(cell_1, cell_2, z_idx, part_1_coords_2d, part_2_coords_2d, last_z):
@@ -827,13 +881,10 @@ def update_coords(cell_1, cell_2, z_idx, part_1_coords_2d, part_2_coords_2d, las
     part_1_array = np.array(list(part_1_coords_2d))
     cell_1.centroids_2d[z_idx] = (last_z, *np.mean(part_1_array, axis=0))
 
-    # Append to cell_2
-    cell_2.coords_set_2d.append(part_2_coords_2d)
-    cell_2.labels_2d.append(cell_1.labels_2d[z_idx])
-
-    part_2_array = np.array(list(part_2_coords_2d))
-    cell_2.centroids_2d.append((last_z, *np.mean(part_2_array, axis=0)))
-    cell_2.volumes_2d.append(len(part_2_coords_2d))
+    # Donate part_2 to cell_2 in z-order (interface z sits below cell_2's body)
+    _insert_slice_in_z_order(
+        cell_2, last_z, part_2_coords_2d, cell_1.labels_2d[z_idx]
+    )
 
     _recalculate_cell_properties(cell_1)
     _recalculate_cell_properties(cell_2)
@@ -849,13 +900,10 @@ def update_coords_bottom(
     part_1_array = np.array(list(part_1_coords_2d))
     cell_2.centroids_2d[z_idx] = (first_z, *np.mean(part_1_array, axis=0))
 
-    # Insert at beginning of cell_1
-    cell_1.coords_set_2d.insert(0, part_2_coords_2d)
-    cell_1.labels_2d.insert(0, cell_2.labels_2d[z_idx])
-
-    part_2_array = np.array(list(part_2_coords_2d))
-    cell_1.centroids_2d.insert(0, (first_z, *np.mean(part_2_array, axis=0)))
-    cell_1.volumes_2d.insert(0, len(part_2_coords_2d))
+    # Donate part_2 to cell_1 in z-order (interface z sits above cell_1's body)
+    _insert_slice_in_z_order(
+        cell_1, first_z, part_2_coords_2d, cell_2.labels_2d[z_idx]
+    )
 
     _recalculate_cell_properties(cell_1)
     _recalculate_cell_properties(cell_2)
@@ -920,7 +968,7 @@ def split_organoid_cells(organoid):
     return organoid
 
 
-def stitch_small_cells(organoid, max_slices=2, iou_threshold=0.9, knn=5):
+def stitch_small_cells(organoid, max_slices=2, iou_threshold=0.7, knn=5):
     """Merge small cells (1-2 slices) with neighboring cells above or below"""
     from scipy.spatial import KDTree
 

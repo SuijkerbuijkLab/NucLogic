@@ -11,6 +11,7 @@ import scipy.ndimage as ndimage
 import cv2
 from .offset_image import offset_image
 from utils.pad_to_shape import pad_to_shape
+from skimage.filters import threshold_triangle
 
 
 import os, shutil, tempfile
@@ -199,21 +200,32 @@ def crop(
     return cropped_movie
 
 
-def get_coords(movie):
-    first_frame = movie[0]
+def central_organoid_mask(frame_8bit):
+    """Classical segmentation of the central organoid in a single 2D frame.
+
+    Returns (selected_mask, centroid_xy) for the connected component closest to the
+    image center (area > 3000), or (None, None) if nothing suitable is found. Shared
+    by the frame-0 point prompt (get_coords) and the keyframe re-prompts in
+    segment_organoid so both describe the same object the same way.
+    """
+    if frame_8bit.max() == 0:
+        return None, None
+
     # Normalize and convert to 8-bit
-    frame = ((first_frame / first_frame.max()) * 255).astype(np.uint8)
-    frame = ndimage.gaussian_filter(frame, sigma=(10, 10))
+    frame = ((frame_8bit / frame_8bit.max()) * 255).astype(np.uint8)
+    frame = ndimage.gaussian_filter(frame, sigma=3)
 
     # Apply threshold (you can tweak the value)
-    median = np.median(frame)
-    _, binary_mask = cv2.threshold(frame, median + 5, 255, cv2.THRESH_BINARY)
+    threshold_value = threshold_triangle(frame)
+    _, binary_mask = cv2.threshold(frame, threshold_value, 255, cv2.THRESH_BINARY)
 
     binary_mask = ndimage.binary_dilation(binary_mask, iterations=10)
     filled_mask = ndimage.binary_fill_holes(binary_mask).astype(np.uint8)
     num_labels, labels, stats_array, centroids = cv2.connectedComponentsWithStats(
         filled_mask
     )
+    if num_labels <= 1:
+        return None, None
 
     center = np.array([frame.shape[0] // 2, frame.shape[1] // 2])
 
@@ -231,30 +243,18 @@ def get_coords(movie):
 
     # Filter and select
     filtered_df = df[df["area"] > 3000]
+    if filtered_df.empty:
+        return None, None
     closest = filtered_df.loc[filtered_df["distance_to_center"].idxmin()]
     selected_label = closest["label"]
 
     # Create a binary mask for the selected label
     selected_mask = (labels == selected_label).astype(np.uint8)
 
-    # Apply erosion only to that mask
-    eroded_mask = ndimage.binary_erosion(selected_mask, iterations=20)
-
-    # Get coordinates from the eroded mask
-    coords = np.column_stack(np.where(eroded_mask))
-
-    sampled_points = coords[np.random.choice(len(coords), 5, replace=False)][:, ::-1]
-    selected_centroid = closest["centroid"]
-    selected_centroid = np.array(
-        [[int(selected_centroid[0]), int(selected_centroid[1])]], dtype=np.int32
-    )
-
-    combined_points = np.vstack([sampled_points, selected_centroid])
-
-    return combined_points
+    return selected_mask
 
 
-def segment_organoid(proj_XY_8bit, model):
+def segment_organoid(proj_XY_8bit, model, drop_frac=0.30, max_repairs=100):
 
     # Temporary directory for saving frames
     temp_dir = tempfile.mkdtemp()
@@ -275,28 +275,63 @@ def segment_organoid(proj_XY_8bit, model):
     inference_state = model.init_state(temp_dir)
 
     # Calculate center point where organoid should be
-    coords = get_coords(proj_XY_8bit)
+    selected_mask = central_organoid_mask(proj_XY_8bit[0])
+    if selected_mask is None or selected_mask.sum() == 0:
+        raise ValueError("No central organoid found in frame 0 to seed SAM2")
 
-    labels = np.ones(len(coords))
-    _, object_ids, mask_logits = model.add_new_points(
+    _, object_ids, mask_logits = model.add_new_mask(
         inference_state=inference_state,
         frame_idx=0,
         obj_id=1,
-        points=coords,
-        labels=labels,
+        mask=selected_mask.astype(bool),   # (H, W) bool, matches the saved frames
     )
 
-    # Get the masks of the organoid
-    all_masks = []
-    for frame_idx, object_ids, mask_logits in model.propagate_in_video(inference_state):
-        masks = (mask_logits > 0.0).cpu().numpy()  # shape: (N, X, H, W)
-        N, X, H, W = masks.shape
-        masks = masks.reshape(N * X, H, W)
-        all_masks.append(masks)
+    T = len(proj_XY_8bit)
+
+    def run_propagation(start=0):
+        # Propagate from `start` forward; return {frame_idx: 2D bool mask of obj 1}
+        out = {}
+        for frame_idx, object_ids, mask_logits in model.propagate_in_video(
+            inference_state, start_frame_idx=start
+        ):
+            masks = (mask_logits > 0.0).cpu().numpy()  # shape: (N, X, H, W)
+            out[frame_idx] = masks.reshape(-1, masks.shape[-2], masks.shape[-1])[0]
+        return out
+
+    # Initial forward pass
+    masks = run_propagation(0)
+
+    # Drop-triggered re-prompting: when the area suddenly collapses (> drop_frac vs
+    # the immediately previous frame), SAM has lost part of the organoid. Re-anchor
+    # that frame with SAM's own last good mask (never the classical threshold mask,
+    # which fails when organoids touch) and re-propagate the tail. The next drop is
+    # always after the repaired frame, so this terminates.
+    for _ in range(max_repairs):
+        drop_t = next(
+            (
+                t
+                for t in range(1, T)
+                if masks[t - 1].sum() > 0
+                and masks[t].sum() < (1 - drop_frac) * masks[t - 1].sum()
+            ),
+            None,
+        )
+        if drop_t is None:
+            break
+
+        good_mask = masks[drop_t - 1]  # SAM's own pre-drop mask
+        if good_mask.sum() == 0:
+            break
+        model.add_new_mask(
+            inference_state=inference_state,
+            frame_idx=drop_t,
+            obj_id=1,
+            mask=good_mask.astype(bool),
+        )
+        masks.update(run_propagation(drop_t))  # redo tail, overwrite downstream
 
     shutil.rmtree(temp_dir)
 
-    all_masks = np.stack(all_masks, axis=0)  # shape: (T, C, Y, X)
-    all_masks = all_masks[:, 0]  # T Y X
+    all_masks = np.stack([masks[t] for t in range(T)], axis=0)  # T Y X
 
     return all_masks
