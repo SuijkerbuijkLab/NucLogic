@@ -39,11 +39,11 @@ set "PIXI=%~dp0tools\pixi.exe"
 :pixi_found
 cd /d "%~dp0"
 
-REM ── First-time setup ─────────────────────────────────────────────────────────
+REM First-time setup
 REM When the environment doesn't exist yet, build it and grant every user on this
 REM PC full access to the install folder. The permissions are INHERITABLE (the
-REM (OI)(CI) flags), so files created later by the in-app updater — even when it
-REM wipes and rebuilds .pixi\envs — automatically inherit them. That means this
+REM (OI)(CI) flags), so files created later by the in-app updater, even when it
+REM wipes and rebuilds .pixi\envs automatically inherit them. That means this
 REM step does NOT need to run again after an update.
 if not exist "%~dp0.pixi\envs\default" (
     REM First-time setup needs admin rights for takeown/icacls below. If we're not
