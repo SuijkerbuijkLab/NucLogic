@@ -304,19 +304,39 @@ def mask_from_organoid(organoid, shape):
     return mask
 
 
-def break_score(values, i):
-    # Calculate intensity-based anomalies by getting a score that resembles high-low-high intensity value patterns
-    # Calculate ratio between slice i and below i, and i and above i
-    bottom = values[max(0, i - 2):i]
-    top = values[i + 1:min(len(values), i + 3)]
+# def break_score(values, i):
+#     # Calculate intensity-based anomalies by getting a score that resembles high-low-high intensity value patterns
+#     # Calculate ratio between slice i and below i, and i and above i
+#     bottom = values[max(0, i - 2):i]
+#     top = values[i + 1:min(len(values), i + 3)]
 
-    values_bottom = max(bottom) if len(bottom) else values[i]
-    values_top = max(top) if len(top) else values[i]
-    ratio_1 = values_bottom / values[i]
-    ratio_2 = values[i] / values_top
+#     values_bottom = max(bottom) if len(bottom) else values[i]
+#     values_top = max(top) if len(top) else values[i]
+#     ratio_1 = values_bottom / values[i]
+#     ratio_2 = values[i] / values_top
 
-    # divide this again, now high low high gets higher score then other patterns
-    return ratio_1 / ratio_2
+#     # divide this again, now high low high gets higher score then other patterns
+#     return ratio_1 / ratio_2
+from scipy.signal import find_peaks, peak_prominences, peak_widths
+def break_score(values, min_prominence=0.0, rel_height=0.5, sigma_floor=0.6):
+    v = np.asarray(values, dtype=float)
+    vmax = v.max()
+    if vmax <= 0:
+        return np.zeros_like(v)
+    inv = vmax - v
+    valleys, props = find_peaks(inv, prominence=min_prominence * vmax)
+    scores = np.zeros_like(v)
+    if len(valleys) == 0:
+        return scores
+    widths = peak_widths(inv, valleys, rel_height=rel_height)[0]   # width in slices
+    idx = np.arange(len(v))
+    for vi, prom, w in zip(valleys, props["prominences"], widths):
+        sigma = max(w / 2.355, sigma_floor)          # width -> gaussian sigma (FWHM->sigma), with a floor\
+        depth = prom / (v[vi] )
+        bump = depth * np.exp(-(idx - vi) ** 2 / (2 * sigma ** 2))
+        scores = np.maximum(scores, bump)
+    scores = np.round(scores, 4)  # clip to only 4 decimals
+    return scores
 
 
 def get_centroid_positions(centroid):
@@ -371,10 +391,11 @@ def get_slope_changes(distances):
 
 def get_volume_break_scores(cell):
     num_slices = len(cell.volumes_2d)
-    volumes_break_score = [0] * num_slices
+    # volumes_break_score = [0] * num_slices
 
-    for i in range(1, num_slices - 1):
-        volumes_break_score[i] = break_score(cell.volumes_2d, i)
+    # for i in range(1, num_slices - 1):
+    #     volumes_break_score[i] = break_score(cell.volumes_2d, i)
+    volumes_break_score = break_score(cell.volumes_2d) * 10
 
     return volumes_break_score
 
@@ -389,8 +410,9 @@ def get_intensity_break_scores(cell):
     else:
         max_intensity = [0] * num_slices
 
-    for i in range(1, num_slices - 1):
-        intensity_break_score[i] = break_score(max_intensity, i)
+    # for i in range(1, num_slices - 1):
+    #     intensity_break_score[i] = break_score(max_intensity, i)
+    intensity_break_score = break_score(max_intensity) * 40 # scale to match volume break score scale
 
     return intensity_break_score
 
@@ -415,7 +437,9 @@ def get_IOU_break_scores(cell):
     return iou_break_score
 
 
-def get_break_scores(organoid, skip_labels=None):
+def get_break_scores(organoid, skip_labels=None, combine_fn=None):
+    # combine_fn(v, i, up, down, iou) -> score lets callers (e.g. an F1
+    # optimizer) swap in a different channel combination. None = default formula.
     skip_labels = skip_labels or set()
     for cell in organoid:
         if cell.label in skip_labels and cell.break_scores is not None:
@@ -426,9 +450,9 @@ def get_break_scores(organoid, skip_labels=None):
             continue
 
         # Calculate volume-based break scores
-        volumes_break_score = get_volume_break_scores(cell)
+        volumes_break_score = get_volume_break_scores(cell) 
         # Calculate intensity-based break scores
-        intensity_break_score = get_intensity_break_scores(cell)
+        intensity_break_score = get_intensity_break_scores(cell) 
 
         # Calculate line-based break scores (from bottom_up)
         z_positions, y_positions, x_positions = get_centroid_positions(
@@ -454,25 +478,29 @@ def get_break_scores(organoid, skip_labels=None):
             break_score_down,
             IOU_break_score,
         ):
-            final_score = (
-                np.max([up_score, down_score])
-                * (IOU_score * 3)
-                + v_score
-                * (i_score**2)
-                
-            )
+            if combine_fn is not None:
+                final_score = combine_fn(
+                    v_score, i_score, up_score, down_score, IOU_score
+                )
+            else:
+                final_score = (
+                    (i_score * 10)
+                    + (IOU_score * 14)
+                    + (i_score * v_score * 20)
+                    + np.max([up_score, down_score]) * v_score * i_score)
             final_scores.append(final_score)
         
-        # if cell.label == 166:
-        #     print(f"Cell {cell.label} break scores:")
-        #     print(f"  Volume break scores: {volumes_break_score}")
-        #     print(f"  Intensity break scores: {intensity_break_score}")
-        #     print(f"  Line break scores (up): {break_score_up}")
-        #     print(f"  Line distances (up): {distances_up}")
-        #     print(f"  Line break scores (down): {break_score_down}")
-        #     print(f"  Line distances (down): {distances_down}")
-        #     print(f"  IOU break scores: {IOU_break_score}")
-        #     print(f"  Final break scores: {final_scores}")
+        if cell.label == 171:
+            print(f"Cell {cell.label} break scores:")
+            print(f"  Number of slices: {len(cell.volumes_2d)}")
+            print(f"  Volume break scores: {volumes_break_score*15}")
+            print(f"  Intensity break scores: {intensity_break_score*60}")
+            print(f"  Line break scores (up): {break_score_up}")
+            # print(f"  Line distances (up): {distances_up}")
+            print(f"  Line break scores (down): {break_score_down}")
+            # print(f"  Line distances (down): {distances_down}")
+            print(f"  IOU break scores: {IOU_break_score*5}")
+            print(f"  Final break scores: {final_scores}")
 
         cell.break_scores = final_scores
 
@@ -1107,6 +1135,7 @@ def stitch_3d(
     image_type_2=None,
     breaking_threshold=2,
     size_2d_filter_multiplier=15,
+    combine_fn=None,
 ):
     print("Starting 3D stitching process...")
     organoid = get_2d_mask_properties(
@@ -1125,7 +1154,9 @@ def stitch_3d(
     checked_labels = set()
     print("Starting iterative breaking of cells")
     while iteration < max_iterations:
-        organoid = get_break_scores(organoid, skip_labels=checked_labels)
+        organoid = get_break_scores(
+            organoid, skip_labels=checked_labels, combine_fn=combine_fn
+        )
         checked_labels = {cell.label for cell in organoid}
         organoid, breaks_made, broken_labels = break_stitching(
             organoid, breaking_threshold=breaking_threshold
