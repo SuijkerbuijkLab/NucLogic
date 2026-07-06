@@ -47,6 +47,45 @@ def _xy_voxel_size_um_from_tiff_page(page, imagej_metadata):
     return (y_size, x_size)
 
 
+MAX_CHANNELS = 4  # more than this leading planes -> treat as timepoints, not channels
+
+
+def _to_tczyx(arr, axes):
+    """Reorder an array to canonical T, C, Z, Y, X.
+
+    Uses tifffile's axes string (e.g. "TZYX", "CZYX", "TCZYX") when it cleanly
+    describes the array, inserting length-1 axes for any of T/C/Z that are
+    absent. Falls back to a size heuristic when the axes metadata is unusable.
+    """
+    axes = (axes or "").upper()
+    known = set("TCZYX")
+
+    usable = len(axes) == arr.ndim and all(
+        a in known or arr.shape[i] == 1 for i, a in enumerate(axes)
+    )
+    if usable:
+        # Drop any non-TCZYX axes (guaranteed length-1 by the check above).
+        for a in [x for x in axes if x not in known]:
+            i = axes.index(a)
+            arr = np.squeeze(arr, axis=i)
+            axes = axes[:i] + axes[i + 1:]
+        # Insert missing T/C/Z as length-1 axes (order fixed by the transpose).
+        for a in "TCZYX":
+            if a not in axes:
+                arr = np.expand_dims(arr, axis=0)
+                axes = a + axes
+        return np.transpose(arr, [axes.index(a) for a in "TCZYX"])
+
+    # No reliable axes metadata: infer from shape.
+    if arr.ndim == 3:  # Z, Y, X
+        return arr[None, None]
+    if arr.ndim == 4:  # ambiguous C,Z,Y,X vs T,Z,Y,X -> few leading planes = channels
+        return arr[None] if arr.shape[0] <= MAX_CHANNELS else arr[:, None]
+    if arr.shape[1] > arr.shape[2]:  # 5D: T,Z,C,Y,X -> T,C,Z,Y,X
+        arr = np.transpose(arr, (0, 2, 1, 3, 4))
+    return arr
+
+
 def load_tiff_movie_and_metadata(input_file):
     """Load TIFF movie and metadata.
 
@@ -119,19 +158,13 @@ def load_tiff_movie_and_metadata(input_file):
             voxel_size = (1.0, 1.0, 1.0)
             time_interval = 1.0
 
-        loaded_movie = tif.asarray()
+        series = tif.series[0]
+        loaded_movie = series.asarray()
+        movie_axes = series.axes
 
     if loaded_movie.ndim < 3:
         raise ValueError("Loaded TIFF movie must have at least 3 dimensions (Z, Y, X)")
 
-    while loaded_movie.ndim < 5:
-        loaded_movie = np.expand_dims(loaded_movie, axis=0)
-
-    if (
-        loaded_movie.shape[1] > loaded_movie.shape[2]
-    ):  # if Z dimension is smaller than C, assume Z is the second dimension
-        loaded_movie = np.transpose(
-            loaded_movie, (0, 2, 1, 3, 4)
-        )  # from T,Z,C,Y,X to T,C,Z,Y,X
+    loaded_movie = _to_tczyx(loaded_movie, movie_axes)
 
     return loaded_movie, voxel_size, time_interval, metadata_missing

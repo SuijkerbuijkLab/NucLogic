@@ -1,3 +1,4 @@
+from matplotlib import scale
 from skimage.measure import regionprops, regionprops_table
 import numpy as np
 from dataclasses import dataclass
@@ -8,7 +9,7 @@ import scipy.spatial
 class cell_3d:
     label: int
     centroid: tuple
-    coords_set: set
+    coords_set: np.ndarray
     volume: int
     labels_2d: list | None = None
     centroids_2d: list | None = None
@@ -35,35 +36,83 @@ class cell_2d:
         self._intensities = {}
 
 
+# --- per-slice coords are stored as sorted, unique uint32 arrays of flat indices
+# (y * width + x). These helpers centralize the operations the pipeline needs on
+# them, replacing the old Python-set encoding (~15x less memory, mostly faster). ---
+
+def _intersect_count(a, b):
+    """Number of shared elements between two sorted, unique 1-D index arrays."""
+    if a.size == 0 or b.size == 0:
+        return 0
+    return int(np.isin(a, b, assume_unique=True).sum())
+
+
+def _overlaps(a, b):
+    """True if two sorted, unique 1-D index arrays share any element."""
+    if a.size == 0 or b.size == 0:
+        return False
+    return bool(np.isin(a, b, assume_unique=True).any())
+
+
+def _flatten_yx(coords_yx, width):
+    """(N, 2) integer (y, x) array -> sorted uint32 array of flat indices y*width + x."""
+    if len(coords_yx) == 0:
+        return np.empty(0, dtype=np.uint32)
+    coords_yx = np.asarray(coords_yx)
+    flat = coords_yx[:, 0].astype(np.int64) * width + coords_yx[:, 1].astype(np.int64)
+    flat.sort()
+    return flat.astype(np.uint32)
+
+
+def _unflatten(flat, width):
+    """Sorted uint32 flat array -> (ys, xs) int64 arrays."""
+    return np.divmod(np.asarray(flat, dtype=np.int64), width)
+
+
+def _centroid_yx_from_flat(flat, width):
+    """Mean (y, x) of a flat index array."""
+    ys, xs = _unflatten(flat, width)
+    return float(ys.mean()), float(xs.mean())
+
+
+def _contains_yx(flat_sorted, y, x, width, height):
+    """Bounds-checked membership test for pixel (y, x) in a sorted flat index array."""
+    if not (0 <= y < height and 0 <= x < width):
+        return False
+    key = y * width + x
+    pos = np.searchsorted(flat_sorted, key)
+    return pos < flat_sorted.size and int(flat_sorted[pos]) == key
+
+
 def get_cell_properties_2d(image):
     # Vectorized alternative to regionprops for label, centroid, volume, coords_set
     nonzero = image != 0
     if not np.any(nonzero):
         return []
-
-    z, y, x = np.nonzero(nonzero)
+    z, y, x = (a.astype(np.int32) for a in np.nonzero(nonzero))
     labels = image[z, y, x]
-    order = np.argsort(labels)
-    labels_sorted = labels[order]
-    z_sorted = z[order]
-    y_sorted = y[order]
-    x_sorted = x[order]
+    del nonzero                                   # free the full-volume bool
 
-    unique_labels, idx, counts = np.unique(
-        labels_sorted, return_index=True, return_counts=True
-    )
-    z_sum = np.add.reduceat(z_sorted, idx)
-    y_sum = np.add.reduceat(y_sorted, idx)
-    x_sum = np.add.reduceat(x_sorted, idx)
+    order = np.argsort(labels, kind="stable")
+    labels = labels[order]; z = z[order]; y = y[order]; x = x[order]
+    del order                                     # no unsorted + sorted duplicates
+
+    unique_labels, idx, counts = np.unique(labels, return_index=True, return_counts=True)
+    z_sum = np.add.reduceat(z, idx)
+    y_sum = np.add.reduceat(y, idx)
+    x_sum = np.add.reduceat(x, idx)
     centroids = np.vstack((z_sum / counts, y_sum / counts, x_sum / counts)).T
 
     height, width = image.shape[1], image.shape[2]
     organoid = []
     for label, start, count, centroid in zip(unique_labels, idx, counts, centroids):
-        y_part = y_sorted[start : start + count]
-        x_part = x_sorted[start : start + count]
-        flat_indices = np.ravel_multi_index((y_part, x_part), (height, width))
-        coords_set = set(flat_indices.tolist())
+        y_part = y[start : start + count]
+        x_part = x[start : start + count]
+        # Already sorted: nonzero is raster-order and the stable argsort by label
+        # preserves it, so a single label's pixels have ascending y*W + x.
+        coords_set = np.ravel_multi_index((y_part, x_part), (height, width)).astype(
+            np.uint32
+        )
         cell = cell_2d(
             label=int(label),
             centroid=tuple(centroid),
@@ -112,27 +161,22 @@ def properties_channel(organoid, mask, image, channel_type=None):
 
 
 def make_unique_mask(mask):
-    """Makes a fresh mask from a already stitched mask"""
+    """Create a unique mask for properties calculation, ensuring that each slice has unique labels."""
     print("Creating unique mask for properties calculation...")
-
-    mask_uint = mask.astype(np.uint32, copy=False)
-    z_slices = mask_uint.shape[0]
-    slice_max = mask_uint.reshape(z_slices, -1).max(axis=1).astype(np.uint32)
+    unique_mask = mask.astype(np.uint32)          # single volume, modified in place
+    z_slices = unique_mask.shape[0]
+    slice_max = unique_mask.reshape(z_slices, -1).max(axis=1).astype(np.uint32)
     offsets = np.concatenate(([0], np.cumsum(slice_max[:-1], dtype=np.uint32)))
-    unique_mask = mask_uint.copy()
 
+    total_unique = 0
     for z, offset in enumerate(offsets):
-        if offset == 0:
-            continue
         slice_data = unique_mask[z]
         nonzero = slice_data != 0
-        if np.any(nonzero):
-            slice_data[nonzero] = slice_data[nonzero] + offset
+        total_unique += np.unique(slice_data[nonzero]).size   # distinct nonzero labels
+        if offset != 0 and nonzero.any():
+            slice_data[nonzero] += offset
 
-    label_counts = [np.unique(mask_uint[z]).size - 1 for z in range(z_slices)]
-    total_unique = int(np.sum(label_counts))
     print(f"Unique mask created with {total_unique} unique cells.")
-
     return unique_mask
 
 
@@ -176,12 +220,12 @@ def calculate_iou(coords_sets, idx1, idx2):
     set2 = coords_sets[idx2]
 
     # Check if either set is empty
-    len1, len2 = len(set1), len(set2)
+    len1, len2 = set1.size, set2.size
     if len2 == 0:
         return 0
 
     # Calculate intersection (overlapping pixels)
-    intersection = len(set1 & set2)
+    intersection = _intersect_count(set1, set2)
 
     if intersection == 0:
         return 0  # No overlap = different cells
@@ -295,12 +339,16 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
 def mask_from_organoid(organoid, shape):
     mask = np.zeros(shape, dtype=np.uint16)
     for cell in organoid:
+        width = cell.shape_2d[1]
         for z_idx, (z, y, x) in enumerate(cell.centroids_2d):
             z_int = int(round(z))
             if 0 <= z_int < shape[0]:
-                for yy, xx in cell.coords_set_2d[z_idx]:
-                    if 0 <= yy < shape[1] and 0 <= xx < shape[2]:
-                        mask[z_int, yy, xx] = cell.label
+                flat = cell.coords_set_2d[z_idx]
+                if flat.size == 0:
+                    continue
+                ys, xs = _unflatten(flat, width)
+                valid = (ys >= 0) & (ys < shape[1]) & (xs >= 0) & (xs < shape[2])
+                mask[z_int, ys[valid], xs[valid]] = cell.label
     return mask
 
 
@@ -412,7 +460,7 @@ def get_intensity_break_scores(cell):
 
     # for i in range(1, num_slices - 1):
     #     intensity_break_score[i] = break_score(max_intensity, i)
-    intensity_break_score = break_score(max_intensity) * 40 # scale to match volume break score scale
+    intensity_break_score = break_score(max_intensity) * 10 # scale to match volume break score scale
 
     return intensity_break_score
 
@@ -484,23 +532,24 @@ def get_break_scores(organoid, skip_labels=None, combine_fn=None):
                 )
             else:
                 final_score = (
-                    (i_score * 10)
-                    + (IOU_score * 14)
-                    + (i_score * v_score * 20)
-                    + np.max([up_score, down_score]) * v_score * i_score)
+                    np.max([up_score, down_score])
+                    * (IOU_score * 3)
+                    + v_score
+                    + i_score
+                )
             final_scores.append(final_score)
         
-        if cell.label == 171:
-            print(f"Cell {cell.label} break scores:")
-            print(f"  Number of slices: {len(cell.volumes_2d)}")
-            print(f"  Volume break scores: {volumes_break_score*15}")
-            print(f"  Intensity break scores: {intensity_break_score*60}")
-            print(f"  Line break scores (up): {break_score_up}")
-            # print(f"  Line distances (up): {distances_up}")
-            print(f"  Line break scores (down): {break_score_down}")
-            # print(f"  Line distances (down): {distances_down}")
-            print(f"  IOU break scores: {IOU_break_score*5}")
-            print(f"  Final break scores: {final_scores}")
+        # if cell.label == 286:
+        #     print(f"Cell {cell.label} break scores:")
+        #     print(f"  Number of slices: {len(cell.volumes_2d)}")
+        #     print(f"  Volume break scores: {volumes_break_score}")
+        #     print(f"  Intensity break scores: {intensity_break_score}")
+        #     print(f"  Line break scores (up): {break_score_up}")
+        #     # print(f"  Line distances (up): {distances_up}")
+        #     print(f"  Line break scores (down): {break_score_down}")
+        #     # print(f"  Line distances (down): {distances_down}")
+        #     print(f"  IOU break scores: {IOU_break_score}")
+        #     print(f"  Final break scores: {final_scores}")
 
         cell.break_scores = final_scores
 
@@ -546,8 +595,22 @@ def split_cell_at_index(cell, break_position, new_label):
     top_cell.shape_2d = getattr(cell, "shape_2d", None)
     return bottom_cell, top_cell
 
+def cell_bbox(cell):
+    """z extent + the LARGEST per-slice y and x extents (all in voxels)."""
+    zs = [int(round(c[0])) for c in cell.centroids_2d]
+    z_size = max(zs) - min(zs) + 1
 
-def break_stitching(organoid, breaking_threshold=2.5):
+    width = cell.shape_2d[1]
+    y_size = x_size = 0
+    for s in cell.coords_set_2d:
+        if s.size == 0:
+            continue
+        ys, xs = _unflatten(s, width)
+        y_size = max(y_size, int(ys.max() - ys.min()) + 1)  # this slice's y extent
+        x_size = max(x_size, int(xs.max() - xs.min()) + 1)  # this slice's x extent
+    return z_size, y_size, x_size
+
+def break_stitching(organoid, breaking_threshold=2.5, scale=(1,1,1)):
     new_organoid = []
     breaks_made = 0
     broken_labels = set()
@@ -556,23 +619,41 @@ def break_stitching(organoid, breaking_threshold=2.5):
         if len(cell.volumes_2d) < 7:
             new_organoid.append(cell)
             continue
-        # if cell.label == 166:
-        #     print(cell.break_scores)
-        # Find indices where break score exceeds threshold
+
+        
+        # get the z y x bounding box sizes
+        z_size, y_size, x_size = cell_bbox(cell)
+        sizes = np.sort(np.array([z_size * scale[0], y_size * scale[1], x_size * scale[2]]))[::-1]                
+        elongation = sizes[0] / sizes[1] - 1
+        elongation = elongation if elongation > 0.5 else 0.5
+        new_threshold = breaking_threshold / (elongation*2)
+
+        # if cell.label == 286:
+        #     print(f"Break scores for cell {cell.label}: {cell.break_scores}")
+        #     print(f"New threshold: {new_threshold}")
+        #     print(f"Elongation: {elongation}, sizes: {sizes}, scale: {scale}")
+
         break_scores = [score for score in cell.break_scores]
         break_scores[:3] = [0, 0, 0]  # First 3 slices get score 0
         break_scores[-3:] = [0, 0, 0]  # Last 3 slices get score 0
-        if max(break_scores) < breaking_threshold:
+        if max(break_scores) < new_threshold:
             new_organoid.append(cell)
             continue
 
-        # break indice is the highest scoring indices above threshold
-        max_break_value = max(break_scores)
-        break_position = break_scores.index(max_break_value)
+        # Peak = highest-scoring slice
+        peak = break_scores.index(max(break_scores))
 
-        # Create new cells by breaking at the identified indices
+        # Cut between the peak and its HIGHER-scoring neighbour, so the peak
+        # slice stays with its LOWER-scoring side.
+        left  = break_scores[peak - 1]
+        right = break_scores[peak + 1]
+        if right > left:
+            split_index = peak + 1   # higher neighbour above -> peak joins bottom
+        else:
+            split_index = peak       # higher neighbour below (or tie) -> peak joins top
+
         bottom_cell, top_cell = split_cell_at_index(
-            cell, break_position, new_label=new_label
+            cell, split_index, new_label=new_label
         )
         new_organoid.append(bottom_cell)
         new_organoid.append(top_cell)
@@ -622,14 +703,14 @@ def find_touching_pairs(organoid):
             is_touching = False
             for z in z_keys:
                 coords = z_to_coords.get(z)
-                if not coords:
+                if coords is None or coords.size == 0:
                     continue
                 coords_other = other_z_to_coords.get(z - 1)
-                if coords_other and (coords & coords_other):
+                if coords_other is not None and _overlaps(coords, coords_other):
                     is_touching = True
                     break
                 coords_other = other_z_to_coords.get(z + 1)
-                if coords_other and (coords & coords_other):
+                if coords_other is not None and _overlaps(coords, coords_other):
                     is_touching = True
                     break
 
@@ -663,25 +744,12 @@ def calculate_split_coords(cell, index, pred_point_1, pred_point_2):
     # Midpoint between predicted points
     midpoint = (pred_point_1 + pred_point_2) / 2
 
-    part_1_coords = []
-    part_2_coords = []
-
-    for coord in cell.coords_set_2d[index]:
-        y, x = coord
-        point = np.array([y, x])
-        # Vector from midpoint to this point
-        to_point = point - midpoint
-        # Dot product determines which side of the line
-        side = np.dot(to_point, normal)
-
-        if side <= 0:
-            part_1_coords.append(coord)
-        else:
-            part_2_coords.append(coord)
-
-    # Calculate new centroids
-    part_1_coords = np.array(part_1_coords)
-    part_2_coords = np.array(part_2_coords)
+    # Vectorized half-plane split: which side of the line each pixel falls on
+    ys, xs = _unflatten(cell.coords_set_2d[index], cell.shape_2d[1])
+    pts = np.stack((ys, xs), axis=1)                         # (N, 2) as (y, x)
+    side = (pts.astype(np.float64) - midpoint) @ normal
+    part_1_coords = pts[side <= 0]
+    part_2_coords = pts[side > 0]
 
     return part_1_coords, part_2_coords
 
@@ -692,9 +760,11 @@ def are_split_cells_valid(cell, index, part_1_coords, part_2_coords):
     )  # At least 10% of pixels or 3 pixels
 
     if len(part_1_coords) < min_size or len(part_2_coords) < min_size:
-        # print(
-        #     f"  Warning: Split too unbalanced ({len(part_1_coords)} vs {len(part_2_coords)} pixels)"
-        # )
+        # if cell.label == 130:
+            # print(
+            #     f"  Warning: Split too unbalanced ({len(part_1_coords)} vs {len(part_2_coords)} pixels)"
+            # )
+            # print(f"  Warning: Split too unbalanced ({len(part_1_coords)} vs {len(part_2_coords)} pixels)")
         return False
     return True
 
@@ -742,19 +812,35 @@ def check_split_cells(cell, index, pred_point_1, pred_point_2):
         part_1_coords, part_2_coords, pred_point_1, pred_point_2
     )
 
+    # to_check = 130
+    # if cell.label == to_check:
+    #     print(f"Cell {cell.label} at index {index}:")
+    #     print(f"  Original centroid: ({original_y:.2f}, {original_x:.2f})")
+    #     print(f"  Predicted points: ({pred_point_1[0]:.2f}, {pred_point_1[1]:.2f}), ({pred_point_2[0]:.2f}, {pred_point_2[1]:.2f})")
+    #     print(f"  Original distances: {original_distance_1:.2f}, {original_distance_2:.2f}")
+    #     print(f"  Average original distance: {average_original_distance:.2f}")
+    #     print(f"  New centroids: ({np.mean(part_1_coords, axis=0)[0]:.2f}, {np.mean(part_1_coords, axis=0)[1]:.2f}), ({np.mean(part_2_coords, axis=0)[0]:.2f}, {np.mean(part_2_coords, axis=0)[1]:.2f})")
+    #     print(f"  New average distance: {avg_new_distance:.2f}")
+
     if avg_new_distance < average_original_distance:
-        # print(
-        #     f"    ✓ Splitting improves fit! cell {cell.label} (reduction: {average_original_distance - avg_new_distance:.2f})"
-        # )
+        # if cell.label == to_check:
+        #     print(
+        #         f"    ✓ Splitting improves fit! cell {cell.label} (reduction: {average_original_distance - avg_new_distance:.2f})"
+        #     )
         return (part_1_coords, part_2_coords)
     else:
-        # print(f"    ✗ Splitting does not improve fit: increase of {avg_new_distance:.2f} >= {average_original_distance:.2f}")
+        # if cell.label == to_check:
+        #     print(f"    ✗ Splitting does not improve fit: increase of {avg_new_distance:.2f} >= {average_original_distance:.2f}")
         return None
 
 
 def split_multiple_cell_layers(cell_1, cell_2):
     z_to_predicts = [1, 2]
     split_cells = 0
+    z1 = {int(round(c[0])) for c in cell_1.centroids_2d}
+    z2 = {int(round(c[0])) for c in cell_2.centroids_2d}
+    share_z = bool(z1 & z2)
+
     for z_to_predict in z_to_predicts:
         # Split cell_1 at its top
         # print("bottom cell z:", z_to_predict)
@@ -764,8 +850,9 @@ def split_multiple_cell_layers(cell_1, cell_2):
         if split_results is not None:
             split_cells += 1
             part_1_coords, part_2_coords, z_idx, last_z = split_results
-            part_1_coords_2d = set(map(tuple, part_1_coords))
-            part_2_coords_2d = set(map(tuple, part_2_coords))
+            width = cell_1.shape_2d[1]
+            part_1_coords_2d = _flatten_yx(part_1_coords, width)
+            part_2_coords_2d = _flatten_yx(part_2_coords, width)
             update_coords(
                 cell_1, cell_2, z_idx, part_1_coords_2d, part_2_coords_2d, last_z
             )
@@ -778,14 +865,15 @@ def split_multiple_cell_layers(cell_1, cell_2):
         if split_results is not None:
             split_cells += 1
             part_1_coords, part_2_coords, z_idx, first_z = split_results
-            part_1_coords_2d = set(map(tuple, part_1_coords))
-            part_2_coords_2d = set(map(tuple, part_2_coords))
+            width = cell_2.shape_2d[1]
+            part_1_coords_2d = _flatten_yx(part_1_coords, width)
+            part_2_coords_2d = _flatten_yx(part_2_coords, width)
             update_coords_bottom(
                 cell_2, cell_1, z_idx, part_1_coords_2d, part_2_coords_2d, first_z
             )
 
         # When no splits are made on the 1st level, we dont need to check splitting the second level.
-        if split_cells == 0:
+        if split_cells == 0 and not share_z:
             break
     return split_cells
 
@@ -837,22 +925,23 @@ def split_single_cell_layer(cell_1, cell_2, z_to_predict=1, bottom_up=True):
     predict_x_2, predict_y_2 = line_2(target_z)
 
     # Check if predicted points are in cell_1's 2D coords at this z
+    width = cell_1.shape_2d[1]
+    height = cell_1.shape_2d[0]
     coords_at_z = cell_1.coords_set_2d[z_idx]
-    predicted_line_1_in_cell_1 = (
-        int(round(predict_y_1)),
-        int(round(predict_x_1)),
-    ) in coords_at_z
-    predicted_line_2_in_cell_1 = (
-        int(round(predict_y_2)),
-        int(round(predict_x_2)),
-    ) in coords_at_z
+    predicted_line_1_in_cell_1 = _contains_yx(
+        coords_at_z, int(round(predict_y_1)), int(round(predict_x_1)), width, height
+    )
+    predicted_line_2_in_cell_1 = _contains_yx(
+        coords_at_z, int(round(predict_y_2)), int(round(predict_x_2)), width, height
+    )
 
     # print(predicted_line_1_in_cell_1, predicted_line_2_in_cell_1)
     # print(int(round(predict_y_1*0.64)), int(round(predict_x_1*0.64)), int(round(predict_y_2*0.64)), int(round(predict_x_2*0.64)))
     if not (predicted_line_1_in_cell_1 and predicted_line_2_in_cell_1):
-        # print(
-        #     f"  ✗ Predicted splitting points not in cell {cell_1.label} at z={int(round(target_z))}"
-        # )
+        # if cell_1.label == 130 or cell_2.label == 130:
+        #     print(
+        #         f"  ✗ Predicted splitting points not in cell {cell_1.label} at z={int(round(target_z))}"
+        #     )
         return None
 
     pred_point_1 = np.array([predict_y_1, predict_x_1])
@@ -872,8 +961,8 @@ def split_single_cell_layer(cell_1, cell_2, z_to_predict=1, bottom_up=True):
     # (index 0) when splitting cell_1 from below, else its top (index -1).
     if cell_2.coords_set_2d:
         neighbor_slice = cell_2.coords_set_2d[0 if bottom_up else -1]
-        part_2_set = set(map(tuple, part_2_coords))
-        if not (part_2_set & neighbor_slice):
+        part_2_flat = _flatten_yx(part_2_coords, width)
+        if not _overlaps(part_2_flat, neighbor_slice):
             # print(f"  ✗ Split piece does not touch cell {cell_2.label}'s body")
             return None
 
@@ -881,7 +970,7 @@ def split_single_cell_layer(cell_1, cell_2, z_to_predict=1, bottom_up=True):
     return part_1_coords, part_2_coords, z_idx, target_z_int
 
 
-def _insert_slice_in_z_order(cell, z, coords_2d, label):
+def _insert_slice_in_z_order(cell, z, coords_flat, label, width):
     """Insert a donated 2D slice into a cell, keeping all per-slice lists sorted by z.
 
     The previous code blindly appended (or inserted at index 0), which left
@@ -889,29 +978,31 @@ def _insert_slice_in_z_order(cell, z, coords_2d, label):
     assume z-ordered input (note the [::-1] reversals), so an out-of-order point
     corrupted the line fit on the z_to_predict=2 round and misplaced the split.
     """
-    centroid = (z, *np.mean(np.array(list(coords_2d)), axis=0))
+    cy, cx = _centroid_yx_from_flat(coords_flat, width)
+    centroid = (z, cy, cx)
 
     pos = 0
     while pos < len(cell.centroids_2d) and cell.centroids_2d[pos][0] < z:
         pos += 1
 
-    cell.coords_set_2d.insert(pos, coords_2d)
+    cell.coords_set_2d.insert(pos, coords_flat)
     cell.labels_2d.insert(pos, label)
     cell.centroids_2d.insert(pos, centroid)
-    cell.volumes_2d.insert(pos, len(coords_2d))
+    cell.volumes_2d.insert(pos, int(coords_flat.size))
 
 
 def update_coords(cell_1, cell_2, z_idx, part_1_coords_2d, part_2_coords_2d, last_z):
     """Update both cells after splitting cell_1 at its top"""
+    width = cell_1.shape_2d[1]
     cell_1.coords_set_2d[z_idx] = part_1_coords_2d
 
-    cell_1.volumes_2d[z_idx] = len(part_1_coords_2d)
-    part_1_array = np.array(list(part_1_coords_2d))
-    cell_1.centroids_2d[z_idx] = (last_z, *np.mean(part_1_array, axis=0))
+    cell_1.volumes_2d[z_idx] = int(part_1_coords_2d.size)
+    cy, cx = _centroid_yx_from_flat(part_1_coords_2d, width)
+    cell_1.centroids_2d[z_idx] = (last_z, cy, cx)
 
     # Donate part_2 to cell_2 in z-order (interface z sits below cell_2's body)
     _insert_slice_in_z_order(
-        cell_2, last_z, part_2_coords_2d, cell_1.labels_2d[z_idx]
+        cell_2, last_z, part_2_coords_2d, cell_1.labels_2d[z_idx], width
     )
 
     _recalculate_cell_properties(cell_1)
@@ -922,15 +1013,16 @@ def update_coords_bottom(
     cell_2, cell_1, z_idx, part_1_coords_2d, part_2_coords_2d, first_z
 ):
     """Update both cells after splitting cell_2 at its bottom"""
+    width = cell_2.shape_2d[1]
     cell_2.coords_set_2d[z_idx] = part_1_coords_2d
 
-    cell_2.volumes_2d[z_idx] = len(part_1_coords_2d)
-    part_1_array = np.array(list(part_1_coords_2d))
-    cell_2.centroids_2d[z_idx] = (first_z, *np.mean(part_1_array, axis=0))
+    cell_2.volumes_2d[z_idx] = int(part_1_coords_2d.size)
+    cy, cx = _centroid_yx_from_flat(part_1_coords_2d, width)
+    cell_2.centroids_2d[z_idx] = (first_z, cy, cx)
 
     # Donate part_2 to cell_1 in z-order (interface z sits above cell_1's body)
     _insert_slice_in_z_order(
-        cell_1, first_z, part_2_coords_2d, cell_2.labels_2d[z_idx]
+        cell_1, first_z, part_2_coords_2d, cell_2.labels_2d[z_idx], width
     )
 
     _recalculate_cell_properties(cell_1)
@@ -947,30 +1039,6 @@ import copy
 
 
 def split_organoid_cells(organoid):
-    # Convert flat-index coords_set_2d to (y, x) tuples if needed
-    for cell in organoid:
-        if not cell.coords_set_2d:
-            continue
-        first_set = next((s for s in cell.coords_set_2d if s), None)
-        if not first_set:
-            continue
-        sample = next(iter(first_set))
-        if isinstance(sample, (int, np.integer)):
-            shape_2d = getattr(cell, "shape_2d", None)
-            if shape_2d is None:
-                raise ValueError(
-                    f"Cell {cell.label} has flat-index coords_set_2d but no shape_2d for conversion"
-                )
-            width = shape_2d[1]
-            cell.coords_set_2d = [
-                (
-                    set(zip(*np.divmod(np.fromiter(s, dtype=np.int64), width)))
-                    if s
-                    else set()
-                )
-                for s in cell.coords_set_2d
-            ]
-
     print("Finding touching cell pairs...")
     organoid = find_touching_pairs(organoid)
 
@@ -1057,15 +1125,17 @@ def stitch_small_cells(organoid, max_slices=2, iou_threshold=0.7, knn=5):
                 if kd is None:
                     continue
                 cands = z_kd_idx[neighbor_z]
+                # if cell.label == 98:
+                #     print(f"Cell {cell.label} at z={z_pos} has {len(cands)} candidates at z={neighbor_z}")
                 k_actual = min(knn, len(cands))
                 _, nn_idxs = kd.query((cy, cx), k=k_actual)
                 for nn_i in np.atleast_1d(nn_idxs):
                     j = cands[nn_i]
                     s2 = organoid[j].coords_set_2d[z_to_idx_maps[j][neighbor_z]]
-                    len2 = len(s2)
+                    len2 = s2.size
                     if len2 == 0:
                         continue
-                    intersection = len(s1 & s2)
+                    intersection = _intersect_count(s1, s2)
                     if intersection == 0:
                         continue
                     min_len = min(len1, len2)
@@ -1074,6 +1144,8 @@ def stitch_small_cells(organoid, max_slices=2, iou_threshold=0.7, knn=5):
                         if intersection == min_len
                         else intersection / (len1 + len2 - intersection)
                     )
+                    # if cell.label == 98:
+                    #     print(f"  Candidate neighbor {organoid[j].label} at z={neighbor_z}: len1={len1}, len2={len2}, intersection={intersection}, iou={iou:.3f}")
                     if iou > iou_threshold:
                         merged_into = j
                         break
@@ -1136,6 +1208,7 @@ def stitch_3d(
     breaking_threshold=2,
     size_2d_filter_multiplier=15,
     combine_fn=None,
+    scale=(1, 1, 1),
 ):
     print("Starting 3D stitching process...")
     organoid = get_2d_mask_properties(
@@ -1159,7 +1232,7 @@ def stitch_3d(
         )
         checked_labels = {cell.label for cell in organoid}
         organoid, breaks_made, broken_labels = break_stitching(
-            organoid, breaking_threshold=breaking_threshold
+            organoid, breaking_threshold=breaking_threshold, scale=scale
         )
         checked_labels -= broken_labels
         if breaks_made == 0:
@@ -1168,7 +1241,8 @@ def stitch_3d(
         print(f"    Iteration {iteration + 1}: Made {breaks_made} breaks.")
         iteration += 1
 
-    organoid = split_organoid_cells(organoid)
+
+    organoid = split_organoid_cells(organoid)    
 
     organoid = stitch_small_cells(organoid)
 

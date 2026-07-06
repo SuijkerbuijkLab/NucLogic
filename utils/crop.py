@@ -4,17 +4,43 @@ import tifffile
 import pandas as pd
 import numpy as np
 from libpysal.weights import KNN
-from esda.moran import Moran
 from imaris_ims_file_reader.ims import ims
 from PIL import Image
 import scipy.ndimage as ndimage
 import cv2
 from .offset_image import offset_image
 from utils.pad_to_shape import pad_to_shape
+from utils.tiff_metadata import _to_tczyx
 from skimage.filters import threshold_triangle
-
+from alive_progress import alive_bar
 
 import os, shutil, tempfile
+
+
+def _moran_rows(XZ, w_cache):
+    """Vectorized Moran's I for every row of a 2D array.
+
+    Equivalent to running esda.Moran(row, KNN(k=2)) per row (default row-
+    standardized transform), but computed for all rows at once: with row-
+    standardized weights S0 == n, so I reduces to zᵀWz / zᵀz. The KNN weight
+    matrix depends only on the row length, so it is built once per length and
+    cached in `w_cache`. Rows with zero variance get I = 0.
+    """
+    n = XZ.shape[1]
+    W = w_cache.get(n)
+    if W is None:
+        coords = np.arange(n).reshape(-1, 1)
+        S = KNN.from_array(coords, k=2).sparse.astype(float)  # binary adjacency
+        rs = np.asarray(S.sum(axis=1)).ravel()
+        rs[rs == 0] = 1.0
+        W = S.multiply((1.0 / rs)[:, None]).tocsr()           # row-standardized
+        w_cache[n] = W
+    Z = XZ.astype(float)
+    Z -= Z.mean(axis=1, keepdims=True)
+    num = (Z * (W @ Z.T).T).sum(axis=1)                       # z · (W z)
+    den = (Z * Z).sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(den > 0, num / den, 0.0)
 
 
 def crop(
@@ -63,18 +89,21 @@ def crop(
     # Load in the input image, which is either a ims or tiff
     if input_file.endswith(".ims"):
         movie = ims(input_file)  # T,C,Z,Y,X
-    elif input_file.endswith(".tif"):
-        movie = tifffile.imread(input_file)  # T,Z,C,Y,X
-        movie = np.transpose(movie, (0, 2, 1, 3, 4))  # T,C,Z,Y,X
+    elif input_file.endswith((".tif", ".tiff")):
+        with tifffile.TiffFile(input_file) as tif:
+            axes = tif.series[0].axes
+        movie = tifffile.imread(input_file)
+        movie = _to_tczyx(movie, axes)  # -> T,C,Z,Y,X (handles TZYX / CZYX / TCZYX)
 
     timepoints = proj_XY.shape[0]
 
     cropped_movie = []
     max_dims = [0, 0, 0, 0]
+    w_cache = {}  # KNN spatial weights reused across rows/frames (keyed by row length)
 
     # Loop over every frame in the movie to crop that frame.
-    for frame in range(timepoints):
-
+    with alive_bar(timepoints, title="Croppping frames") as bar:
+        for frame in range(timepoints):
             maskXY = np.max(organoid_only[frame, nuclei], axis=0) > 0
             coordsXY = np.where(maskXY)
 
@@ -104,12 +133,9 @@ def crop(
             # Get a bounding box cropped version of the organoid
             ref_crop = maskXY[row_min:row_max, col_min:col_max]
 
-            # In this bounding box image, create the Z axis of the same dimensions of the original movie
-            ref_expanded = ref_crop[np.newaxis, :, :]
-            ref_expanded = np.repeat(ref_expanded, ref.shape[0], axis=0)
-
-            # Use the this XYZ mask on the original movie to crop as both a bounding box and to make all pixels (corners) where there is no organoid actually black
-            ref_masked = np.where(ref_expanded > 0, ref, 0).astype(np.uint16)
+            # Use the XY mask on the original movie to crop as a bounding box and
+            # black out corners where there is no organoid (broadcast over Z).
+            ref_masked = np.where(ref_crop[np.newaxis, :, :] > 0, ref, 0).astype(np.uint16)
 
             # Make an max XZ projection that we will use to see what Z slices are important
             XZ = np.max(ref_masked, axis=1)
@@ -117,30 +143,12 @@ def crop(
             # Apply offset to enhance contrast and make background and signal more distinct
             XZ = offset_image(XZ, type="median")
 
-            z_list = []
-            moran_values = []  # Collect Moran’s I for all rows
+            # Moran's I per row (vectorized; zero-variance rows -> 0)
+            moran_values = np.nan_to_num(_moran_rows(XZ, w_cache), nan=0.0)
 
-            # Step 1: Calculate Moran's I for each row
-            for idx, row in enumerate(XZ):
-                if np.std(row) == 0:
-                    moran_values.append((idx, 0))
-                    continue
-                coords = np.arange(len(row)).reshape(-1, 1)
-                w_1d = KNN.from_array(coords, k=2)
-                moran = Moran(row, w_1d)
-                if not np.isnan(
-                    moran.I
-                ):  # Make sure this value is not NA, which can happen in truly background / random data
-                    moran_values.append((idx, moran.I))  # store both index and value
-                else:
-                    moran_values.append((idx, 0))
-
-            # Step 2: Calculate dynamic threshold based on max moran I value found
-            max_moran = max(val for _, val in moran_values)
-            threshold = 0.4 * max_moran
-
-            # Step 3: Filter Z slices using threshold
-            z_list = [idx for idx, val in moran_values if val >= threshold]
+            # Dynamic threshold based on the max Moran I found, then keep those rows
+            threshold = 0.4 * moran_values.max()
+            z_list = np.nonzero(moran_values >= threshold)[0].tolist()
 
             z_vals_sorted = sorted(set(z_list))
             max_block = []
@@ -173,19 +181,10 @@ def crop(
             mask_crop = maskXY[
                 row_min:row_max, col_min:col_max
             ]  # shape: (Y_crop, X_crop)
-            # Expand mask to 4D: (C, Z, Y_crop, X_crop)
-            mask_expanded = mask_crop[np.newaxis, np.newaxis, :, :]
-            # Repeat over C and Z to match cropped_image shape
-            mask_expanded = np.repeat(
-                mask_expanded, cropped_image.shape[0], axis=0
-            )  # C
-            mask_expanded = np.repeat(
-                mask_expanded, cropped_image.shape[1], axis=1
-            )  # Z
-            # Apply the mask
-            cropped_image_masked = np.where(mask_expanded, cropped_image, 0).astype(
-                np.uint16
-            )
+            # Apply the mask, broadcasting (Y,X) over C and Z of the cropped image
+            cropped_image_masked = np.where(
+                mask_crop[np.newaxis, np.newaxis, :, :], cropped_image, 0
+            ).astype(np.uint16)
             cropped_image_masked = np.transpose(
                 cropped_image_masked, (1, 0, 2, 3)
             )  # Z C Y X for tiff
@@ -193,6 +192,8 @@ def crop(
             cropped_movie.append(cropped_image_masked)
             for i in range(4):
                 max_dims[i] = max(max_dims[i], cropped_image_masked.shape[i])
+
+            bar()
 
     cropped_movie = [pad_to_shape(stack, max_dims) for stack in cropped_movie]
     cropped_movie = np.stack(cropped_movie, axis=0)
