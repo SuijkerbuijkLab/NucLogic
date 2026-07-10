@@ -84,100 +84,62 @@ def _contains_yx(flat_sorted, y, x, width, height):
     return pos < flat_sorted.size and int(flat_sorted[pos]) == key
 
 
-def get_cell_properties_2d(image):
-    # Vectorized alternative to regionprops for label, centroid, volume, coords_set
-    nonzero = image != 0
-    if not np.any(nonzero):
-        return []
-    z, y, x = (a.astype(np.int32) for a in np.nonzero(nonzero))
-    labels = image[z, y, x]
-    del nonzero                                   # free the full-volume bool
-
-    order = np.argsort(labels, kind="stable")
-    labels = labels[order]; z = z[order]; y = y[order]; x = x[order]
-    del order                                     # no unsorted + sorted duplicates
-
-    unique_labels, idx, counts = np.unique(labels, return_index=True, return_counts=True)
-    z_sum = np.add.reduceat(z, idx)
-    y_sum = np.add.reduceat(y, idx)
-    x_sum = np.add.reduceat(x, idx)
-    centroids = np.vstack((z_sum / counts, y_sum / counts, x_sum / counts)).T
-
-    height, width = image.shape[1], image.shape[2]
+def get_cell_properties_2d(mask):
+    # Cellpose labels are only unique within a z-slice. Iterate slice by slice and
+    # assign globally-unique ids on the fly, which subsumes the old make_unique_mask
+    # step (no separate uint32 volume, no full-volume relabel pass). Working per slice
+    # also keeps peak memory to one slice's coords instead of the whole volume.
+    height, width = mask.shape[1], mask.shape[2]
     organoid = []
-    for label, start, count, centroid in zip(unique_labels, idx, counts, centroids):
-        y_part = y[start : start + count]
-        x_part = x[start : start + count]
-        # Already sorted: nonzero is raster-order and the stable argsort by label
-        # preserves it, so a single label's pixels have ascending y*W + x.
-        coords_set = np.ravel_multi_index((y_part, x_part), (height, width)).astype(
-            np.uint32
-        )
-        cell = cell_2d(
-            label=int(label),
-            centroid=tuple(centroid),
-            coords_set=coords_set,
-            volume=int(count),
-            shape_2d=(height, width),
-        )
-        organoid.append(cell)
+    new_label = 0
+    for z in range(mask.shape[0]):
+        sl = mask[z]
+        ys, xs = np.nonzero(sl)
+        if ys.size == 0:
+            continue
+        labs = sl[ys, xs]
+        order = np.argsort(labs, kind="stable")  # stable keeps raster order within a label
+        labs = labs[order]
+        ys = ys[order].astype(np.int64)
+        xs = xs[order].astype(np.int64)
 
+        _, idx, counts = np.unique(labs, return_index=True, return_counts=True)
+        for start, count in zip(idx, counts):
+            y_part = ys[start : start + count]
+            x_part = xs[start : start + count]
+            # flat = y*W + x, already ascending thanks to the stable sort above
+            coords_set = (y_part * width + x_part).astype(np.uint32)
+            new_label += 1
+            organoid.append(
+                cell_2d(
+                    label=new_label,
+                    centroid=(float(z), float(y_part.mean()), float(x_part.mean())),
+                    coords_set=coords_set,
+                    volume=int(count),
+                    shape_2d=(height, width),
+                )
+            )
+
+    print(f"Created {new_label} unique 2D cells.")
     return organoid
 
 
-def properties_channel(organoid, mask, image, channel_type=None):
-    # print(
-    #     f"Calculating intensity properties for channel '{channel_type}'..."
-    #     if channel_type
-    #     else "Calculating intensity properties for image..."
-    # )
-
-    try:  # SCIkit changed the name of this property at some point, so we try both just in case
-        props_channel = regionprops_table(
-            mask, intensity_image=image, properties=["label", "intensity_mean"]
-        )
-        intensity_dict = dict(
-            zip(props_channel["label"], props_channel["intensity_mean"])
-        )
-    except KeyError:
-        props_channel = regionprops_table(
-            mask, intensity_image=image, properties=["label", "mean_intensity"]
-        )
-        intensity_dict = dict(
-            zip(props_channel["label"], props_channel["mean_intensity"])
-        )
-
+def properties_channel(organoid, image, channel_type=None):
+    # Mean intensity per 2D cell, computed directly from its flat (y, x) coords at its
+    # slice. Each unique label lives entirely in one z-slice, so this reproduces
+    # regionprops' mean_intensity exactly, without a full-volume regionprops pass.
+    attr_name = f"intensity_{channel_type}" if channel_type else "intensity"
+    z_max = image.shape[0] - 1
     for cell in organoid:
-        attr_name = f"intensity_{channel_type}" if channel_type else "intensity"
-        setattr(cell, attr_name, intensity_dict.get(cell.label, 0))
-
-    # print(
-    #     f"Calculated intensity properties for channel '{channel_type}'."
-    #     if channel_type
-    #     else "Calculated intensity properties for image."
-    # )
+        z_int = min(max(int(round(cell.centroid[0])), 0), z_max)
+        flat = cell.coords_set
+        if flat.size:
+            mean_val = float(image[z_int].reshape(-1)[flat].mean())
+        else:
+            mean_val = 0.0
+        setattr(cell, attr_name, mean_val)
 
     return organoid
-
-
-def make_unique_mask(mask):
-    """Create a unique mask for properties calculation, ensuring that each slice has unique labels."""
-    print("Creating unique mask for properties calculation...")
-    unique_mask = mask.astype(np.uint32)          # single volume, modified in place
-    z_slices = unique_mask.shape[0]
-    slice_max = unique_mask.reshape(z_slices, -1).max(axis=1).astype(np.uint32)
-    offsets = np.concatenate(([0], np.cumsum(slice_max[:-1], dtype=np.uint32)))
-
-    total_unique = 0
-    for z, offset in enumerate(offsets):
-        slice_data = unique_mask[z]
-        nonzero = slice_data != 0
-        total_unique += np.unique(slice_data[nonzero]).size   # distinct nonzero labels
-        if offset != 0 and nonzero.any():
-            slice_data[nonzero] += offset
-
-    print(f"Unique mask created with {total_unique} unique cells.")
-    return unique_mask
 
 
 def filter_big_2d_cells(organoid_2d, size_2d_filter_multiplier = 15):
@@ -192,18 +154,13 @@ def filter_big_2d_cells(organoid_2d, size_2d_filter_multiplier = 15):
 def get_2d_mask_properties(
     mask, image1, image_type_1=None, image2=None, image_type_2=None, size_2d_filter_multiplier=15
 ):
-    unique_mask = make_unique_mask(mask)
-    organoid = get_cell_properties_2d(unique_mask)
+    organoid = get_cell_properties_2d(mask)
     organoid = filter_big_2d_cells(organoid, size_2d_filter_multiplier)
 
-    organoid = properties_channel(
-        organoid, unique_mask, image1, channel_type=image_type_1
-    )
+    organoid = properties_channel(organoid, image1, channel_type=image_type_1)
 
     if image2 is not None:
-        organoid = properties_channel(
-            organoid, unique_mask, image2, channel_type=image_type_2
-        )
+        organoid = properties_channel(organoid, image2, channel_type=image_type_2)
 
     print(f"Calculated 2D (intensity) properties for all cells")
 
@@ -303,10 +260,16 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
     # build organoid_3d list (skip 3D coords to avoid heavy conversions)
     organoid_3d = []
     intensity_attrs = [a for a in organoid_2d[0].__dict__ if a.startswith("intensity")]
-    for cell in np.unique(labels_3d):
+    # Group 2D-cell indices by their assigned 3D label in one O(n log n) pass instead
+    # of rescanning labels_3d per label (which was O(n_labels * n)).
+    order = np.argsort(labels_3d, kind="stable")
+    sorted_labels = labels_3d[order]
+    uniq, starts = np.unique(sorted_labels, return_index=True)
+    starts = np.append(starts, labels_3d.size)
+    for k, cell in enumerate(uniq):
         if cell <= 0:
             continue
-        slice_idxs = np.where(labels_3d == cell)[0]
+        slice_idxs = order[starts[k] : starts[k + 1]]  # ascending original indices
         labels_2d = [organoid_2d[i].label for i in slice_idxs]
         centroids_2d = [organoid_2d[i].centroid for i in slice_idxs]
         coords_set_2d = [organoid_2d[i].coords_set for i in slice_idxs]
@@ -539,7 +502,7 @@ def get_break_scores(organoid, skip_labels=None, combine_fn=None):
                 )
             final_scores.append(final_score)
         
-        # if cell.label == 286:
+        # if cell.label == 4307:
         #     print(f"Cell {cell.label} break scores:")
         #     print(f"  Number of slices: {len(cell.volumes_2d)}")
         #     print(f"  Volume break scores: {volumes_break_score}")
@@ -610,38 +573,48 @@ def cell_bbox(cell):
         x_size = max(x_size, int(xs.max() - xs.min()) + 1)  # this slice's x extent
     return z_size, y_size, x_size
 
-def break_stitching(organoid, breaking_threshold=2.5, scale=(1,1,1)):
+def break_stitching(organoid, breaking_threshold=2.5, scale=(1,1,1), skip_labels=None):
+    skip_labels = skip_labels or set()
     new_organoid = []
     breaks_made = 0
     broken_labels = set()
     new_label = max(cell.label for cell in organoid) + 1
     for cell in organoid:
+        # A cell that already survived a previous round with unchanged scores/geometry
+        # would make the identical (no-break) decision again, so skip re-evaluating it.
+        if cell.label in skip_labels:
+            new_organoid.append(cell)
+            continue
         if len(cell.volumes_2d) < 7:
             new_organoid.append(cell)
             continue
 
-        
-        # get the z y x bounding box sizes
-        z_size, y_size, x_size = cell_bbox(cell)
-        sizes = np.sort(np.array([z_size * scale[0], y_size * scale[1], x_size * scale[2]]))[::-1]                
-        elongation = sizes[0] / sizes[1] - 1
-        elongation = elongation if elongation > 0.5 else 0.5
-        new_threshold = breaking_threshold / (elongation*2)
-
-        # if cell.label == 286:
-        #     print(f"Break scores for cell {cell.label}: {cell.break_scores}")
-        #     print(f"New threshold: {new_threshold}")
-        #     print(f"Elongation: {elongation}, sizes: {sizes}, scale: {scale}")
-
         break_scores = [score for score in cell.break_scores]
         break_scores[:3] = [0, 0, 0]  # First 3 slices get score 0
         break_scores[-3:] = [0, 0, 0]  # Last 3 slices get score 0
-        if max(break_scores) < new_threshold:
+        max_value = max(break_scores)
+        # get the z y x bounding box sizes
+
+        if max_value < breaking_threshold:
+            z_size, y_size, x_size = cell_bbox(cell)
+            sizes = np.sort(np.array([z_size * scale[0], y_size * scale[1], x_size * scale[2]]))[::-1]                
+            elongation = sizes[0] / sizes[1] - 1
+            elongation = elongation if elongation > 0.5 else 0.5
+            new_threshold = breaking_threshold / ((elongation*2)**2) # scale the threshold based on elongation, more elongated cells are more likely to be broken
+
+            # if cell.label == 4307:
+            #     print(f"Break scores for cell {cell.label}: {cell.break_scores}")
+            #     print(f"New threshold: {new_threshold}")
+            #     print(f"Elongation: {elongation}, sizes: {sizes}, scale: {scale}")
+        elif max_value >= breaking_threshold:
+            new_threshold = breaking_threshold
+
+        if max_value < new_threshold:
             new_organoid.append(cell)
             continue
 
         # Peak = highest-scoring slice
-        peak = break_scores.index(max(break_scores))
+        peak = break_scores.index(max_value)
 
         # Cut between the peak and its HIGHER-scoring neighbour, so the peak
         # slice stays with its LOWER-scoring side.
@@ -1227,14 +1200,15 @@ def stitch_3d(
     checked_labels = set()
     print("Starting iterative breaking of cells")
     while iteration < max_iterations:
+        skip = checked_labels  # survivors from the previous round (empty on the first)
         organoid = get_break_scores(
-            organoid, skip_labels=checked_labels, combine_fn=combine_fn
+            organoid, skip_labels=skip, combine_fn=combine_fn
         )
-        checked_labels = {cell.label for cell in organoid}
         organoid, breaks_made, broken_labels = break_stitching(
-            organoid, breaking_threshold=breaking_threshold, scale=scale
+            organoid, breaking_threshold=breaking_threshold, scale=scale, skip_labels=skip
         )
-        checked_labels -= broken_labels
+        # survivors = all current cells minus the ones that were (re)broken this round
+        checked_labels = {cell.label for cell in organoid} - broken_labels
         if breaks_made == 0:
             break  # No more breaks made
 
