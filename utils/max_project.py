@@ -5,6 +5,8 @@ import tifffile
 from imaris_ims_file_reader.ims import ims
 from alive_progress import alive_bar
 
+from utils.tiff_metadata import _to_tczyx
+
 
 def max_project(file, name="nuclei"):
     # Load in either the ims or tif file
@@ -33,24 +35,27 @@ def max_project(file, name="nuclei"):
                     bar()
 
     elif file.endswith((".tif", ".tiff")):
+        # Read the axis meaning (TZYX / CZYX / TCZYX ...) without loading pixels,
+        # then memory-map the data (falling back to a full read if not contiguous).
+        with tifffile.TiffFile(file) as tif:
+            axes = tif.series[0].axes
         try:
-            movie = tifffile.memmap(file, mode="r")  # T,Z,C,Y,X
+            movie = tifffile.memmap(file, mode="r")
         except ValueError:
             movie = tifffile.imread(file)
 
+        # Normalize to T,C,Z,Y,X (views only -> memmap stays lazy).
+        movie = _to_tczyx(movie, axes)
         shape = movie.shape
-        while len(shape) < 5:
-            shape = (1,) + shape
-            movie = movie.reshape(shape)
 
-        # T,Z,C,Y,X -> max over Z (axis 1) -> T,C,Y,X
-        output_shape = (shape[0], shape[2], shape[3], shape[4])
+        # T,C,Z,Y,X -> max over Z (axis 2) -> T,C,Y,X
+        output_shape = (shape[0], shape[1], shape[3], shape[4])
         max_data = np.zeros(output_shape, dtype=movie.dtype)
 
         with alive_bar(shape[0], title="Generating Max Z projection") as bar:
             for t in range(shape[0]):
-                # movie[t] is (Z,C,Y,X) — max over Z covers all channels in one call
-                max_data[t] = np.max(movie[t], axis=0)
+                # movie[t] is (C,Z,Y,X) — max over Z (axis 1) covers all channels
+                max_data[t] = np.max(movie[t], axis=1)
                 bar()
 
     print(f"Saving max projection of shape {max_data.shape}")

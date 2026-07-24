@@ -1,6 +1,13 @@
 from datetime import datetime
 import sys
 import os
+
+# Pin the Qt binding for the whole process (app, napari, matplotlib-qtagg, and
+# any qtpy-based widget). Without this, if anything imports qtpy before PySide6
+# is loaded, qtpy can lock onto PyQt5 and napari then runs on a *different* Qt
+# binding than this app -> two Qt bindings in one process -> hard crash.
+os.environ.setdefault("QT_API", "pyside6")
+
 import shutil
 import torch
 from pathlib import Path
@@ -1178,7 +1185,7 @@ class MainWindow(QMainWindow):
         breaking_threshold_layout.addWidget(
             QLabel("Breaking threshold for cell stitching:")
         )
-        self.breaking_threshold_input = QLineEdit("2.5")
+        self.breaking_threshold_input = QLineEdit("3")
         self.breaking_threshold_input.setMaximumWidth(90)
         breaking_threshold_layout.addWidget(self.breaking_threshold_input)
         breaking_threshold_layout.addWidget(self._info_label(
@@ -2251,6 +2258,10 @@ class MainWindow(QMainWindow):
             movie = sample_data["movie"]
             voxel_size = sample_data["voxel_size"]
             segmentation = sample_data["segmentation"]
+            properties_path = sample_data.get("properties_path")
+            seg_metadata = {"sample": sample, "voxel_size": voxel_size}
+            if properties_path:
+                seg_metadata["properties_path"] = properties_path
 
             for i, channel_name in enumerate(channel_names):
                 viewer.add_image(
@@ -2272,6 +2283,7 @@ class MainWindow(QMainWindow):
                             rendering="iso_categorical",
                             scale=voxel_size,
                             iso_gradient_mode="smooth",
+                            metadata=dict(seg_metadata),
                         )
                 else:
                     viewer.add_labels(
@@ -2282,6 +2294,7 @@ class MainWindow(QMainWindow):
                         rendering="iso_categorical",
                         scale=voxel_size,
                         iso_gradient_mode="smooth",
+                        metadata=dict(seg_metadata),
                     )
 
             for pheno in sample_data.get("phenotype_masks", []):
@@ -2308,6 +2321,14 @@ class MainWindow(QMainWindow):
                     iso_gradient_mode="smooth",
                     colormap={0: "", 1: binary_color},
                 )
+
+        # Add the property-based label filtering widget (slider plugin).
+        try:
+            from utils.napari_slider_plugin import attach_property_filter
+
+            attach_property_filter(viewer)
+        except Exception as e:
+            print(f"Could not attach property filter widget: {e}")
 
     def _viewer_error(self, error_message):
         self.view_button.setEnabled(True)
@@ -2672,6 +2693,10 @@ class ViewerWorker(QThread):
                             phenotype_masks.append({"name": pheno_name, "data": mask})
                             print(f"Loaded phenotype mask: {fname} ({pheno_name})")
 
+                properties_path = os.path.join(
+                    self.base_path, sample, f"{sample}_properties.tsv"
+                )
+
                 samples_data.append(
                     {
                         "sample": sample,
@@ -2679,6 +2704,11 @@ class ViewerWorker(QThread):
                         "voxel_size": voxel_size,
                         "segmentation": segmentation,
                         "phenotype_masks": phenotype_masks,
+                        "properties_path": (
+                            properties_path
+                            if os.path.exists(properties_path)
+                            else None
+                        ),
                     }
                 )
 

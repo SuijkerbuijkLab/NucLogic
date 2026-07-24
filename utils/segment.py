@@ -24,7 +24,7 @@ def segment(image, model):
                 diameter=None,
                 normalize=True,
                 flow_threshold=0.4,
-                invert=False,
+                # invert=False,
                 resample=True,
                 do_3D=False,
                 progress=None,
