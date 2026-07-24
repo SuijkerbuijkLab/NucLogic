@@ -22,6 +22,10 @@ class cell_3d:
     break_scores: list | None = None
     parents: list | None = None
     touching_cells: list | None = None
+    # cached per-gap "1 - adjacent-slice IOU" array (index i = gap between slice
+    # i-1 and i; index 0 is 0). Invariant under breaking, so it is sliced onto the
+    # halves in split_cell_at_index instead of being recomputed each round.
+    iou_gaps: list | None = None
 
 
 @dataclass
@@ -51,7 +55,13 @@ def _overlaps(a, b):
     """True if two sorted, unique 1-D index arrays share any element."""
     if a.size == 0 or b.size == 0:
         return False
-    return bool(np.isin(a, b, assume_unique=True).any())
+    # Both inputs are already sorted & unique, so probe the smaller into the larger
+    # with searchsorted. Avoids np.isin re-sorting b on every call.
+    if a.size > b.size:
+        a, b = b, a
+    pos = np.searchsorted(b, a)
+    pos = np.clip(pos, 0, b.size - 1)
+    return bool((b[pos] == a).any())
 
 
 def _flatten_yx(coords_yx, width):
@@ -225,6 +235,10 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
         z_indices[z_int] = np.array(indices, dtype=np.int64)
 
     labels_3d = np.full(n, -1, dtype=np.int32)
+    # adjacent-slice IOU captured at the moment two 2D cells are stitched, keyed by
+    # the upper (z+1) 2D-cell index. Reused later as cell.iou_gaps so get_break_scores
+    # never has to recompute consecutive-slice overlaps.
+    gap_iou = {}
 
     def stitch_forward(idx, current_label):
         labels_3d[idx] = current_label
@@ -248,7 +262,9 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
         )
         closest_cell = np.argmin(dists)
         cand_idx = int(cand_idx[closest_cell])
-        if calculate_iou(coords_sets, idx, cand_idx) > iou_threshold:
+        iou = calculate_iou(coords_sets, idx, cand_idx)
+        if iou > iou_threshold:
+            gap_iou[cand_idx] = iou
             stitch_forward(cand_idx, current_label)
 
     current_label = 0
@@ -280,6 +296,18 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
             for attr in intensity_attrs
         }
 
+        # per-gap "1 - adjacent IOU", reusing the IOUs already computed while
+        # stitching. slice_idxs are z-ascending and contiguous, so gap j sits
+        # between slice_idxs[j-1] and slice_idxs[j]; its IOU was stored under the
+        # upper index slice_idxs[j]. Fall back to a direct compute only if missing.
+        iou_gaps = [0.0]
+        for j in range(1, len(slice_idxs)):
+            upper = int(slice_idxs[j])
+            iou = gap_iou.get(upper)
+            if iou is None:
+                iou = calculate_iou(coords_sets, int(slice_idxs[j - 1]), upper)
+            iou_gaps.append(1 - iou)
+
         cell3d = cell_3d(
             label=cell,
             centroid=np.mean(centroids_2d, axis=0),
@@ -290,6 +318,7 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
             coords_set_2d=coords_set_2d,
             volumes_2d=volumes_2d,
             intensities_2d=intensities_2d,
+            iou_gaps=iou_gaps,
         )
         cell3d.shape_2d = shape_2d
         organoid_3d.append(cell3d)
@@ -364,14 +393,36 @@ def calculate_line_3d(z_positions, y_positions, x_positions, points=3):
     elif isinstance(points, int):
         points = slice(None, points)
 
-    z_fit = np.array(z_positions[points])
-    x_fit = np.array(x_positions[points])
-    y_fit = np.array(y_positions[points])
+    z_fit = z_positions[points]
+    x_fit = x_positions[points]
+    y_fit = y_positions[points]
+    n = len(z_fit)
 
-    # Calculate line parameters
-    A = np.vstack([z_fit, np.ones(len(z_fit))]).T
-    m_x, c_x = np.linalg.lstsq(A, x_fit, rcond=None)[0]
-    m_y, c_y = np.linalg.lstsq(A, y_fit, rcond=None)[0]
+    # Closed-form ordinary least squares (identical result to lstsq for a full-rank
+    # line fit, but ~3x faster here: these fits are tiny (n ~ 3-30) and pure-Python
+    # arithmetic avoids the array-allocation overhead lstsq pays per call).
+    if n >= 2:
+        inv = 1.0 / n
+        zbar = sum(z_fit) * inv
+        xbar = sum(x_fit) * inv
+        ybar = sum(y_fit) * inv
+        denom = num_x = num_y = 0.0
+        for zi, xi, yi in zip(z_fit, x_fit, y_fit):
+            dz = zi - zbar
+            denom += dz * dz
+            num_x += dz * (xi - xbar)
+            num_y += dz * (yi - ybar)
+        if denom > 0.0:
+            m_x = num_x / denom
+            m_y = num_y / denom
+            c_x = xbar - m_x * zbar
+            c_y = ybar - m_y * zbar
+            return lambda z: (m_x * z + c_x, m_y * z + c_y)
+
+    # Rank-deficient (<2 points, or all z equal): fall back to lstsq's min-norm solution.
+    A = np.vstack([np.asarray(z_fit, dtype=np.float64), np.ones(n)]).T
+    m_x, c_x = np.linalg.lstsq(A, np.asarray(x_fit, dtype=np.float64), rcond=None)[0]
+    m_y, c_y = np.linalg.lstsq(A, np.asarray(y_fit, dtype=np.float64), rcond=None)[0]
 
     # Create line function: given z, returns (x, y) in that order
     line_function = lambda z: (m_x * z + c_x, m_y * z + c_y)
@@ -438,13 +489,27 @@ def get_line_break_scores(z_positions, y_positions, x_positions):
     return break_score, distances
 
 
+def _get_iou_gaps(cell):
+    # Raw per-gap array: index i = 1 - IOU(slice i-1, slice i) for i >= 1, index 0 = 0.
+    # Normally already populated by IOU_stitching (which computed these IOUs while
+    # forming the cell); split_cell_at_index then slices it onto the halves. This
+    # lazy compute is only a fallback for cells that arrive without it.
+    gaps = cell.iou_gaps
+    if gaps is None:
+        n = len(cell.volumes_2d)
+        gaps = [0.0] * n
+        for i in range(1, n):
+            gaps[i] = 1 - calculate_iou(cell.coords_set_2d, i - 1, i)
+        cell.iou_gaps = gaps
+    return gaps
+
+
 def get_IOU_break_scores(cell):
-    num_slices = len(cell.volumes_2d)
-    iou_break_score = [0] * num_slices
-
-    for i in range(1, num_slices - 1):
-        iou_break_score[i] = 1 - calculate_iou(cell.coords_set_2d, i - 1, i)
-
+    # Derive the score array from the cached raw gaps. The original left the first
+    # and last positions unscored (0); reproduce that exactly by zeroing the ends.
+    iou_break_score = list(_get_iou_gaps(cell))
+    iou_break_score[0] = 0
+    iou_break_score[-1] = 0
     return iou_break_score
 
 
@@ -456,7 +521,7 @@ def get_break_scores(organoid, skip_labels=None, combine_fn=None):
         if cell.label in skip_labels and cell.break_scores is not None:
             continue
         num_slices = len(cell.volumes_2d)
-        if num_slices < 5:
+        if num_slices < 7:
             cell.break_scores = [0] * num_slices
             continue
 
@@ -556,6 +621,14 @@ def split_cell_at_index(cell, break_position, new_label):
 
     bottom_cell.shape_2d = getattr(cell, "shape_2d", None)
     top_cell.shape_2d = getattr(cell, "shape_2d", None)
+
+    # Slice the cached adjacent-slice IOU gaps onto the halves instead of letting
+    # them be recomputed. Internal gaps are identical to the parent's; each half's
+    # first gap has no "below" neighbour, so it resets to 0 (get_IOU_break_scores
+    # zeroes the trailing end when it derives its score array).
+    parent_gaps = _get_iou_gaps(cell)
+    bottom_cell.iou_gaps = list(parent_gaps[:break_position])
+    top_cell.iou_gaps = [0.0] + list(parent_gaps[break_position + 1:max_z])
     return bottom_cell, top_cell
 
 def cell_bbox(cell):
@@ -596,7 +669,14 @@ def break_stitching(organoid, breaking_threshold=2.5, scale=(1,1,1), skip_labels
         # get the z y x bounding box sizes
 
         if max_value < breaking_threshold:
-            z_size, y_size, x_size = cell_bbox(cell)
+            # bbox is invariant unless the cell is split; cache it so re-evaluated
+            # (but unbroken) cells don't re-unflatten every slice each round. The
+            # halves are fresh cell_3d objects without _bbox, so they recompute.
+            bbox = getattr(cell, "_bbox", None)
+            if bbox is None:
+                bbox = cell_bbox(cell)
+                cell._bbox = bbox
+            z_size, y_size, x_size = bbox
             sizes = np.sort(np.array([z_size * scale[0], y_size * scale[1], x_size * scale[2]]))[::-1]                
             elongation = sizes[0] / sizes[1] - 1
             elongation = elongation if elongation > 0.5 else 0.5
@@ -653,6 +733,11 @@ def find_touching_pairs(organoid):
         z_to_coords_list.append(z_to_coords)
         z_keys_list.append(set(z_to_coords.keys()))
 
+    # (min_z, max_z) per cell; empty cells get an impossible range so they never
+    # pass the adjacency prefilter below. Two cells can only touch at a z-interface
+    # if their z-extents come within one slice of each other.
+    z_ranges = [(min(zk), max(zk)) if zk else (1, -1) for zk in z_keys_list]
+
     for i, cell in enumerate(organoid):
         if len(cell.volumes_2d) <= 1:
             cell.touching_cells = []
@@ -668,9 +753,17 @@ def find_touching_pairs(organoid):
             cell.touching_cells = []
             continue
 
+        lo_i, hi_i = z_ranges[i]
         for idx in candidate_indices:
             other_z_to_coords = z_to_coords_list[idx]
             if not other_z_to_coords:
+                continue
+
+            # Skip candidates whose z-extent can't be adjacent to this cell's,
+            # before paying for the per-z overlap scan below. Necessary condition
+            # for touching, so it never changes which pairs are found.
+            lo_j, hi_j = z_ranges[idx]
+            if lo_i > hi_j + 1 or lo_j > hi_i + 1:
                 continue
 
             is_touching = False
