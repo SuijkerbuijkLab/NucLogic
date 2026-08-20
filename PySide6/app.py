@@ -153,8 +153,16 @@ class MainWindow(QMainWindow):
         return self._update_banner
 
     def _start_update_check(self):
+        # Print the installed version immediately (works offline); the async check
+        # below then reports up-to-date / update-available once GitHub responds.
+        current = _read_local_version()
+        print(f"[version] NucLogic {current}" if current else "[version] NucLogic (version not yet set)")
+
         self._update_checker = UpdateChecker()
         self._update_checker.update_available.connect(self._on_update_available)
+        self._update_checker.up_to_date.connect(
+            lambda v: print(f"[update] NucLogic {v} is up to date.")
+        )
         self._update_checker.check_failed.connect(
             lambda msg: print(f"[update] check failed: {msg}")
         )
@@ -162,7 +170,9 @@ class MainWindow(QMainWindow):
 
     def _on_update_available(self, version, url, html_url):
         self._update_url = url
-        current = _read_local_version()
+        self._update_version = version
+        current = _read_local_version() or "unknown"
+        print(f"[update] NucLogic {version} is available (currently on: {current}).")
         self._update_label.setText(f"NucLogic {version} is available  (currently on: {current})")
         if html_url:
             self._release_notes_html_url = html_url
@@ -177,7 +187,7 @@ class MainWindow(QMainWindow):
     def _install_update(self):
         self._install_btn.setEnabled(False)
         self._update_label.setText("Downloading…")
-        self._updater = Updater(self._update_url)
+        self._updater = Updater(self._update_url, self._update_version)
         self._updater.progress.connect(self._update_label.setText)
         self._updater.finished.connect(self._on_update_finished)
         self._updater.error.connect(self._on_update_error)

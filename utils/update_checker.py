@@ -9,9 +9,25 @@ _REPO = "SebastianVanDijk/organoid_segmenter"
 _API_URL = f"https://api.github.com/repos/{_REPO}/releases/latest"
 
 
+def _version_path():
+    return _PROJECT_ROOT / "miscellaneous" / "version.txt"
+
+
 def _read_local_version():
-    p = _PROJECT_ROOT / "miscellaneous" / "version.txt"
-    return p.read_text().strip() if p.exists() else "0.0.0"
+    # version.txt is a LOCAL runtime file (gitignored), not committed. It records
+    # which release tag is currently installed. Returns None when absent (a fresh
+    # install that has not been bootstrapped yet).
+    p = _version_path()
+    if not p.exists():
+        return None
+    return p.read_text().strip() or None
+
+
+def _write_local_version(version):
+    # Store the numeric version (no leading "v"), matching release tag comparison.
+    p = _version_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(str(version).strip().lstrip("v") + "\n")
 
 
 def _read_token():
@@ -29,7 +45,7 @@ def _parse_version(v):
 
 class UpdateChecker(QThread):
     update_available = Signal(str, str, str)   # (new_version, zipball_url, html_url)
-    up_to_date = Signal()
+    up_to_date = Signal(str)                    # (installed_version)
     check_failed = Signal(str)
 
     def run(self):
@@ -49,11 +65,17 @@ class UpdateChecker(QThread):
                 self.check_failed.emit("No tag_name in release response")
                 return
 
-            remote = _parse_version(tag)
-            local = _parse_version(_read_local_version())
-            if remote > local:
+            local = _read_local_version()
+            if local is None:
+                # Fresh install: adopt the current latest release as the baseline
+                # so we don't prompt an "update" to the version already installed.
+                _write_local_version(tag)
+                self.up_to_date.emit(tag.lstrip("v"))
+                return
+
+            if _parse_version(tag) > _parse_version(local):
                 self.update_available.emit(tag.lstrip("v"), zipball, html_url)
             else:
-                self.up_to_date.emit()
+                self.up_to_date.emit(local)
         except Exception as e:
             self.check_failed.emit(str(e))

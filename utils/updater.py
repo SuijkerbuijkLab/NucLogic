@@ -24,9 +24,10 @@ class Updater(QThread):
     finished = Signal()
     error = Signal(str)
 
-    def __init__(self, zipball_url, parent=None):
+    def __init__(self, zipball_url, version=None, parent=None):
         super().__init__(parent)
         self._url = zipball_url
+        self._version = version  # release tag being installed; written to version.txt
 
     def run(self):
         try:
@@ -99,6 +100,14 @@ class Updater(QThread):
             )
             if result.returncode != 0:
                 raise RuntimeError(f"pixi install failed:\n{result.stderr}")
+
+            # Record the installed version locally. version.txt is not part of the
+            # release archive (it is gitignored), so we write it from the tag we
+            # just installed — this is what stops the update prompt from recurring.
+            if self._version:
+                from utils.update_checker import _write_local_version
+
+                _write_local_version(self._version)
 
             shutil.rmtree(tmp, ignore_errors=True)
             self.finished.emit()

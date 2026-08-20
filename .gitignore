@@ -14,6 +14,8 @@ logs/
 .pixi/
 github_token.txt
 tools/
+# Local runtime file: records the installed release tag; written by the app, never committed.
+miscellaneous/version.txt
 models/*
 !models/sam2.1_hiera_s.yaml
 !models/sam2.1_hiera_small.pt
