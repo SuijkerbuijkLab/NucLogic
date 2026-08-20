@@ -587,21 +587,28 @@ class MainWindow(QMainWindow):
         )
         self.calculate_advanced_statistics_list.setMaximumHeight(180)
 
+        # NOTE: several entries (anisotropy, axis_medial_length, elongation,
+        # flatness, sphericity) are derived, voxel-size-scaled shape descriptors
+        # computed in utils/compute_shape_descriptors.py, not plain regionprops.
         advanced_property_items = [
+            "anisotropy",
             "area_bbox",
             "area_convex",
             "area_filled",
             "axis_major_length",
+            "axis_medial_length",
             "axis_minor_length",
             "centroid_local",
             "centroid_weighted",
             "centroid_weighted_local",
-            "coords_scaled",
             "coords",
+            "coords_scaled",
+            "elongation",
             "equivalent_diameter_area",
             "euler_number",
             "extent",
             "feret_diameter_max",
+            "flatness",
             "image",
             "image_convex",
             "image_filled",
@@ -621,6 +628,7 @@ class MainWindow(QMainWindow):
             "num_pixels",
             "slice",
             "solidity",
+            "sphericity",
         ]
 
         for item in advanced_property_items:
