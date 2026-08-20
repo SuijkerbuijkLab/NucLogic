@@ -9,7 +9,6 @@ import os
 os.environ.setdefault("QT_API", "pyside6")
 
 import shutil
-import torch
 from pathlib import Path
 if sys.platform == "win32":
     import winreg
@@ -67,7 +66,9 @@ class MainWindow(QMainWindow):
         self._set_icon()
         self._setup_ui()
         self._start_update_check()
-        self._check_gpu()
+        # GPU check is driven by _start_prewarm's background thread (which owns
+        # the torch import) so it doesn't block the window from appearing.
+        self._start_prewarm()
 
     def _set_icon(self):
         icon_path = Path(__file__).parent / "www" / "organoid_segmenter.ico"
@@ -99,10 +100,23 @@ class MainWindow(QMainWindow):
 
         return self._gpu_banner
 
-    def _check_gpu(self):
-        if not torch.cuda.is_available():
+    def _on_gpu_checked(self, available):
+        # Driven by PrewarmWorker.gpu_available (runs on the UI thread via the
+        # queued signal), so torch need not be imported before the window shows.
+        if not available:
             print("[gpu] No CUDA-capable GPU found. Running in CPU mode.")
             self._gpu_banner.setVisible(True)
+
+    # ── Background pre-warm ───────────────────────────────────────────────────
+
+    def _start_prewarm(self):
+        # Import heavy pipeline modules (incl. torch) in the background so the
+        # window shows quickly and Run/View start instantly. Kept on self so the
+        # thread isn't garbage-collected, and run at low priority so it never
+        # competes with the UI.
+        self._prewarm_worker = PrewarmWorker()
+        self._prewarm_worker.gpu_available.connect(self._on_gpu_checked)
+        self._prewarm_worker.start(QThread.Priority.LowPriority)
 
     # ── Update system ─────────────────────────────────────────────────────────
 
@@ -2736,6 +2750,62 @@ class ViewerWorker(QThread):
             self.error_occurred.emit(str(e))
 
 
+class PrewarmWorker(QThread):
+    """Import the pipeline's heavy modules in the background at app launch.
+
+    First-time import of cellpose (and, on the viewer path, napari) plus the
+    pipeline entry modules costs ~6s warm and far more on a cold cache. Doing it
+    here — while the user is still configuring — means the imports are already
+    cached in ``sys.modules`` by the time Run/View is clicked, so those handlers
+    start effectively instantly. Only importing happens here (no Qt widgets, no
+    napari.Viewer), which is safe off the main thread; every import is guarded so
+    a broken optional module can never crash startup.
+    """
+
+    # Heavy leaf modules plus pipeline entry points. Importing the entry points
+    # pulls in the rest of each dependency tree, so the whole pipeline import
+    # graph gets warmed without listing every module by hand.
+    _TARGETS = (
+        "cellpose.models",
+        "napari",
+        "napari.viewer",
+        "utils.load_model",
+        "main_functions.segment_organoid",
+        "main_functions.calculate_phenotypes",
+        "main_functions.crop_sample",
+        "main_functions.add_advanced_statistics",
+        "main_functions.add_phenotype_similarity",
+        "main_functions.split_phenotype_mask",
+    )
+
+    # Emitted once torch is imported here, carrying torch.cuda.is_available().
+    # Lets the GPU banner resolve off the UI-show critical path.
+    gpu_available = Signal(bool)
+
+    def run(self):
+        import importlib
+        import time
+
+        start = time.perf_counter()
+
+        # torch first: it is the heaviest single import and gates the GPU check.
+        try:
+            import torch
+
+            self.gpu_available.emit(bool(torch.cuda.is_available()))
+        except Exception as exc:
+            print(f"[prewarm] torch import failed: {type(exc).__name__}: {exc}")
+            self.gpu_available.emit(False)
+
+        for module_name in self._TARGETS:
+            try:
+                importlib.import_module(module_name)
+            except Exception as exc:
+                # A missing/broken optional module must not affect startup.
+                print(f"[prewarm] skipped {module_name}: {type(exc).__name__}: {exc}")
+        print(f"[prewarm] pipeline modules ready ({time.perf_counter() - start:.1f}s)")
+
+
 class SegmentationWorker(QThread):
     progress_updated = Signal(int)
     finished = Signal(float)
@@ -2831,6 +2901,10 @@ class SegmentationWorker(QThread):
 
     def run(self):
         try:
+            # These are pre-warmed at app launch (see PrewarmWorker); if that is
+            # still running, the import lock makes the lines below wait, so print
+            # first to avoid a silent gap before "Using CUDA for processing".
+            print("Preparing pipeline (loading libraries and model)...")
             from main_functions.segment_organoid import segment_organoid
             from utils.load_model import load_model
             from main_functions.calculate_phenotypes import calculate_phenotypes
