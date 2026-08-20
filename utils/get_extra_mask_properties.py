@@ -3,11 +3,14 @@ from skimage.measure import regionprops
 
 
 def get_extra_mask_properties(
-    mask, intensity_image=None, extra_props=None, channel_name=None
+    mask, intensity_image=None, extra_props=None, channel_name=None, voxel_size=None
 ):
 
-    # Get the properties of every mask in the image
-    props = regionprops(mask, intensity_image=intensity_image)
+    # Get the properties of every mask in the image. Passing ``spacing`` makes
+    # all spatial properties (lengths, volumes, positions, moments) come out in
+    # physical units; dimensionless ratios, voxel counts, and intensities are
+    # unaffected by it.
+    props = regionprops(mask, intensity_image=intensity_image, spacing=voxel_size)
     extra_props = extra_props or []
 
     # Compatibility aliases for renamed properties across scikit-image versions.

@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 import tifffile
 from utils.get_extra_mask_properties import get_extra_mask_properties
+from utils.compute_shape_descriptors import (
+    compute_shape_descriptors,
+    DERIVED_SHAPE_DESCRIPTORS,
+)
 from utils.find_input_file import find_input_file
 from utils.expand_mask import expand_mask_3d
 from utils.get_time_interval import get_time_interval
@@ -83,7 +87,15 @@ def add_advanced_statistics(
         return measured
 
     intensity_props = [p for p in extra_props if _is_intensity_property(p)]
-    shape_props = [p for p in extra_props if not _is_intensity_property(p)]
+    non_intensity_props = [p for p in extra_props if not _is_intensity_property(p)]
+    # Derived, voxel-size-scaled descriptors are computed separately from the
+    # generic getattr-based regionprops path (they are not regionprops attrs).
+    derived_shape_props = [
+        p for p in non_intensity_props if p in DERIVED_SHAPE_DESCRIPTORS
+    ]
+    shape_props = [
+        p for p in non_intensity_props if p not in DERIVED_SHAPE_DESCRIPTORS
+    ]
 
     properties_file = f"{os.path.basename(input_directory)}_properties.tsv"
     if properties_file not in os.listdir(input_directory):
@@ -271,8 +283,17 @@ def add_advanced_statistics(
 
         # Add non-intensity/shape props once per timepoint.
         if shape_props:
-            shape_df = get_extra_mask_properties(mask_3d, extra_props=shape_props)
+            shape_df = get_extra_mask_properties(
+                mask_3d, extra_props=shape_props, voxel_size=voxel_size
+            )
             time_props = _merge_overwrite(time_props, shape_df, key="label")
+
+        # Add derived, voxel-size-scaled shape descriptors once per timepoint.
+        if derived_shape_props:
+            descriptor_df = compute_shape_descriptors(
+                mask_3d, voxel_size, derived_shape_props
+            )
+            time_props = _merge_overwrite(time_props, descriptor_df, key="label")
 
         # Add intensity-dependent props for each channel as both raw and background-subtracted.
         if intensity_props:
@@ -285,6 +306,7 @@ def add_advanced_statistics(
                     intensity_image=frame[ch_idx],
                     extra_props=intensity_props,
                     channel_name=f"{channel_name}_{region_tag}_raw",
+                    voxel_size=voxel_size,
                 )
                 time_props = _merge_overwrite(time_props, raw_intensity_df, key="label")
 
@@ -294,6 +316,7 @@ def add_advanced_statistics(
                     intensity_image=offset_ch,
                     extra_props=intensity_props,
                     channel_name=f"{channel_name}_{region_tag}_background_subtracted",
+                    voxel_size=voxel_size,
                 )
                 time_props = _merge_overwrite(
                     time_props, bgsub_intensity_df, key="label"
