@@ -146,6 +146,11 @@ class MainWindow(QMainWindow):
         self._install_btn.clicked.connect(self._install_update)
         row.addWidget(self._install_btn)
 
+        self._restart_btn = QPushButton("Restart now")
+        self._restart_btn.setVisible(False)
+        self._restart_btn.clicked.connect(self._restart_app)
+        row.addWidget(self._restart_btn)
+
         dismiss_btn = QPushButton("✕")
         dismiss_btn.setFixedWidth(28)
         dismiss_btn.clicked.connect(lambda: self._update_banner.setVisible(False))
@@ -195,13 +200,55 @@ class MainWindow(QMainWindow):
         self._updater.start()
 
     def _on_update_finished(self):
-        self._update_label.setText(
-            "Update complete — please restart NucLogic to apply it."
-        )
+        self._update_label.setText("Update complete — restart to apply it.")
+        self._install_btn.setVisible(False)
+        self._release_notes_btn.setVisible(False)
+        self._restart_btn.setVisible(True)
 
     def _on_update_error(self, msg):
         self._update_label.setText(f"Update failed: {msg}")
         self._install_btn.setEnabled(True)
+
+    def _restart_app(self):
+        """Relaunch through the same launcher script, then close this instance.
+
+        Going through NucLogic.bat / Linux_NucLogic.sh rather than re-executing
+        the current interpreter matters after an update: the launcher re-enters
+        the pixi environment, which may have just been rebuilt.
+        """
+        import subprocess
+
+        if getattr(self, "worker", None) is not None and self.worker.isRunning():
+            self._update_label.setText(
+                "Segmentation is still running — restart once it has finished."
+            )
+            return
+
+        self._restart_btn.setEnabled(False)
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        fallback = [sys.executable, os.path.join(project_root, "PySide6", "launcher.py")]
+
+        try:
+            if sys.platform == "win32":
+                launcher = os.path.join(project_root, "NucLogic.bat")
+                command = (
+                    ["cmd", "/c", "start", "", launcher]
+                    if os.path.exists(launcher)
+                    else fallback
+                )
+                subprocess.Popen(command, cwd=project_root)
+            else:
+                launcher = os.path.join(project_root, "Linux_NucLogic.sh")
+                command = ["bash", launcher] if os.path.exists(launcher) else fallback
+                subprocess.Popen(command, cwd=project_root, start_new_session=True)
+        except Exception as e:
+            self._restart_btn.setEnabled(True)
+            self._update_label.setText(
+                f"Could not restart automatically ({e}) — please close and reopen NucLogic."
+            )
+            return
+
+        QApplication.quit()
 
     # ── End update system ─────────────────────────────────────────────────────
 

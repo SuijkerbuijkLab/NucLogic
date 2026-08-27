@@ -22,3 +22,4 @@ models/*
 !models/sam2.1_hiera_small.pt
 !models/2d_high_quality_model
 !models/2d_low_quality_model
+utils/load_image.py

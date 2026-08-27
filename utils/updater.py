@@ -18,6 +18,72 @@ def _read_token():
 # Files/folders that must never be overwritten by an update
 _PRESERVE = {".pixi", "tools", "github_token.txt", "logs", "models"}
 
+_LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+
+
+def _dependency_names(pixi_toml):
+    import tomllib
+
+    with open(pixi_toml, "rb") as f:
+        data = tomllib.load(f)
+    return set(data.get("dependencies", {})) | set(data.get("pypi-dependencies", {}))
+
+
+def _dependencies_removed(new_toml, current_toml):
+    """True when the update drops or renames a package.
+
+    Only then can stale files be left behind that a plain `pixi install` will
+    not clear. Added packages need no rebuild.
+    """
+    if not new_toml.exists() or not current_toml.exists():
+        return False
+    try:
+        return bool(_dependency_names(current_toml) - _dependency_names(new_toml))
+    except Exception:
+        return True
+
+
+def _is_lfs_pointer(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read(len(_LFS_POINTER_PREFIX)) == _LFS_POINTER_PREFIX
+    except OSError:
+        return False
+
+
+def _stash_lfs_pointer_targets(source_root, stash_dir):
+    """Move aside local files that the release would replace with LFS pointers.
+
+    GitHub zipballs carry the pointer text rather than the tracked content, so
+    copying them over a real file destroys it.
+    """
+    stashed = []
+    for item in source_root.rglob("*"):
+        relative = item.relative_to(source_root)
+        if relative.parts[0] in _PRESERVE or not item.is_file():
+            continue
+        if not _is_lfs_pointer(item):
+            continue
+
+        local = _PROJECT_ROOT / relative
+        if not local.is_file() or _is_lfs_pointer(local):
+            continue
+
+        target = stash_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(local), str(target))
+        stashed.append(relative)
+    return stashed
+
+
+def _restore_lfs_pointer_targets(stashed, stash_dir):
+    for relative in stashed:
+        destination = _PROJECT_ROOT / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            destination.unlink()
+        shutil.move(str(stash_dir / relative), str(destination))
+
 
 class Updater(QThread):
     progress = Signal(str)
@@ -53,6 +119,14 @@ class Updater(QThread):
             children = list(extract_dir.iterdir())
             source_root = children[0] if len(children) == 1 and children[0].is_dir() else extract_dir
 
+            # Decide this before the copy below overwrites the current pixi.toml.
+            needs_rebuild = _dependencies_removed(
+                source_root / "pixi.toml", _PROJECT_ROOT / "pixi.toml"
+            )
+
+            stash_dir = tmp / "preserved"
+            stashed = _stash_lfs_pointer_targets(source_root, stash_dir)
+
             # --- Copy over project root, skipping preserved paths ---
             self.progress.emit("Applying update…")
             for item in source_root.iterdir():
@@ -66,21 +140,9 @@ class Updater(QThread):
                 else:
                     shutil.copy2(item, dest)
 
-            # --- Detect whether pixi.toml changed ---
-            new_pixi_toml = source_root / "pixi.toml"
-            current_pixi_toml = _PROJECT_ROOT / "pixi.toml"
-            pixi_toml_changed = (
-                new_pixi_toml.exists()
-                and (
-                    not current_pixi_toml.exists()
-                    or new_pixi_toml.read_bytes() != current_pixi_toml.read_bytes()
-                )
-            )
+            _restore_lfs_pointer_targets(stashed, stash_dir)
 
-            if pixi_toml_changed:
-                # Wipe the old environment so pixi rebuilds cleanly.
-                # Stale packages (e.g. pyside2 after a pyside6 migration) would
-                # otherwise remain and cause crashes.
+            if needs_rebuild:
                 self.progress.emit("Dependencies changed — clearing old environment…")
                 envs_dir = _PROJECT_ROOT / ".pixi" / "envs"
                 if envs_dir.exists():
