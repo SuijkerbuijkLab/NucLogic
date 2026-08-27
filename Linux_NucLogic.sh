@@ -4,6 +4,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIXI_LOCAL="$SCRIPT_DIR/tools/pixi"
 
+# Keep the package cache in the install folder, matching NucLogic.bat, so an
+# environment rebuild reuses local packages instead of re-downloading them.
+export PIXI_CACHE_DIR="$SCRIPT_DIR/pixi_cache"
+
 if [ -f "$PIXI_LOCAL" ]; then
     PIXI="$PIXI_LOCAL"
 elif command -v pixi &>/dev/null; then

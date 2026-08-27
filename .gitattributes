@@ -1,3 +1,12 @@
+# Line-ending policy: LF in the repository and LF on disk on every platform.
+# This overrides each user's core.autocrlf, so a Windows clone and the files
+# extracted by the in-app updater (which come from a GitHub zipball, always LF)
+# agree — otherwise git reports every touched file as modified with an empty diff.
+* text=auto eol=lf
+*.bat text eol=crlf
+
+# Binary / LFS tracked files: -text keeps them out of any line-ending conversion.
+# These lines must stay AFTER the policy above (later rules win).
 *.pt filter=lfs diff=lfs merge=lfs -text
 models/sam2.1_hiera_s.yaml filter=lfs diff=lfs merge=lfs -text
 models/2d_high_quality_model filter=lfs diff=lfs merge=lfs -text
