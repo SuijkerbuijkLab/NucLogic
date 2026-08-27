@@ -12,6 +12,7 @@ env/
 logs/
 .claude/
 .pixi/
+pixi_cache/
 github_token.txt
 tools/
 # Local runtime file: records the installed release tag; written by the app, never committed.

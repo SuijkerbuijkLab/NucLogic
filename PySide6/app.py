@@ -22,6 +22,7 @@ matplotlib.use("qtagg")
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 from utils.file_to_folder import file_to_folder
+from utils.load_model import CELLPOSE_SAM_MODEL_NAME
 from utils.tiff_metadata import load_tiff_movie_and_metadata
 from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
@@ -1425,7 +1426,8 @@ class MainWindow(QMainWindow):
         model_setting_layout.addWidget(self._info_label(
             "Pretrained 2D Cellpose segmentation models used to detect nuclei in each Z-slice.\n"
             "The slices are then stitched into a full 3D segmentation.\n"
-            "You can upload a custom Cellpose model trained on your own data."
+            "You can upload a custom Cellpose model trained on your own data,\n"
+            f"or use the built-in '{CELLPOSE_SAM_MODEL_NAME}' (always the last option)."
         ))
         model_setting_layout.addStretch()
         return model_setting_layout
@@ -1457,12 +1459,15 @@ class MainWindow(QMainWindow):
         for display_name, full_path in model_entries:
             self.model_combo_box.addItem(display_name, full_path)
 
-        if model_entries:
-            if select_name:
-                idx = self.model_combo_box.findText(select_name)
-                self.model_combo_box.setCurrentIndex(idx if idx >= 0 else 0)
-            else:
-                self.model_combo_box.setCurrentIndex(0)
+        # The Cellpose-SAM foundation model always ships with the environment,
+        # so it is always offered as the last option.
+        self.model_combo_box.addItem(CELLPOSE_SAM_MODEL_NAME, CELLPOSE_SAM_MODEL_NAME)
+
+        if select_name:
+            idx = self.model_combo_box.findText(select_name)
+            self.model_combo_box.setCurrentIndex(idx if idx >= 0 else 0)
+        else:
+            self.model_combo_box.setCurrentIndex(0)
         self.model_combo_box.blockSignals(False)
 
     def _upload_custom_model(self):
@@ -1519,7 +1524,14 @@ class MainWindow(QMainWindow):
         return channel_names, channel_types
 
     def get_model_path(self):
-        """Get the model path based on selected model"""
+        """Get the model path based on selected model.
+
+        Returns the sentinel CELLPOSE_SAM_MODEL_NAME when the built-in
+        Cellpose-SAM foundation model is selected (it has no file on disk).
+        """
+        if self.model_combo_box.currentText() == CELLPOSE_SAM_MODEL_NAME:
+            return CELLPOSE_SAM_MODEL_NAME
+
         model_path = self.model_combo_box.currentData()
         if model_path and os.path.exists(model_path):
             return model_path
