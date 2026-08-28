@@ -1,14 +1,12 @@
 import os
-import tifffile
-from imaris_ims_file_reader import ims
 from utils.find_input_file import find_input_file
-from utils.get_time_interval import get_time_interval
 from utils.max_project import max_project
 from utils.crop_fixed import crop_fixed
 from utils.crop import crop
+from utils.load_image import ims_acquisition_start, load_image
 from utils.save_as_ims import save_as_ims
+from utils.save_as_tiff import save_as_tiff
 import numpy as np
-from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 
 def crop_sample(
@@ -51,21 +49,9 @@ def crop_sample(
     # Get what the file name is without the extension to use for new file generation
     name = os.path.basename(input_file).split(".")[0]
 
-    # Get metadata of the time interval of the movie
-    metadata_missing = False
-    if input_file.endswith(".ims"):
-        time_interval = get_time_interval(input_file)
-        loaded_movie = ims(input_file)
-        voxel_size = loaded_movie.resolution
-        if voxel_size is None:
-            metadata_missing = True
-            voxel_size = (1.0, 1.0, 1.0)
-        while loaded_movie.ndim < 5:
-            loaded_movie = np.expand_dims(loaded_movie, axis=0)
-    else:
-        loaded_movie, voxel_size, time_interval, metadata_missing = (
-            load_tiff_movie_and_metadata(input_file)
-        )
+    # Lazy: only the shape is needed here, the crop functions re-open the file
+    # themselves to read pixels.
+    loaded_movie, voxel_size, time_interval, metadata_missing = load_image(input_file)
 
     voxel_size = _should_use_user_voxel(voxel_size, metadata_missing)
 
@@ -111,27 +97,20 @@ def crop_sample(
             ),
             voxel_size=voxel_size,
             time_interval=time_interval,
+            start_time=(
+                ims_acquisition_start(input_file)
+                if input_file.endswith(".ims")
+                else None
+            ),
         )
     elif save_as == ".tif":
         # Save this final cropped frame in the output folder as tif
-        tifffile.imwrite(
+        save_as_tiff(
             os.path.join(os.path.dirname(input_file), f"{name}_cropped.tif"),
             cropped_movie,
-            bigtiff=True,
-            imagej=True,
-            resolution=(
-                1 / voxel_size[2],
-                1 / voxel_size[1],
-            ),
-            metadata={
-                "unit": "um",
-                "axes": "TZCYX",
-                "spacing": voxel_size[0],
-                "finterval": time_interval,
-                "tunit": "h",
-            },
-            compression="zlib",
-            compressionargs={"level": 8},
+            "TZCYX",
+            voxel_size,
+            time_interval,
         )
 
     return True

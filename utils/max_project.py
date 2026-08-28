@@ -1,73 +1,35 @@
 import os
 
 import numpy as np
-import tifffile
-from imaris_ims_file_reader.ims import ims
 from alive_progress import alive_bar
 
-from utils.tiff_metadata import _to_tczyx
+from utils.load_image import as_numpy, load_image
+from utils.save_as_tiff import save_as_tiff
 
 
 def max_project(file, name="nuclei"):
-    # Load in either the ims or tif file
-    if file.endswith(".ims"):
-        movie = ims(file)  # T,C,Z,Y,X
-        shape = movie.shape
+    movie, voxel_size, time_interval, _ = load_image(file)
+    T, C, _, Y, X = movie.shape
 
-        # Ensure shape has 5 dimensions by padding at the front
-        full_shape = shape
-        while len(full_shape) < 5:
-            full_shape = (1,) + full_shape
+    max_data = np.zeros((T, C, Y, X), dtype=movie.dtype)
 
-        output_shape = (full_shape[0], full_shape[1], full_shape[3], full_shape[4])
-        max_data = np.zeros(output_shape, dtype=movie.dtype)
-        ndim_diff = 5 - movie.ndim
-
-        # IMS is HDF5-backed so each read triggers disk I/O — process one (T, C) at a time
-        with alive_bar(
-            full_shape[0] * full_shape[1], title="Generating Max Z projection"
-        ) as bar:
-            for t in range(full_shape[0]):
-                for c in range(full_shape[1]):
-                    idx = [t, c, slice(None), slice(None), slice(None)][ndim_diff:]
-                    z_stack = movie[tuple(idx)]  # Z,Y,X
-                    max_data[t, c] = np.max(z_stack, axis=0)
-                    bar()
-
-    elif file.endswith((".tif", ".tiff")):
-        # Read the axis meaning (TZYX / CZYX / TCZYX ...) without loading pixels,
-        # then memory-map the data (falling back to a full read if not contiguous).
-        with tifffile.TiffFile(file) as tif:
-            axes = tif.series[0].axes
-        try:
-            movie = tifffile.memmap(file, mode="r")
-        except ValueError:
-            movie = tifffile.imread(file)
-
-        # Normalize to T,C,Z,Y,X (views only -> memmap stays lazy).
-        movie = _to_tczyx(movie, axes)
-        shape = movie.shape
-
-        # T,C,Z,Y,X -> max over Z (axis 2) -> T,C,Y,X
-        output_shape = (shape[0], shape[1], shape[3], shape[4])
-        max_data = np.zeros(output_shape, dtype=movie.dtype)
-
-        with alive_bar(shape[0], title="Generating Max Z projection") as bar:
-            for t in range(shape[0]):
-                # movie[t] is (C,Z,Y,X) — max over Z (axis 1) covers all channels
-                max_data[t] = np.max(movie[t], axis=1)
+    # One (T, C) Z-stack per read, so a movie far larger than RAM still projects.
+    with alive_bar(T * C, title="Generating Max Z projection") as bar:
+        for t in range(T):
+            for c in range(C):
+                max_data[t, c] = np.max(as_numpy(movie[t, c]), axis=0)
                 bar()
 
     print(f"Saving max projection of shape {max_data.shape}")
 
     proj_XY_name = os.path.join(os.path.dirname(file), f"{name}_projXY.tif")
-    tifffile.imwrite(
+    # Z is projected away, so the file carries no Z calibration.
+    save_as_tiff(
         proj_XY_name,
         max_data,
-        imagej=True,
-        metadata={"axes": "TCYX"},
-        compression="zlib",
-        compressionargs={"level": 8},
+        "TCYX",
+        (1.0, voxel_size[1], voxel_size[2]),
+        time_interval,
     )
 
     return max_data

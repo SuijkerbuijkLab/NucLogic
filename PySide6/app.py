@@ -23,7 +23,9 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 from utils.file_to_folder import file_to_folder
 from utils.load_model import CELLPOSE_SAM_MODEL_NAME
-from utils.tiff_metadata import load_tiff_movie_and_metadata
+from utils.load_image import SUPPORTED_EXTENSIONS, is_supported, load_image
+from utils.split_positions import scan_directory, split_file
+from utils.merge_nd import merge_file, scan_directory as scan_nd_directory
 from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
 
@@ -47,6 +49,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QGridLayout,
     QProgressBar,
+    QMessageBox,
     QCheckBox,
     QSizePolicy,
     QScrollArea,
@@ -347,14 +350,17 @@ class MainWindow(QMainWindow):
         # Store samples in data structure
         self.samples_data = self._get_samples(dir_name)
         image_files = self._get_image_files(dir_name)
+        self.multiposition_files = self._scan_multiposition(dir_name)
+        self.nd_files = self._scan_nd(dir_name)
 
         # Display samples count
         self.load_data_layout_2.addWidget(
             QLabel(f"Found {len(self.samples_data)} samples")
         )
 
-        # Handle loose image files
-        if image_files:
+        # Handle loose image files. A .nd is not an image file in its own right,
+        # so it has to trigger this section too.
+        if image_files or self.nd_files:
             self._add_loose_files_section(dir_name, image_files)
 
         # Create list widgets (only first time)
@@ -403,26 +409,286 @@ class MainWindow(QMainWindow):
 
     def _get_image_files(self, dir_name):
         """Get list of image files in root directory"""
-        return [
-            f for f in os.listdir(dir_name) if f.endswith((".tif", ".tiff", ".ims"))
-        ]
+        return [f for f in os.listdir(dir_name) if is_supported(f)]
+
+    def _scan_multiposition(self, dir_name):
+        """Loose files holding several stage positions. Reads headers only."""
+        try:
+            return scan_directory(dir_name)
+        except Exception as error:
+            print(f"Warning: could not scan for multiposition files: {error}")
+            return []
+
+    def _scan_nd(self, dir_name):
+        """Loose MetaMorph .nd acquisitions. Reads the .nd text and one header."""
+        try:
+            return scan_nd_directory(dir_name)
+        except Exception as error:
+            print(f"Warning: could not scan for .nd acquisitions: {error}")
+            return []
 
     def _add_loose_files_section(self, dir_name, image_files):
         """Add section for handling loose image files"""
-        self.load_data_layout_2_1.addWidget(
-            QLabel(
-                f"Found {len(image_files)} image files without a directory. "
-                "Create directories for them?"
+        multiposition = getattr(self, "multiposition_files", [])
+        nd_files = getattr(self, "nd_files", [])
+        multiposition_names = {entry.name for entry in multiposition}
+        ordinary = [f for f in image_files if f not in multiposition_names]
+        pending = [entry for entry in multiposition if not entry.already_split]
+        already_split = [entry for entry in multiposition if entry.already_split]
+        pending_nd = [entry for entry in nd_files if not entry.already_merged]
+        merged_nd = [entry for entry in nd_files if entry.already_merged]
+
+        for entry in already_split:
+            self.load_data_layout_2.addWidget(
+                QLabel(
+                    f"{entry.name} is already split into {entry.positions} "
+                    f"position samples."
+                )
             )
-        )
+        for entry in merged_nd:
+            self.load_data_layout_2.addWidget(
+                QLabel(f"{entry.name} has already been merged into a sample.")
+            )
+
+        if not ordinary and not pending and not pending_nd:
+            return
+
+        message = []
+        if ordinary:
+            message.append(f"Found {len(ordinary)} image files without a directory.")
+        for entry in pending:
+            message.append(
+                f"{entry.name} contains {entry.positions} stage positions."
+            )
+        for entry in pending_nd:
+            message.append(
+                f"{entry.name} is a MetaMorph acquisition split across "
+                f"{len(entry.sources) - 1} stack files."
+            )
+        message.append("Create directories for them?")
+        self.load_data_layout_2_1.addWidget(QLabel(" ".join(message)))
+
         create_button = QPushButton("Create directories")
         create_button.clicked.connect(lambda: self._handle_create_dirs(dir_name))
         self.load_data_layout_2_1.addWidget(create_button)
         self.load_data_layout_2.addLayout(self.load_data_layout_2_1)
 
     def _handle_create_dirs(self, dir_name):
-        file_to_folder(dir_name)
+        try:
+            self._create_dirs(dir_name)
+        except Exception as error:
+            # A Qt slot must not let an exception escape: it would take the
+            # whole application down rather than reporting the problem.
+            QMessageBox.critical(
+                self,
+                "Could not create directories",
+                f"{type(error).__name__}: {error}",
+            )
+            self.update_file_info(dir_name)
+
+    def _create_dirs(self, dir_name):
+        pending = [
+            entry
+            for entry in getattr(self, "multiposition_files", [])
+            if not entry.already_split
+        ]
+        pending_nd = [
+            entry for entry in getattr(self, "nd_files", []) if not entry.already_merged
+        ]
+
+        # Multiposition files are left alone by file_to_folder, and .nd/.STK are
+        # not image formats it recognises, so this only deals with the ordinary
+        # loose files either way. The scan already knows the position counts, so
+        # pass them rather than re-opening every file.
+        failures = file_to_folder(
+            dir_name,
+            {entry.name: entry.positions
+             for entry in getattr(self, "multiposition_files", [])},
+        )
+        if failures:
+            self._report_move_failures(failures)
+
+        if (pending or pending_nd) and self._confirm_conversion(pending, pending_nd):
+            self._start_split(dir_name, pending, pending_nd)
+            return
+
         self.update_file_info(dir_name)
+
+    def _report_move_failures(self, failures):
+        """Tell the user which files stayed put, and why.
+
+        On Windows a file cannot be moved while anything still has it open, and
+        the usual culprit is the sample still being displayed in the viewer.
+        """
+        listed = "\n".join(f"    {name}" for name, _ in failures)
+        QMessageBox.warning(
+            self,
+            "Some files could not be moved",
+            f"{len(failures)} file(s) are open in another program and were left "
+            f"where they are:\n\n{listed}\n\n"
+            f"If one of them is still open in the napari viewer, close that "
+            f"window and press Create directories again. Every other file was "
+            f"moved into its own folder.",
+        )
+
+    def _confirm_conversion(self, pending, pending_nd):
+        """Ask before spending the disk and time a conversion costs."""
+        estimate_gb = sum(
+            entry.estimated_bytes for entry in list(pending) + list(pending_nd)
+        ) / 1e9
+
+        lines = []
+        if pending:
+            positions = sum(entry.positions for entry in pending)
+            lines.append(
+                f"{len(pending)} file(s) contain more than one stage position. "
+                f"Each position becomes its own sample ({positions} in total). "
+                f"Without splitting, only the first position of each is analysed."
+            )
+            lines += [
+                f"    {entry.name} — {entry.positions} positions" for entry in pending
+            ]
+        if pending_nd:
+            if lines:
+                lines.append("")
+            lines.append(
+                f"{len(pending_nd)} MetaMorph acquisition(s) are split across "
+                f"separate stack files. Each becomes one sample with its "
+                f"wavelengths merged into channels."
+            )
+            lines += [
+                f"    {entry.name} — {len(entry.channel_names)} channels "
+                f"({', '.join(entry.channel_names)})"
+                for entry in pending_nd
+            ]
+
+        answer = QMessageBox.question(
+            self,
+            "Convert files into samples?",
+            "\n".join(lines)
+            + f"\n\nThis writes roughly {estimate_gb:.1f} GB of new files. "
+            f"The originals are kept, and you will be asked afterwards whether "
+            f"to delete them.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        return answer == QMessageBox.Yes
+
+    def _start_split(self, dir_name, pending, pending_nd=()):
+        self._clear_layout(self.load_data_layout_2_1)
+
+        self.split_label = QLabel("Preparing…")
+        self.split_progress = QProgressBar()
+        self.split_progress.setRange(0, 100)
+        self.split_cancel_btn = QPushButton("Cancel")
+        self.split_cancel_btn.clicked.connect(self._cancel_split)
+
+        self.load_data_layout_2_1.addWidget(self.split_label)
+        self.load_data_layout_2_1.addWidget(self.split_progress)
+        self.load_data_layout_2_1.addWidget(self.split_cancel_btn)
+        self.load_data_layout_2.addLayout(self.load_data_layout_2_1)
+
+        jobs = [(entry.path, split_file) for entry in pending]
+        # merge_file returns one folder; the worker collects lists either way.
+        jobs += [
+            (entry.path,
+             lambda path, progress, should_stop:
+                 [f for f in [merge_file(path, progress, should_stop)] if f])
+            for entry in pending_nd
+        ]
+
+        self.split_worker = SampleConversionWorker(jobs)
+        self.split_worker.progress_updated.connect(self.split_progress.setValue)
+        self.split_worker.status_changed.connect(self.split_label.setText)
+        self.split_worker.error_occurred.connect(
+            lambda message: self._on_split_error(dir_name, message)
+        )
+        self.split_worker.finished_converting.connect(
+            lambda written: self._on_split_finished(
+                dir_name, list(pending) + list(pending_nd), written
+            )
+        )
+        self.split_worker.start()
+
+    def _cancel_split(self):
+        if getattr(self, "split_worker", None):
+            self.split_worker.stop()
+        self.split_cancel_btn.setEnabled(False)
+        self.split_label.setText("Finishing the current position…")
+
+    def _on_split_error(self, dir_name, message):
+        QMessageBox.critical(self, "Splitting failed", message)
+        self.update_file_info(dir_name)
+
+    def _on_split_finished(self, dir_name, pending, written):
+        cancelled = self.split_worker.was_cancelled()
+
+        if cancelled:
+            done = sum(len(folders) for folders in written.values())
+            QMessageBox.information(
+                self,
+                "Conversion stopped",
+                f"Stopped after writing {done} sample(s). What was already "
+                f"written is usable; run this again to finish the rest.",
+            )
+        else:
+            self._offer_original_deletion(pending, written)
+
+        self.update_file_info(dir_name)
+
+    def _offer_original_deletion(self, pending, written):
+        """Offer to delete sources, but only ones that fully converted.
+
+        Deleting acquisition data cannot be undone, so a file qualifies only
+        once every sample it should produce has been written and re-read. For a
+        .nd that means deleting its stack files too, not just the index.
+        """
+        complete = [
+            entry
+            for entry in pending
+            if len(written.get(entry.path, [])) == self._expected_samples(entry)
+        ]
+        if not complete:
+            return
+
+        # A .nd lists its stacks; anything else is a single file.
+        removable = {
+            entry: list(getattr(entry, "sources", [entry.path])) for entry in complete
+        }
+        names = "\n".join(
+            f"    {entry.name}"
+            + (f" (and {len(files) - 1} stack files)" if len(files) > 1 else "")
+            for entry, files in removable.items()
+        )
+        answer = QMessageBox.question(
+            self,
+            "Delete the original files?",
+            f"Wrote {sum(len(written[e.path]) for e in complete)} sample(s) from "
+            f"{len(complete)} acquisition(s), and every one reads back "
+            f"correctly.\n\n{names}\n\n"
+            f"Delete the original file(s)? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        failed = []
+        for entry, files in removable.items():
+            for path in files:
+                try:
+                    os.remove(path)
+                except OSError as error:
+                    failed.append(f"{os.path.basename(path)}: {error}")
+        if failed:
+            QMessageBox.warning(
+                self, "Could not delete", "\n".join(failed)
+            )
+
+    @staticmethod
+    def _expected_samples(entry):
+        """How many sample folders a source should produce when it converts."""
+        return getattr(entry, "positions", 1)
 
     def _update_sample_lists(self):
         """Update both sample lists with data from self.samples_data"""
@@ -2329,6 +2595,40 @@ class MainWindow(QMainWindow):
         self.viewer_worker.error_occurred.connect(self._viewer_error)
         self.viewer_worker.start()
 
+    def _contrast_from_sample(self, channel_stack):
+        """Contrast limits and slider range for one channel of a (T, Z, Y, X) movie.
+
+        napari works these out itself, but on a lazy movie it only inspects a
+        single plane, which on a mostly-background plane collapses the range and
+        saturates the image. Reading one timepoint here is both correct and
+        cheap enough to keep the movie lazy.
+
+        Returns (contrast_limits, slider_range).
+        """
+        import numpy as np
+
+        from utils.load_image import as_numpy
+
+        timepoint = as_numpy(channel_stack[len(channel_stack) // 2])
+        # Thin out Z so a tall stack does not make the percentiles expensive.
+        step = max(1, timepoint.shape[0] // 8) if timepoint.ndim >= 3 else 1
+        sample = np.ravel(timepoint[::step])
+
+        data_max = float(sample.max()) if sample.size else 1.0
+
+        # Cropped movies are zeroed outside the organoid; those pixels are not
+        # background and would drag the black point down to 0.
+        signal = sample[sample > 0]
+        if signal.size == 0:
+            return (0.0, max(data_max, 1.0)), (0.0, max(data_max, 1.0))
+
+        background = float(np.percentile(signal, 5))
+        foreground = float(np.percentile(signal, 99.5))
+        if foreground <= background:
+            foreground = background + 1.0
+
+        return (background, foreground), (0.0, max(data_max, foreground))
+
     def _launch_napari_viewer(self, data):
         import napari
         import napari.viewer  # force lazy-loaded submodule to resolve before shiboken2 interferes
@@ -2355,14 +2655,22 @@ class MainWindow(QMainWindow):
                 seg_metadata["properties_path"] = properties_path
 
             for i, channel_name in enumerate(channel_names):
-                viewer.add_image(
-                    movie[:, i],
+                channel_stack = movie[:, i]
+                limits, value_range = self._contrast_from_sample(channel_stack)
+                layer = viewer.add_image(
+                    channel_stack,
                     name=channel_name,
                     colormap=channel_colors[i].lower(),
                     visible=True,
                     blending="additive",
                     scale=voxel_size,
+                    contrast_limits=limits,
                 )
+                # Slider spans the full intensity range; the handles start at
+                # background..foreground. Limits are re-applied because widening
+                # the range can reset them.
+                layer.contrast_limits_range = value_range
+                layer.contrast_limits = limits
             if show_segmentation and segmentation is not None:
                 if len(segmentation.shape) > 4:
                     for j in range(segmentation.shape[1]):
@@ -2730,20 +3038,20 @@ class ViewerWorker(QThread):
             for sample in self.selected:
 
                 def _file_priority(f):
-                    if f.endswith("_cropped.ims"):
+                    lowered = f.lower()
+                    if lowered.endswith("_cropped.ims"):
                         return 0
-                    if f.endswith("_cropped.tif"):
+                    if lowered.endswith("_cropped.tif"):
                         return 1
-                    if f.endswith(".ims"):
+                    if lowered.endswith(".ims"):
                         return 2
-                    if f.endswith(".tif"):
-                        return 3  # plain .tif
+                    return 3  # any other readable format
 
                 input_files = sorted(
                     [
                         f
                         for f in os.listdir(os.path.join(self.base_path, sample))
-                        if f.endswith(("_cropped.ims", "_cropped.tif", ".ims", ".tif"))
+                        if is_supported(f)
                     ],
                     key=_file_priority,
                 )
@@ -2752,13 +3060,11 @@ class ViewerWorker(QThread):
 
                 print(input_file)
 
-                if input_file and input_file.endswith(".ims"):
-                    movie = ims(os.path.join(self.base_path, sample, input_file))
-                    voxel_size = movie.resolution
-                else:
-                    movie, voxel_size, _, _ = load_tiff_movie_and_metadata(
-                        os.path.join(self.base_path, sample, input_file)
-                    )
+                # Lazy: napari reads slices on demand, so opening a sample in the
+                # viewer never pulls the whole movie into RAM.
+                movie, voxel_size, _, _ = load_image(
+                    os.path.join(self.base_path, sample, input_file)
+                )
 
                 print(voxel_size)
                 print(f"movie {movie.shape}")
@@ -2873,6 +3179,58 @@ class PrewarmWorker(QThread):
                 # A missing/broken optional module must not affect startup.
                 print(f"[prewarm] skipped {module_name}: {type(exc).__name__}: {exc}")
         print(f"[prewarm] pipeline modules ready ({time.perf_counter() - start:.1f}s)")
+
+
+class SampleConversionWorker(QThread):
+    """Build sample folders off the UI thread.
+
+    Handles both jobs the Load Data tab can start: splitting a multiposition
+    file into one sample per position, and merging a MetaMorph .nd acquisition
+    into a single sample. Cancelling is cooperative: the converters poll
+    should_stop between timepoints, drop the partially written file and return
+    whatever they finished.
+    """
+
+    progress_updated = Signal(int)
+    status_changed = Signal(str)
+    finished_converting = Signal(object)
+    error_occurred = Signal(str)
+
+    def __init__(self, jobs):
+        """jobs: (path, convert) pairs, convert(path, progress, should_stop)."""
+        super().__init__()
+        self.jobs = jobs
+        self.written = {}
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def was_cancelled(self):
+        return self._stop_requested
+
+    def run(self):
+        for number, (path, convert) in enumerate(self.jobs):
+            if self._stop_requested:
+                break
+
+            def progress(fraction, label, _number=number):
+                self.progress_updated.emit(
+                    int(100 * (_number + fraction) / len(self.jobs))
+                )
+                self.status_changed.emit(label)
+
+            try:
+                self.written[path] = convert(
+                    path, progress, lambda: self._stop_requested
+                )
+            except Exception as error:
+                self.error_occurred.emit(
+                    f"{os.path.basename(path)}: {type(error).__name__}: {error}"
+                )
+                return
+
+        self.finished_converting.emit(self.written)
 
 
 class SegmentationWorker(QThread):

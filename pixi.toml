@@ -1,6 +1,6 @@
 [workspace]
 name = "NucLogic"
-version = "0.0.4"
+version = "0.2.0"
 description = "NucLogic organoid segmentation desktop app"
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64"]
@@ -38,6 +38,7 @@ cellpose = "*"
 nd2 = "*"
 bioio = "*"
 bioio-czi = "*"
+bioio-lif = "*"
 
 # ── PyPI index configuration ──────────────────────────────────────────────────
 # PyTorch index listed first so uv prefers CUDA wheels over CPU-only PyPI builds

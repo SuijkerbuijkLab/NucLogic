@@ -4,7 +4,8 @@ import tifffile
 import numpy as np
 import pandas as pd
 from alive_progress import alive_it
-from imaris_ims_file_reader.ims import ims
+from utils.load_image import as_numpy, load_image
+from utils.save_as_tiff import save_as_tiff
 
 
 import os
@@ -13,13 +14,11 @@ import sys
 from utils.segment import segment
 from utils.stitch_3d import stitch_3d
 from utils.properties_mask import properties_mask
-from utils.get_time_interval import get_time_interval
 from utils.find_input_file import find_input_file
 from utils.compensate_voxel_size import compensate_voxel_size
 from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
 from utils.expand_mask import expand_mask_3d
-from utils.tiff_metadata import load_tiff_movie_and_metadata
 
 
 def extract_frame_number(filename):
@@ -89,26 +88,9 @@ def segment_organoid(
         input_file = find_input_file(input_directory)
         name = os.path.basename(input_file).split(".")[0]
 
-    # Get metadata of the time interval of the movie
-    metadata_missing = False
-    if input_file.endswith(".ims"):
-        time_interval = get_time_interval(input_file)
-        loaded_movie = ims(input_file)  # TCZXY
-        while loaded_movie.ndim < 5:
-            loaded_movie = np.expand_dims(loaded_movie, axis=0)
-        voxel_size = loaded_movie.resolution
-        if voxel_size is None:
-            metadata_missing = True
-            voxel_size = (1.0, 1.0, 1.0)
-    elif input_file.endswith(".tif") or input_file.endswith(".tiff"):
-        loaded_movie, voxel_size, time_interval, metadata_missing = (
-            load_tiff_movie_and_metadata(input_file)
-        )
-
-    else:
-        raise ValueError(
-            "Unsupported file format in sample directory. Please provide a .tif, .tiff, or .ims file."
-        )
+    # Lazy: timepoints are materialised one at a time inside the loop below, so
+    # a movie far larger than RAM can be segmented.
+    loaded_movie, voxel_size, time_interval, metadata_missing = load_image(input_file)
 
     voxel_size = _resolve_voxel_size(voxel_size, metadata_missing)
 
@@ -120,7 +102,8 @@ def segment_organoid(
     for timepoint in alive_it(
         range(loaded_movie.shape[0]), title="Segmenting organoid"
     ):
-        frame = loaded_movie[timepoint]
+        # Read this timepoint once; everything below works on real numpy.
+        frame = as_numpy(loaded_movie[timepoint])
         if frame.ndim != 4:  # If no channel dimension, add one
             frame = np.expand_dims(frame, axis=0)
 
@@ -184,28 +167,15 @@ def segment_organoid(
         if save_frames:
             frames_dir = os.path.join(input_directory, "frames")
             os.makedirs(frames_dir, exist_ok=True)
-            frame_czyx = loaded_movie[timepoint]  # CZYX
+            # Reuse the frame already read above instead of hitting disk again.
             # CZYX -> TCZYX -> TZCYX for tifffile
-            frame_tzcyx = np.transpose(
-                np.expand_dims(frame_czyx, axis=0), (0, 2, 1, 3, 4)
-            )
-            tifffile.imwrite(
+            frame_tzcyx = np.transpose(np.expand_dims(frame, axis=0), (0, 2, 1, 3, 4))
+            save_as_tiff(
                 os.path.join(frames_dir, f"Frame-{timepoint}.tif"),
                 frame_tzcyx,
-                bigtiff=True,
-                resolution=(
-                    1 / voxel_size[2],
-                    1 / voxel_size[1],
-                ),
-                metadata={
-                    "unit": "um",
-                    "axes": "TZCYX",
-                    "spacing": voxel_size[0],
-                    "finterval": time_interval,
-                    "tunit": "h",
-                },
-                compression="zlib",
-                compressionargs={"level": 8},
+                "TZCYX",
+                voxel_size,
+                time_interval,
             )
 
         if save_segmentation:
@@ -213,23 +183,12 @@ def segment_organoid(
             os.makedirs(seg_dir, exist_ok=True)
             # segmented_stack_stitched is ZYX; add T and C dims -> TZCYX
             seg_tzcyx = segmented_stack_stitched[np.newaxis, :, np.newaxis, :, :]
-            tifffile.imwrite(
+            save_as_tiff(
                 os.path.join(seg_dir, f"Frame-{timepoint}_segmented.tif"),
                 seg_tzcyx,
-                bigtiff=True,
-                resolution=(
-                    1 / voxel_size[2],
-                    1 / voxel_size[1],
-                ),
-                metadata={
-                    "unit": "um",
-                    "axes": "TZCYX",
-                    "spacing": voxel_size[0],
-                    "finterval": time_interval,
-                    "tunit": "h",
-                },
-                compression="zlib",
-                compressionargs={"level": 8},
+                "TZCYX",
+                voxel_size,
+                time_interval,
             )
 
         # Get properties of the masked nuclei, such as volume and location of every cell
@@ -297,40 +256,22 @@ def segment_organoid(
     segmented_movie = np.stack(segmented_movie, axis=0)
     print("Segmented movie shape (T, Z, Y, X):", segmented_movie.shape)
 
-    tifffile.imwrite(
+    save_as_tiff(
         os.path.join(input_directory, f"{name}_segmented.tif"),
         segmented_movie,
-        bigtiff=True,
-        imagej=True,
-        resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
-        metadata={
-            "unit": "um",
-            "axes": "TZYX",
-            "spacing": voxel_size[0],
-            "finterval": time_interval,
-            "tunit": "h",
-        },
-        compression="zlib",
-        compressionargs={"level": 8},
+        "TZYX",
+        voxel_size,
+        time_interval,
     )
 
     if save_measurement_mask and measure_region != "nuclei" and measurement_mask_movie:
         measurement_mask_movie = np.stack(measurement_mask_movie, axis=0)
-        tifffile.imwrite(
+        save_as_tiff(
             os.path.join(input_directory, f"{name}_segmented_{region_tag}.tif"),
             measurement_mask_movie,
-            bigtiff=True,
-            imagej=True,
-            resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
-            metadata={
-                "unit": "um",
-                "axes": "TZYX",
-                "spacing": voxel_size[0],
-                "finterval": time_interval,
-                "tunit": "h",
-            },
-            compression="zlib",
-            compressionargs={"level": 8},
+            "TZYX",
+            voxel_size,
+            time_interval,
         )
 
     # Convert the data from all frames to a pandas data frame
