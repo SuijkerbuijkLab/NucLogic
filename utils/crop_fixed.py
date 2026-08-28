@@ -5,13 +5,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.ndimage as ndimage
-import tifffile
 from esda.moran import Moran
-from imaris_ims_file_reader.ims import ims
 from libpysal.weights import KNN
 from skimage.filters import threshold_triangle 
 
 from .offset_image import offset_image
+from utils.load_image import as_numpy, load_image
+from utils.save_as_tiff import save_as_tiff
 
 
 def crop_fixed(
@@ -89,17 +89,18 @@ def crop_fixed(
         # Apply mask to original projXY
         organoid_only = np.where(selected_mask > 0, original_projXY, 0)
 
-    # Save this tracked movie to the output folder
-    tifffile.imwrite(
-        os.path.join(
-            os.path.dirname(input_file),
-            f"{name}_projXY_tracked.tif",
-        ),
+    # Load the input image; load_image normalises every format to T,C,Z,Y,X.
+    movie_tczyx, voxel_size, time_interval, _ = load_image(input_file)
+    print(f"Original movie shape: {movie_tczyx.shape}")
+
+    # Save this tracked movie to the output folder. Z is projected away, so the
+    # file carries no Z calibration.
+    save_as_tiff(
+        os.path.join(os.path.dirname(input_file), f"{name}_projXY_tracked.tif"),
         organoid_only,
-        imagej=True,
-        metadata={"axes": "TCYX"},
-        compression="zlib",
-        compressionargs={"level": 8},
+        "TCYX",
+        (1.0, voxel_size[1], voxel_size[2]),
+        time_interval,
     )
 
     # Find the XY coordinates of the mask
@@ -131,57 +132,13 @@ def crop_fixed(
             "No nuclei channel configured. Please mark at least one channel as 'Nuclei marker'."
         )
 
-    # Load in the input image, which is either a ims or tiff.
-    # Normalize to a consistent numpy layout: T,C,Z,Y,X.
-    if input_file.endswith(".ims"):
-        movie = ims(input_file)
-        movie = movie[:]
-        print(f"Original movie shape: {movie.shape}")
-    elif input_file.endswith(".tif"):
-        movie = tifffile.imread(input_file)  # usually T,Z,C,Y,X
-        print(f"Original movie shape: {movie.shape}")
-    else:
-        raise ValueError("Unsupported input file for fixed cropping.")
-
-    if movie.ndim == 5:
-        # Assume already T,C,Z,Y,X
-        movie_tczyx = movie
-    elif movie.ndim == 4:
-        # Could be C,Z,Y,X (fixed 3D) OR T,C,Y,X (fixed 2D time).
-        if all(ch < movie.shape[0] for ch in nuclei_list):
-            # C,Z,Y,X -> add singleton time axis
-            movie_tczyx = movie[np.newaxis, ...]
-        elif all(ch < movie.shape[1] for ch in nuclei_list):
-            # T,C,Y,X -> add singleton Z axis
-            movie_tczyx = movie[:, :, np.newaxis, :, :]
-        else:
-            raise ValueError(
-                f"Could not infer channel axis for movie shape {movie.shape} with nuclei channels {nuclei_list}."
-            )
-    elif movie.ndim == 3:
-        # Z,Y,X -> single channel + single time
-        movie_tczyx = movie[np.newaxis, np.newaxis, ...]
-    else:
-        raise ValueError(
-            f"Unexpected movie shape {movie.shape}. Expected ZYX, CZYX, TCYX, or TCZYX."
-        )
-
-    # For TIFF path loaded as T,Z,C,Y,X, transpose to T,C,Z,Y,X when needed.
-    if (
-        input_file.endswith((".tif", ".tiff"))
-        and movie_tczyx.ndim == 5
-        and movie_tczyx.shape[2] <= 8
-        and movie_tczyx.shape[1] > 8
-    ):
-        movie_tczyx = np.transpose(movie_tczyx, (0, 2, 1, 3, 4))
-
     channel_crops = []
     for ch in nuclei_list:
         if ch >= movie_tczyx.shape[1]:
             raise ValueError(
                 f"Configured nuclei channel index {ch} is out of bounds for movie with {movie_tczyx.shape[1]} channels."
             )
-        ch_crop = np.asarray(movie_tczyx[:, ch, :, row_min:row_max, col_min:col_max])
+        ch_crop = as_numpy(movie_tczyx[:, ch, :, row_min:row_max, col_min:col_max])
         channel_crops.append(ch_crop)
 
     ref = np.max(np.stack(channel_crops, axis=1), axis=1)  # (T, Z, Y, X)
@@ -262,9 +219,9 @@ def crop_fixed(
             slice_max = min(max(max_block) + 2, ref.shape[1])
 
     # This time, crop the frame of the movie on all channels using corrext XYZ
-    cropped_image = movie_tczyx[
-        :, :, slice_min:slice_max, row_min:row_max, col_min:col_max
-    ]
+    cropped_image = as_numpy(
+        movie_tczyx[:, :, slice_min:slice_max, row_min:row_max, col_min:col_max]
+    )
 
     # On this cropped frame, make pixels outside the organoid black.
     # cropped_image has shape (T, C, Z, Y, X).

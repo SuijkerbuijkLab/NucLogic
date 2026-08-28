@@ -1,7 +1,12 @@
+# Must be imported before PyImarisWriter runs a conversion: once it has, a first
+# `import h5py` in the same process fails to load its HDF5 DLL, which breaks
+# reading any .ims afterwards.
+import h5py  # noqa: F401
+
 from PyImarisWriter import PyImarisWriter as PW
 from alive_progress import alive_bar
 from matplotlib.colors import to_rgba
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils.dummy_callback import dummy_callback
 import numpy as np
 
@@ -13,16 +18,24 @@ def save_as_ims(
     time_interval,
     channel_colors=["blue", "lime", "magenta", "gray", "yellow"],
     channel_names=["Channel_1", "Channel_2", "Channel_3", "Channel_4", "Channel_5"],
+    start_time=None,
 ):
-    """Save a 5D numpy array as an IMS file using PyImarisWriter, Input as TCZYX."""
+    """Save a 5D numpy array as an IMS file using PyImarisWriter, Input as TCZYX.
+
+    time_interval is in hours; start_time is the acquisition time of the first
+    timepoint, so a cropped copy keeps the timing of the original.
+    """
 
     try:
-        timestamps = np.arange(0, input_movie.shape[0] * time_interval, time_interval)
-    except Exception as e:
-        print(f"Non fatal error calculating timestamps: {e}")
-        timestamps = np.arange(0, input_movie.shape[0] * 1, 1)  # fallback to 1h intervals
-    # channel_colors = ["magenta", "green", "blue"]
-    # channel_names = ["magenta", "green", "blue"]
+        interval_hours = float(time_interval)
+        if not np.isfinite(interval_hours) or interval_hours <= 0:
+            raise ValueError(f"unusable time interval: {time_interval}")
+    except (TypeError, ValueError) as e:
+        print(f"Non fatal error reading time interval ({e}); assuming 1 hour.")
+        interval_hours = 1.0
+
+    if start_time is None:
+        start_time = datetime.now()
 
     T, C, Z, Y, X = input_movie.shape
 
@@ -99,7 +112,7 @@ def save_as_ims(
             i, channel_names[i] if i < len(channel_names) else f"Channel {i}"
         )
     # Time info
-    time_infos = [datetime.utcfromtimestamp(t / 1e6) for t in timestamps]
+    time_infos = [start_time + timedelta(hours=i * interval_hours) for i in range(T)]
 
     # Convert to PW.Color using to_rgba
     colors = []

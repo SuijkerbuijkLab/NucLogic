@@ -1,16 +1,15 @@
 # Function that will crop a movie based on an existing XY max projection using a SAM model
 
-import tifffile
 import pandas as pd
 import numpy as np
 from libpysal.weights import KNN
-from imaris_ims_file_reader.ims import ims
 from PIL import Image
 import scipy.ndimage as ndimage
 import cv2
 from .offset_image import offset_image
 from utils.pad_to_shape import pad_to_shape
-from utils.tiff_metadata import _to_tczyx
+from utils.load_image import as_numpy, load_image
+from utils.save_as_tiff import save_as_tiff
 from skimage.filters import threshold_triangle
 from alive_progress import alive_bar
 
@@ -73,27 +72,18 @@ def crop(
     # Create new movie that only has the tracked organoid
     organoid_only = np.where(new_masks, proj_XY, 0)
 
-    # Save this tracked movie to the output folder
-    tifffile.imwrite(
-        os.path.join(
-            os.path.dirname(input_file),
-            f"{name}_projXY_tracked.tif",
-        ),
-        organoid_only,
-        imagej=True,
-        metadata={"axes": "TCYX"},
-        compression="zlib",
-        compressionargs={"level": 8},
-    )
+    # Load the input image lazily; frames are read one at a time in the loop below.
+    movie, voxel_size, time_interval, _ = load_image(input_file)
 
-    # Load in the input image, which is either a ims or tiff
-    if input_file.endswith(".ims"):
-        movie = ims(input_file)  # T,C,Z,Y,X
-    elif input_file.endswith((".tif", ".tiff")):
-        with tifffile.TiffFile(input_file) as tif:
-            axes = tif.series[0].axes
-        movie = tifffile.imread(input_file)
-        movie = _to_tczyx(movie, axes)  # -> T,C,Z,Y,X (handles TZYX / CZYX / TCZYX)
+    # Save this tracked movie to the output folder. Z is projected away, so the
+    # file carries no Z calibration.
+    save_as_tiff(
+        os.path.join(os.path.dirname(input_file), f"{name}_projXY_tracked.tif"),
+        organoid_only,
+        "TCYX",
+        (1.0, voxel_size[1], voxel_size[2]),
+        time_interval,
+    )
 
     timepoints = proj_XY.shape[0]
 
@@ -123,7 +113,7 @@ def crop(
             ref = np.max(
                 np.stack(
                     [
-                        movie[frame, ch, :, row_min:row_max, col_min:col_max]
+                        as_numpy(movie[frame, ch, :, row_min:row_max, col_min:col_max])
                         for ch in nuclei_list
                     ]
                 ),
@@ -170,12 +160,9 @@ def crop(
             slice_max = min(max(max_block) + 2, ref.shape[0])
 
             # This time, crop the frame of the movie on all channels using corrext XYZ
-            cropped_image = movie[
-                frame, :, slice_min:slice_max, row_min:row_max, col_min:col_max
-            ]
-            # ims reader squeezes C=1 to 3D (Z,Y,X); restore to (C,Z,Y,X)
-            if cropped_image.ndim == 3:
-                cropped_image = cropped_image[np.newaxis, :, :, :]
+            cropped_image = as_numpy(
+                movie[frame, :, slice_min:slice_max, row_min:row_max, col_min:col_max]
+            )
 
             # On this cropped frame, we again need to make it so that the pixels in the corners where no organoid is are actually black
             mask_crop = maskXY[

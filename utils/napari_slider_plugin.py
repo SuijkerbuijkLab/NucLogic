@@ -48,7 +48,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import tifffile
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
@@ -68,6 +67,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from superqt import QLabeledDoubleRangeSlider
+
+from utils.save_as_tiff import save_as_tiff
 
 # Columns that identify a cell / are not meaningful to filter on with a slider.
 _NON_FILTERABLE = {"label", "bounding_box", "timepoint", "time"}
@@ -705,22 +706,7 @@ class PropertyFilterWidget(QWidget):
         axes = "TZYX" if data.ndim == 4 else "ZYX"
         df = layer.metadata["_properties_df"]
         try:
-            tifffile.imwrite(
-                path,
-                data,
-                bigtiff=True,
-                imagej=True,
-                resolution=(1 / vx, 1 / vy),
-                metadata={
-                    "unit": "um",
-                    "axes": axes,
-                    "spacing": vz,
-                    "finterval": self._time_interval(df),
-                    "tunit": "h",
-                },
-                compression="zlib",
-                compressionargs={"level": 8},
-            )
+            save_as_tiff(path, data, axes, (vz, vy, vx), self._time_interval(df))
         except Exception as e:
             QMessageBox.critical(self, "Save failed", str(e))
             self.status.setText(f"Save failed: {e}")

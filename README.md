@@ -41,14 +41,30 @@ NucLogic uses Cellpose Sam, which is extremely slow on cpu. Please use an NVIDIA
 # Using NucLogic
 
 **Input files:**  
-Both tif and ims files can be used as input for 3D or 4D imaging data. NucLogic reads voxel size and timepoint metadata from the file where available, and falls back to default values otherwise. Timelapses should be saved as a single file, not split per timeframe.
+NucLogic reads 3D and 4D imaging data in the following formats:
+
+| Format | Extension |
+| --- | --- |
+| TIFF (OME-TIFF, ImageJ, plain) | `.tif`, `.tiff`, `.ome.tif` |
+| Imaris | `.ims` |
+| Nikon | `.nd2` |
+| Zeiss | `.czi`, `.lsm` |
+| Leica | `.lif` |
+| OME-Zarr / NGFF | `.zarr`, `.ome.zarr` |
+
+Voxel size and timepoint interval are read from the file where available, and fall back to the values set in the advanced settings otherwise. Timelapses should be saved as a single file, not split per timeframe.
 
 **Preparing your data:**  
 Place all files you want to analyse into a single folder and navigate to it in NucLogic. You will be prompted to generate a subfolder for each sample — this is required, as NucLogic expects each sample in its own folder to keep output files organised.
 
+**MetaMorph acquisitions:**  
+A MetaMorph acquisition is stored as a small `.nd` index next to one `.STK` stack per wavelength (and per timepoint for a timelapse). NucLogic detects these and offers to merge them into a single OME-TIFF sample, with the wavelengths joined as channels. The Z step is taken from the stacks; MetaMorph often leaves the XY calibration unset, in which case the merged file says so and the voxel size from the advanced settings is used. As with multiposition files, the originals are kept until you confirm deletion.
+
+**Multiposition files:**  
+ND2, CZI and LIF files can hold several stage positions or scenes in one container. NucLogic detects these and offers to write each position out as its own sample, so that a whole plate can be analysed rather than just its first position. Each position becomes a folder holding one OME-TIFF, named after the scene where the file provides a name. The original file is left untouched, and you are asked afterwards whether to delete it. The conversion can be cancelled at any point; positions already written stay usable and re-running continues where it stopped.
+
 **Segmenting:**  
-Select the samples you want to analyse and go to the **Segment** tab. Fill in all required information, making sure to specify all channels present in your images. You can then run the full pipeline for segmentation and analysis. At later timepoints you can skip the segmentation step and only rerun the analysis, which saves siNucLogic can use tif and ims files as input to segment 3D or 4D imaging data. NucLogic tries to read image metadata for voxel size and timepoints, but falls back to default values when this is not found in the input file. Timelapses should be saved as a single file, not seperated per time frame. Place all the files you want to analyse into a folder, and navigate to this folder in NucLogic. You will be prompted to generate directories for your samples, this is done because NucLogic expexts every sample in a seperate folder, to prevent cluttering of all of the output files generated. Next, select the samples you want to analyse and move to the "segment" tab. Here, fill out all the necessary information. Please inform NucLogic of all the channels present in your images. You can then choose to start the full segmentation pipeline for segmentation and analysis. If you have previously segmented these samples but want to generate more statistics, you can also choose to run parts of the pipeline and skip the segmentation step, in order to save a lot of computing time.. 
-Save and load configurations for replicatability in the settings between experiments.
+Select the samples you want to analyse and go to the **Segment** tab. Fill in all required information, making sure to specify all channels present in your images. You can then run the full pipeline for segmentation and analysis. If you have previously segmented these samples but want to generate more statistics, you can skip the segmentation step and rerun only the analysis, which saves a lot of computing time. Configurations can be saved and reloaded in the settings, so the same analysis can be repeated across experiments.
 In the advanced segmentations settings, you can also upload your own 2D cellpose SAM models for 2D segmentation.
 To analyse images with different sets of imaged channels, please divide this over seperate segmentation runs, as NucLogic cannot handle this.
 The view data tab can be used to open and inspect your samples and segmentations in Napari.

@@ -4,6 +4,9 @@
 #input/*.xlsx to do all file types in a folder
 */__pycache__/
 .vscode/
+.history/
+# Paths to sample microscopy files, local to whoever runs the tests
+tests/local_data.py
 env/
 .venv/
 */napari_paths.json
@@ -22,4 +25,3 @@ models/*
 !models/sam2.1_hiera_small.pt
 !models/2d_high_quality_model
 !models/2d_low_quality_model
-utils/load_image.py

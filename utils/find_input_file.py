@@ -1,18 +1,23 @@
-# Function to find the biggest existing tiff or ims file in a input folder
+# Function to find the biggest existing image file in a input folder
 
 import os
 
+from utils.load_image import is_supported
 
-def find_input_file(input_directory, types=[".ims", ".tif"]):
-    # Find the existing IMS or Tiff files in this folder
+
+def find_input_file(input_directory, types=None):
+    # Every format load_image can read, unless the caller restricts it further
     input_files = [
         os.path.join(input_directory, f)
         for f in os.listdir(input_directory)
-        if any(f.endswith(extension) for extension in types)
+        if (any(f.lower().endswith(e) for e in types) if types else is_supported(f))
     ]
-    # If no IMS or Tiff file is found, print a warning
+    # If no readable image is found, print a warning
     if not input_files:
-        print(f"Warning: No IMS file found in {input_directory}. Skipping this folder.")
+        print(
+            f"Warning: No readable image found in {input_directory}. "
+            f"Skipping this folder."
+        )
         return
 
     # From the found IMS and Tiff files, select the bigest file to use as the input file, as this is probably the main file you want to analyse

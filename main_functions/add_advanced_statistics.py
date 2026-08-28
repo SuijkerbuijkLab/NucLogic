@@ -9,12 +9,11 @@ from utils.compute_shape_descriptors import (
 )
 from utils.find_input_file import find_input_file
 from utils.expand_mask import expand_mask_3d
-from utils.get_time_interval import get_time_interval
 from utils.offset_image import offset_image
 from utils.compute_knn_features import compute_knn_features
 from utils.get_touching_neigbhours_3d import get_touching_neighbors_3d
-from imaris_ims_file_reader import ims
-from utils.tiff_metadata import load_tiff_movie_and_metadata
+from utils.load_image import as_numpy, load_image
+from utils.save_as_tiff import save_as_tiff
 
 
 def add_advanced_statistics(
@@ -150,25 +149,9 @@ def add_advanced_statistics(
         input_file = find_input_file(input_directory)
         name = os.path.basename(input_file).split(".")[0]
 
-    # Load source movie with expected shape T, C, Z, Y, X
-    metadata_missing = False
-    if input_file.endswith(".ims"):
-        time_interval = get_time_interval(input_file)
-        loaded_movie = ims(input_file)  # TCZXY
-        voxel_size = loaded_movie.resolution
-        if voxel_size is None:
-            metadata_missing = True
-            voxel_size = (1.0, 1.0, 1.0)
-        while loaded_movie.ndim < 5:
-            loaded_movie = np.expand_dims(loaded_movie, axis=0)
-    elif input_file.endswith(".tif") or input_file.endswith(".tiff"):
-        loaded_movie, voxel_size, time_interval, metadata_missing = (
-            load_tiff_movie_and_metadata(input_file)
-        )
-    else:
-        raise ValueError(
-            "Unsupported file format in sample directory. Please provide a .tif, .tiff, or .ims file."
-        )
+    # Load source movie with expected shape T, C, Z, Y, X. Lazy: timepoints are
+    # materialised one at a time in the loop below.
+    loaded_movie, voxel_size, time_interval, metadata_missing = load_image(input_file)
 
     voxel_size = _resolve_voxel_size(voxel_size, metadata_missing)
 
@@ -201,21 +184,12 @@ def add_advanced_statistics(
 
     if save_measurement_mask and measure_region != "nuclei":
         sample_name = os.path.basename(input_directory)
-        tifffile.imwrite(
+        save_as_tiff(
             os.path.join(input_directory, f"{sample_name}_segmented_{region_tag}.tif"),
             mask_to_use,
-            bigtiff=True,
-            imagej=True,
-            resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
-            metadata={
-                "unit": "um",
-                "axes": "TZYX",
-                "spacing": voxel_size[0],
-                "finterval": time_interval,
-                "tunit": "h",
-            },
-            compression="zlib",
-            compressionargs={"level": 8},
+            "TZYX",
+            voxel_size,
+            time_interval,
         )
 
     touching_expanded_movie = None
@@ -234,21 +208,12 @@ def add_advanced_statistics(
             input_directory,
             f"{sample_name}_segmented_{touching_prefix}.tif",
         )
-        tifffile.imwrite(
+        save_as_tiff(
             touching_mask_path,
             touching_expanded_movie,
-            bigtiff=True,
-            imagej=True,
-            resolution=(1 / voxel_size[2], 1 / voxel_size[1]),
-            metadata={
-                "unit": "um",
-                "axes": "TZYX",
-                "spacing": voxel_size[0],
-                "finterval": time_interval,
-                "tunit": "h",
-            },
-            compression="zlib",
-            compressionargs={"level": 8},
+            "TZYX",
+            voxel_size,
+            time_interval,
         )
         print(f"Saved touching-neighbour expansion mask to {touching_mask_path}")
 
@@ -270,7 +235,8 @@ def add_advanced_statistics(
 
         time_props = props[props["timepoint"] == timepoint].copy()
         mask_3d = mask_to_use[timepoint_int]
-        frame = loaded_movie[timepoint_int]  # C, Z, Y, X
+        # Read this timepoint once; everything below works on real numpy.
+        frame = as_numpy(loaded_movie[timepoint_int])  # C, Z, Y, X
 
         def _merge_overwrite(base_df, new_df, key="label"):
             # Recompute columns should overwrite previous values instead of creating _x/_y duplicates.

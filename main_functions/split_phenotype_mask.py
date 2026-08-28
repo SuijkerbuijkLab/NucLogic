@@ -1,7 +1,9 @@
 import os
-import tifffile
 import pandas as pd
 import numpy as np
+
+from utils.load_image import load_image
+from utils.save_as_tiff import save_as_tiff
 
 
 def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
@@ -19,18 +21,17 @@ def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
         )
         return
 
-    segmentation = tifffile.imread(
+    # The segmented movie carries the voxel size and time interval; read them here
+    # so the phenotype masks written below keep the same metadata.
+    loaded, voxel_size, time_interval, _ = load_image(
         os.path.join(
             input_directory, f"{os.path.basename(input_directory)}_segmented.tif"
-        )
+        ),
+        lazy=False,
     )
+    segmentation = loaded[:, 0]  # T,C,Z,Y,X with C=1 -> T,Z,Y,X
 
     print(segmentation.shape)
-
-    while segmentation.ndim < 4:
-        segmentation = np.expand_dims(
-            segmentation, axis=0
-        )  # add time dimension if missing because its a fixed sample
 
     T, Z, Y, X = segmentation.shape
     # Output: T, Z, 2, Y, X  — channel 0 = phenotype_1 labels, channel 1 = phenotype_2 labels
@@ -62,33 +63,17 @@ def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
     phenotype_2_mask = new_segmentation[:, :, 1, :, :]
 
     name = os.path.basename(input_directory)
-    tifffile.imwrite(
-        os.path.join(
-            input_directory,
-            f"{name}_{phenotype_1}_mask.tif",
-        ),
+    save_as_tiff(
+        os.path.join(input_directory, f"{name}_{phenotype_1}_mask.tif"),
         phenotype_1_mask,
-        bigtiff=True,
-        imagej=True,
-        metadata={
-            "unit": "um",
-            "axes": "TZYX",
-        },
-        compression="zlib",
-        compressionargs={"level": 8},
+        "TZYX",
+        voxel_size,
+        time_interval,
     )
-    tifffile.imwrite(
-        os.path.join(
-            input_directory,
-            f"{name}_{phenotype_2}_mask.tif",
-        ),
+    save_as_tiff(
+        os.path.join(input_directory, f"{name}_{phenotype_2}_mask.tif"),
         phenotype_2_mask,
-        bigtiff=True,
-        imagej=True,
-        metadata={
-            "unit": "um",
-            "axes": "TZYX",
-        },
-        compression="zlib",
-        compressionargs={"level": 8},
+        "TZYX",
+        voxel_size,
+        time_interval,
     )
