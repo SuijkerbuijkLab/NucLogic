@@ -679,20 +679,43 @@ class _DimensionPreservingReader:
     on a 5D file returns (Z, Y, X), not (1, 1, Z, Y, X). dask requires each
     chunk to come back with the full number of dimensions, so without this any
     multi-chunk read fails.
+
+    It also owns the file handle, and only opens it when pixels are first
+    asked for. _load_ims reads the metadata with its own short-lived reader and
+    closes it, so merely inspecting an .ims -- scanning a folder, reading a
+    voxel size -- leaves the file unlocked. On Windows an open file cannot be
+    moved, which otherwise blocks sorting samples into their folders.
     """
 
-    def __init__(self, reader):
-        self._reader = reader
-        self.shape = tuple(reader.shape)
-        self.dtype = reader.dtype
-        self.ndim = reader.ndim
+    def __init__(self, path, shape, dtype):
+        self._path = path
+        self._reader = None
+        self.shape = tuple(shape)
+        self.dtype = dtype
+        self.ndim = len(self.shape)
+
+    def _open(self):
+        if self._reader is None:
+            self._reader = _quiet_ims_reader(self._path)
+        return self._reader
+
+    def close(self):
+        reader, self._reader = self._reader, None
+        if reader is not None:
+            try:
+                reader.close()
+            except Exception:
+                pass
+
+    def __del__(self):
+        self.close()
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
         key = key + (slice(None),) * (self.ndim - len(key))
 
-        block = np.asarray(self._reader[key])
+        block = np.asarray(self._open()[key])
         # Integer keys are meant to drop their axis; slices are not.
         expected = tuple(
             len(range(*part.indices(size)))
@@ -703,9 +726,17 @@ class _DimensionPreservingReader:
 
 
 def _load_ims(path, lazy, all_positions=False, position=None):
+    # Read the metadata with a reader of our own and let it go again: holding it
+    # open would lock the file for as long as the returned array lives, even if
+    # no pixel is ever read from it.
     reader = _quiet_ims_reader(path)  # HDF5-backed, slices lazily
+    try:
+        voxel_size = getattr(reader, "resolution", None)
+        shape, dtype = tuple(reader.shape), reader.dtype
+    finally:
+        with _quiet_ims():
+            reader.close()
 
-    voxel_size = getattr(reader, "resolution", None)
     metadata_missing = voxel_size is None
     if metadata_missing:
         voxel_size = (1.0, 1.0, 1.0)
@@ -718,16 +749,14 @@ def _load_ims(path, lazy, all_positions=False, position=None):
     # max_project already streams IMS data. Built even for lazy=False, so the
     # eager path reads in chunks instead of one huge request (and because the
     # reader does not accept Ellipsis indexing).
-    chunks = tuple(
-        1 if i < reader.ndim - 3 else size for i, size in enumerate(reader.shape)
-    )
+    chunks = tuple(1 if i < len(shape) - 3 else size for i, size in enumerate(shape))
     # meta= keeps dask from probing the file with a zero-size read on open.
     data = da.from_array(
-        _DimensionPreservingReader(reader),
+        _DimensionPreservingReader(path, shape, dtype),
         chunks=chunks,
         asarray=False,
         name=str(path),
-        meta=np.empty((0,) * reader.ndim, dtype=reader.dtype),
+        meta=np.empty((0,) * len(shape), dtype=dtype),
     )
 
     # IMS is stored T, C, Z, Y, X but drops leading singleton dimensions.

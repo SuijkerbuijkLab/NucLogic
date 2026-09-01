@@ -1,4 +1,5 @@
 from datetime import datetime
+import gc
 import sys
 import os
 
@@ -25,6 +26,7 @@ from utils.file_to_folder import file_to_folder
 from utils.load_model import CELLPOSE_SAM_MODEL_NAME
 from utils.load_image import SUPPORTED_EXTENSIONS, is_supported, load_image
 from utils.split_positions import scan_directory, split_file
+from utils.voxel_size import parse_override
 from utils.merge_nd import merge_file, scan_directory as scan_nd_directory
 from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
@@ -495,6 +497,10 @@ class MainWindow(QMainWindow):
         pending_nd = [
             entry for entry in getattr(self, "nd_files", []) if not entry.already_merged
         ]
+
+        # Release any lazily-loaded array nothing references any more: while one
+        # is alive its source file stays open, and an open file cannot be moved.
+        gc.collect()
 
         # Multiposition files are left alone by file_to_folder, and .nd/.STK are
         # not image formats it recognises, so this only deals with the ordinary
@@ -1209,25 +1215,13 @@ class MainWindow(QMainWindow):
                     self.calculate_phenotype_similarity_touching_checkbox.isChecked()
                 )
 
-        voxel_z_text = self.voxel_size_z_input.text().strip()
-        voxel_x_text = self.voxel_size_x_input.text().strip()
-        voxel_y_text = self.voxel_size_y_input.text().strip()
-        if voxel_z_text or voxel_x_text or voxel_y_text:
-            try:
-                voxel_z = float(voxel_z_text) if voxel_z_text else 1.0
-                voxel_x = float(voxel_x_text) if voxel_x_text else 1.0
-                voxel_y = float(voxel_y_text) if voxel_y_text else 1.0
-            except ValueError as exc:
-                raise ValueError(
-                    "Invalid voxel size override. Please enter valid float values for Z, X, and Y."
-                ) from exc
-            if voxel_z <= 0 or voxel_x <= 0 or voxel_y <= 0:
-                raise ValueError(
-                    "Invalid voxel size override. Z, X, and Y must be positive values."
-                )
-            user_voxel_size = (voxel_z, voxel_y, voxel_x)
-        else:
-            user_voxel_size = (1.0, 1.0, 1.0)
+        # Per axis: a filled box overrides that axis, a blank one keeps whatever
+        # the file says. parse_override raises a message meant for the user.
+        user_voxel_size = parse_override(
+            self.voxel_size_z_input.text(),
+            self.voxel_size_y_input.text(),
+            self.voxel_size_x_input.text(),
+        )
         return (
             extra_props,
             advanced_statistics_only,
@@ -1308,10 +1302,12 @@ class MainWindow(QMainWindow):
         combo_row.setContentsMargins(0, 2, 0, 0)
         combo_row.addWidget(QLabel("Save cropped files as:"))
         self.save_crop_as = QComboBox()
-        self.save_crop_as.addItems([".ims", ".tif"])
+        self.save_crop_as.addItems([".tif", ".ims"])
         combo_row.addWidget(self.save_crop_as)
         combo_row.addWidget(self._info_label(
-            "Use .ims if you work with Imaris; use .tif for universal compatibility."
+            "OME-TIFF (.tif) is the default: it carries voxel size and timing, "
+            "opens anywhere, and has no size limit.\n"
+            "Choose .ims only if you work in Imaris."
         ))
         combo_row.addStretch()
         sub_layout.addLayout(combo_row)
@@ -1562,7 +1558,8 @@ class MainWindow(QMainWindow):
         voxel_label_row.addWidget(QLabel("Voxel size override (Z / X / Y in µm):"))
         voxel_label_row.addWidget(self._info_label(
             "Only needed if your image file has incorrect or missing spatial metadata.\n"
-            "Leave blank to use the voxel size read from the file automatically."
+            "Each axis is separate: fill in the ones you want to set, and leave "
+            "the rest blank to read them from the file."
         ))
         voxel_label_row.addStretch()
         self.advanced_layout.addLayout(voxel_label_row)
@@ -2311,7 +2308,7 @@ class MainWindow(QMainWindow):
         _set_check(self.do_crop_sample, "do_crop_sample", True)
         _set_check(self.manual_crop_fixed_checkbox, "manual_crop_fixed")
         _set_check(self.skip_crop_existing_files_checkbox, "skip_crop_existing_files")
-        _set_combo(self.save_crop_as, "save_crop_as", ".ims")
+        _set_combo(self.save_crop_as, "save_crop_as", ".tif")
         _set_combo(self.run_mode_combo, "run_mode", "Full pipeline")
         self.breaking_threshold_input.setText(config.get("breaking_threshold", "2.5"))
         self.size_2d_filter_input.setText(config.get("size_2d_filter_multiplier", "15"))
@@ -2729,6 +2726,29 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Could not attach property filter widget: {e}")
 
+        self._release_files_when_closed(viewer)
+
+    def _release_files_when_closed(self, viewer):
+        """Drop the layers when the viewer window goes away.
+
+        Layers hold the lazily-loaded arrays, which hold the open source files.
+        Until they are released the sample cannot be moved, renamed or deleted
+        on Windows, so closing the viewer has to actually let go.
+        """
+        def release(*_):
+            try:
+                viewer.layers.clear()
+            except Exception:
+                pass
+            gc.collect()
+
+        try:
+            viewer.window._qt_window.destroyed.connect(release)
+        except Exception as error:
+            # Private napari API: if it moves, the files stay open until the
+            # objects are collected anyway, so this is not worth failing over.
+            print(f"Note: could not hook viewer teardown ({error}).")
+
     def _viewer_error(self, error_message):
         self.view_button.setEnabled(True)
         self.view_status_label.setText(f"Error: {error_message}")
@@ -3032,7 +3052,6 @@ class ViewerWorker(QThread):
     def run(self):
         try:
             import numpy as np
-            from imaris_ims_file_reader.ims import ims
 
             samples_data = []
             for sample in self.selected:
