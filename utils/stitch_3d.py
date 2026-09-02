@@ -329,7 +329,9 @@ def IOU_stitching(organoid_2d, distance_threshold=10, iou_threshold=0.3):
 
 
 def mask_from_organoid(organoid, shape):
-    mask = np.zeros(shape, dtype=np.uint16)
+    max_label = max((cell.label for cell in organoid), default=0)
+    dtype = np.uint16 if max_label <= np.iinfo(np.uint16).max else np.uint32
+    mask = np.zeros(shape, dtype=dtype)
     for cell in organoid:
         width = cell.shape_2d[1]
         for z_idx, (z, y, x) in enumerate(cell.centroids_2d):
