@@ -2619,10 +2619,8 @@ class MainWindow(QMainWindow):
         if signal.size == 0:
             return (0.0, max(data_max, 1.0)), (0.0, max(data_max, 1.0))
 
-        background = float(np.percentile(signal, 5))
-        foreground = float(np.percentile(signal, 99.5))
-        if foreground <= background:
-            foreground = background + 1.0
+        background = float(np.median(signal))
+        foreground = float(np.percentile(signal, 99.95))
 
         return (background, foreground), (0.0, max(data_max, foreground))
 
