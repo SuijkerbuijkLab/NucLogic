@@ -6,6 +6,7 @@ import pandas as pd
 from alive_progress import alive_it
 from utils.load_image import as_numpy, load_image
 from utils.save_as_tiff import save_as_tiff
+from utils.voxel_size import resolve_voxel_size
 
 
 import os
@@ -39,29 +40,10 @@ def segment_organoid(
     measure_intensity_in="Nuclei",
     cytoplasm_size=5,
     save_measurement_mask=False,
-    user_voxel_size=(1.0, 1.0, 1.0),
+    user_voxel_size=None,
 ):
     nuclei_channels = []
 
-    def _to_voxel_tuple(voxel_like):
-        try:
-            return (
-                float(voxel_like[0]),
-                float(voxel_like[1]),
-                float(voxel_like[2]),
-            )
-        except (TypeError, ValueError, IndexError):
-            return (1.0, 1.0, 1.0)
-
-    def _resolve_voxel_size(measured_voxel, metadata_missing):
-        measured = _to_voxel_tuple(measured_voxel)
-        user_voxel = _to_voxel_tuple(user_voxel_size)
-        user_is_default = np.allclose(user_voxel, (1.0, 1.0, 1.0))
-        measured_is_default = np.allclose(measured, (1.0, 1.0, 1.0))
-        if not user_is_default and (metadata_missing or measured_is_default):
-            print(f"Using user-provided voxel size override: {user_voxel}")
-            return user_voxel
-        return measured
 
     measure_region = measure_intensity_in.lower().strip()
 
@@ -92,7 +74,7 @@ def segment_organoid(
     # a movie far larger than RAM can be segmented.
     loaded_movie, voxel_size, time_interval, metadata_missing = load_image(input_file)
 
-    voxel_size = _resolve_voxel_size(voxel_size, metadata_missing)
+    voxel_size = resolve_voxel_size(voxel_size, user_voxel_size, metadata_missing)
 
     segmented_movie = []
     measurement_mask_movie = []

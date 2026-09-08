@@ -41,10 +41,12 @@ cd /d "%~dp0"
 
 REM First-time setup
 REM When the environment doesn't exist yet, build it and grant every user on this
-REM PC full access to the install folder. The permissions are INHERITABLE (the
-REM (OI)(CI) flags), so files created later by the in-app updater, even when it
-REM wipes and rebuilds .pixi\envs automatically inherit them. That means this
-REM step does NOT need to run again after an update.
+REM PC full access to the install folder. The (OI)(CI) flags make the grant
+REM inheritable, which covers plain files created later. It does NOT cover packages
+REM that pixi/rattler hardlinks in from pixi_cache: a hardlink keeps the cache
+REM file's own DACL instead of inheriting this folder's. So the in-app updater
+REM re-applies this same grant itself after its pixi install (see utils/updater.py
+REM _grant_all_users_access); that is what keeps updates working for every account.
 if not exist "%~dp0.pixi\envs\default" (
     REM First-time setup needs admin rights for takeown/icacls below. If we're not
     REM elevated, relaunch this script as administrator and let that copy do the

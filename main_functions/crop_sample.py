@@ -6,6 +6,7 @@ from utils.crop import crop
 from utils.load_image import ims_acquisition_start, load_image
 from utils.save_as_ims import save_as_ims
 from utils.save_as_tiff import save_as_tiff
+from utils.voxel_size import resolve_voxel_size
 import numpy as np
 
 
@@ -16,27 +17,8 @@ def crop_sample(
     save_as=".ims",
     manual_fixed=False,
     fixed_only=False,
-    user_voxel_size=(1.0, 1.0, 1.0),
+    user_voxel_size=None,
 ):
-    def _to_voxel_tuple(voxel_like):
-        try:
-            return (
-                float(voxel_like[0]),
-                float(voxel_like[1]),
-                float(voxel_like[2]),
-            )
-        except (TypeError, ValueError, IndexError):
-            return (1.0, 1.0, 1.0)
-
-    def _should_use_user_voxel(measured_voxel, metadata_missing):
-        measured = _to_voxel_tuple(measured_voxel)
-        user_voxel = _to_voxel_tuple(user_voxel_size)
-        user_is_default = np.allclose(user_voxel, (1.0, 1.0, 1.0))
-        measured_is_default = np.allclose(measured, (1.0, 1.0, 1.0))
-        if not user_is_default and (metadata_missing or measured_is_default):
-            print(f"Using user-provided voxel size override: {user_voxel}")
-            return user_voxel
-        return measured
 
     nuclei_channels = []
     for i, channel_type in enumerate(channel_types):
@@ -53,7 +35,7 @@ def crop_sample(
     # themselves to read pixels.
     loaded_movie, voxel_size, time_interval, metadata_missing = load_image(input_file)
 
-    voxel_size = _should_use_user_voxel(voxel_size, metadata_missing)
+    voxel_size = resolve_voxel_size(voxel_size, user_voxel_size, metadata_missing)
 
     # Loader normalizes TIFF/IMS to 5D (T,C,Z,Y,X); fixed samples are represented as T=1.
     is_fixed = loaded_movie.shape[0] == 1
@@ -103,8 +85,11 @@ def crop_sample(
                 else None
             ),
         )
-    elif save_as == ".tif":
-        # Save this final cropped frame in the output folder as tif
+    else:
+        # Default: OME-TIFF. Anything other than .ims lands here, so an unknown
+        # setting writes the portable format rather than silently writing
+        # nothing. The name stays "_cropped.tif" because the rest of the
+        # pipeline finds cropped files by that suffix.
         save_as_tiff(
             os.path.join(os.path.dirname(input_file), f"{name}_cropped.tif"),
             cropped_movie,

@@ -1,4 +1,5 @@
 from datetime import datetime
+import gc
 import sys
 import os
 
@@ -25,9 +26,11 @@ from utils.file_to_folder import file_to_folder
 from utils.load_model import CELLPOSE_SAM_MODEL_NAME
 from utils.load_image import SUPPORTED_EXTENSIONS, is_supported, load_image
 from utils.split_positions import scan_directory, split_file
+from utils.voxel_size import parse_override
 from utils.merge_nd import merge_file, scan_directory as scan_nd_directory
 from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
+from utils.download_models import ModelDownloader, optional_assets
 
 # Import PySide6 FIRST
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
@@ -54,6 +57,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QScrollArea,
     QFrame,
+    QDialog,
+    QDialogButtonBox,
 )
 import qdarktheme
 
@@ -69,7 +74,7 @@ class MainWindow(QMainWindow):
         self.samples_data = []  # Data structure holding samples
         self._set_icon()
         self._setup_ui()
-        self._start_update_check()
+        self._start_model_download()
         # GPU check is driven by _start_prewarm's background thread (which owns
         # the torch import) so it doesn't block the window from appearing.
         self._start_prewarm()
@@ -160,6 +165,35 @@ class MainWindow(QMainWindow):
         row.addWidget(dismiss_btn)
 
         return self._update_banner
+
+    def _start_model_download(self):
+        # Model weights ship as release assets, not in the repo, so a fresh clone
+        # or zip arrives without them. Runs before the update check so the two
+        # never compete for the banner.
+        self._model_downloader = ModelDownloader()
+        self._model_downloader.progress.connect(self._on_model_progress)
+        self._model_downloader.completed.connect(self._on_models_ready)
+        self._model_downloader.error.connect(self._on_model_error)
+        self._model_downloader.start()
+
+    def _on_model_progress(self, msg):
+        self.run_segmentation_btn.setEnabled(False)
+        self._install_btn.setVisible(False)
+        self._update_label.setText(msg)
+        self._update_banner.setVisible(True)
+
+    def _on_models_ready(self):
+        self.run_segmentation_btn.setEnabled(True)
+        self._install_btn.setVisible(True)
+        self._update_banner.setVisible(False)
+        self._start_update_check()
+
+    def _on_model_error(self, msg):
+        print(f"[models] download failed: {msg}")
+        self.run_segmentation_btn.setEnabled(False)
+        self._install_btn.setVisible(False)
+        self._update_label.setText(f"Could not download model weights: {msg}")
+        self._update_banner.setVisible(True)
 
     def _start_update_check(self):
         # Print the installed version immediately (works offline); the async check
@@ -495,6 +529,10 @@ class MainWindow(QMainWindow):
         pending_nd = [
             entry for entry in getattr(self, "nd_files", []) if not entry.already_merged
         ]
+
+        # Release any lazily-loaded array nothing references any more: while one
+        # is alive its source file stays open, and an open file cannot be moved.
+        gc.collect()
 
         # Multiposition files are left alone by file_to_folder, and .nd/.STK are
         # not image formats it recognises, so this only deals with the ordinary
@@ -1209,25 +1247,13 @@ class MainWindow(QMainWindow):
                     self.calculate_phenotype_similarity_touching_checkbox.isChecked()
                 )
 
-        voxel_z_text = self.voxel_size_z_input.text().strip()
-        voxel_x_text = self.voxel_size_x_input.text().strip()
-        voxel_y_text = self.voxel_size_y_input.text().strip()
-        if voxel_z_text or voxel_x_text or voxel_y_text:
-            try:
-                voxel_z = float(voxel_z_text) if voxel_z_text else 1.0
-                voxel_x = float(voxel_x_text) if voxel_x_text else 1.0
-                voxel_y = float(voxel_y_text) if voxel_y_text else 1.0
-            except ValueError as exc:
-                raise ValueError(
-                    "Invalid voxel size override. Please enter valid float values for Z, X, and Y."
-                ) from exc
-            if voxel_z <= 0 or voxel_x <= 0 or voxel_y <= 0:
-                raise ValueError(
-                    "Invalid voxel size override. Z, X, and Y must be positive values."
-                )
-            user_voxel_size = (voxel_z, voxel_y, voxel_x)
-        else:
-            user_voxel_size = (1.0, 1.0, 1.0)
+        # Per axis: a filled box overrides that axis, a blank one keeps whatever
+        # the file says. parse_override raises a message meant for the user.
+        user_voxel_size = parse_override(
+            self.voxel_size_z_input.text(),
+            self.voxel_size_y_input.text(),
+            self.voxel_size_x_input.text(),
+        )
         return (
             extra_props,
             advanced_statistics_only,
@@ -1308,10 +1334,12 @@ class MainWindow(QMainWindow):
         combo_row.setContentsMargins(0, 2, 0, 0)
         combo_row.addWidget(QLabel("Save cropped files as:"))
         self.save_crop_as = QComboBox()
-        self.save_crop_as.addItems([".ims", ".tif"])
+        self.save_crop_as.addItems([".tif", ".ims"])
         combo_row.addWidget(self.save_crop_as)
         combo_row.addWidget(self._info_label(
-            "Use .ims if you work with Imaris; use .tif for universal compatibility."
+            "OME-TIFF (.tif) is the default: it carries voxel size and timing, "
+            "opens anywhere, and has no size limit.\n"
+            "Choose .ims only if you work in Imaris."
         ))
         combo_row.addStretch()
         sub_layout.addLayout(combo_row)
@@ -1562,7 +1590,8 @@ class MainWindow(QMainWindow):
         voxel_label_row.addWidget(QLabel("Voxel size override (Z / X / Y in µm):"))
         voxel_label_row.addWidget(self._info_label(
             "Only needed if your image file has incorrect or missing spatial metadata.\n"
-            "Leave blank to use the voxel size read from the file automatically."
+            "Each axis is separate: fill in the ones you want to set, and leave "
+            "the rest blank to read them from the file."
         ))
         voxel_label_row.addStretch()
         self.advanced_layout.addLayout(voxel_label_row)
@@ -1736,6 +1765,9 @@ class MainWindow(QMainWindow):
         upload_button = QPushButton("Upload custom model")
         upload_button.clicked.connect(self._upload_custom_model)
         model_setting_layout.addWidget(upload_button)
+        extra_models_button = QPushButton("Download extra pretrained models")
+        extra_models_button.clicked.connect(self._download_extra_models)
+        model_setting_layout.addWidget(extra_models_button)
         model_setting_layout.addWidget(self._info_label(
             "Pretrained 2D Cellpose segmentation models used to detect nuclei in each Z-slice.\n"
             "The slices are then stitched into a full 3D segmentation.\n"
@@ -1761,7 +1793,8 @@ class MainWindow(QMainWindow):
 
         model_entries = []
         for entry in sorted(os.listdir(models_dir)):
-            if self._is_sam_support_file(entry):
+            # .part files are downloads still in flight, not usable models.
+            if self._is_sam_support_file(entry) or entry.endswith(".part"):
                 continue
             full_path = os.path.join(models_dir, entry)
             if os.path.isdir(full_path) or os.path.isfile(full_path):
@@ -1782,6 +1815,76 @@ class MainWindow(QMainWindow):
         else:
             self.model_combo_box.setCurrentIndex(0)
         self.model_combo_box.blockSignals(False)
+
+    def _download_extra_models(self):
+        # Models published alongside the required ones but not fetched by default,
+        # so a normal install does not pay for weights it will never use.
+        try:
+            extras = optional_assets()
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Extra models", f"Could not reach the model release:\n{e}"
+            )
+            return
+
+        if not extras:
+            QMessageBox.information(
+                self, "Extra models", "No extra pretrained models are available."
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Download extra pretrained models")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(
+            "Pretrained models for other sample types. Selected models are saved\n"
+            "to the models folder and then appear in the 2D segmentation model list."
+        ))
+
+        boxes = []
+        for asset in extras:
+            label = f"{asset['name']}  ({asset['size'] / 1048576:.0f} MB)"
+            box = QCheckBox(
+                f"{label} — already downloaded" if asset["installed"] else label
+            )
+            box.setEnabled(not asset["installed"])
+            layout.addWidget(box)
+            boxes.append((box, asset))
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        selected = [asset for box, asset in boxes if box.isChecked()]
+        if not selected:
+            return
+
+        self._extra_downloader = ModelDownloader(assets=selected)
+        self._extra_downloader.progress.connect(self._on_extra_progress)
+        self._extra_downloader.completed.connect(self._on_extra_done)
+        self._extra_downloader.error.connect(self._on_extra_error)
+        self._extra_downloader.start()
+
+    def _on_extra_progress(self, msg):
+        self._install_btn.setVisible(False)
+        self._update_label.setText(msg)
+        self._update_banner.setVisible(True)
+
+    def _on_extra_done(self):
+        self._install_btn.setVisible(True)
+        self._update_banner.setVisible(False)
+        self._refresh_model_options()
+
+    def _on_extra_error(self, msg):
+        print(f"[models] extra download failed: {msg}")
+        self._update_label.setText(f"Could not download extra models: {msg}")
+        self._update_banner.setVisible(True)
 
     def _upload_custom_model(self):
         file_filter = "Model Files (*.pt *.pth *.onnx *.npy);;All Files (*)"
@@ -2311,7 +2414,7 @@ class MainWindow(QMainWindow):
         _set_check(self.do_crop_sample, "do_crop_sample", True)
         _set_check(self.manual_crop_fixed_checkbox, "manual_crop_fixed")
         _set_check(self.skip_crop_existing_files_checkbox, "skip_crop_existing_files")
-        _set_combo(self.save_crop_as, "save_crop_as", ".ims")
+        _set_combo(self.save_crop_as, "save_crop_as", ".tif")
         _set_combo(self.run_mode_combo, "run_mode", "Full pipeline")
         self.breaking_threshold_input.setText(config.get("breaking_threshold", "2.5"))
         self.size_2d_filter_input.setText(config.get("size_2d_filter_multiplier", "15"))
@@ -2380,6 +2483,17 @@ class MainWindow(QMainWindow):
         self.show_segmentation_checkbox.setChecked(True)
         analysis_section.addWidget(self.show_segmentation_checkbox)
 
+        # Whole-cell and cytoplasm masks only exist when the analysis step was
+        # run with "save measurement mask", so the boxes stay hidden until a
+        # selected sample actually has one.
+        self.region_mask_checkboxes = {}
+        for tag, label in self._REGION_MASKS:
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(False)
+            checkbox.setVisible(False)
+            analysis_section.addWidget(checkbox)
+            self.region_mask_checkboxes[tag] = checkbox
+
         self.show_phenotype_segmentations_checkbox = QCheckBox("Show split phenotype segmentations")
         self.show_phenotype_segmentations_checkbox.setChecked(False)
         self.show_phenotype_segmentations_checkbox.toggled.connect(
@@ -2396,9 +2510,9 @@ class MainWindow(QMainWindow):
         self.phenotype_color_widget.setVisible(False)
         analysis_section.addWidget(self.phenotype_color_widget)
 
-        self._get_list_widget(self.view_data_sample_list).itemSelectionChanged.connect(
-            self._update_phenotype_color_rows
-        )
+        view_list = self._get_list_widget(self.view_data_sample_list)
+        view_list.itemSelectionChanged.connect(self._update_phenotype_color_rows)
+        view_list.itemSelectionChanged.connect(self._update_region_mask_checkboxes)
 
         self.view_data_layout.addLayout(analysis_section)
 
@@ -2415,6 +2529,45 @@ class MainWindow(QMainWindow):
         self.view_status_label.setVisible(False)
         button_section.addWidget(self.view_status_label)
         self.view_data_layout.addLayout(button_section)
+
+    # Per-cell masks add_advanced_statistics can write beside the segmentation,
+    # as "{sample}_segmented_{tag}.tif".
+    _REGION_MASKS = (
+        ("whole_cell", "Show whole-cell segmentation"),
+        ("cytoplasm", "Show cytoplasm segmentation"),
+    )
+
+    def region_mask_path(self, base_path, sample, tag):
+        return os.path.join(base_path, sample, f"{sample}_segmented_{tag}.tif")
+
+    def _update_region_mask_checkboxes(self):
+        """Offer a mask only when a selected sample actually has that file."""
+        list_widget = self._get_list_widget(self.view_data_sample_list)
+        selected = [item.text() for item in list_widget.selectedItems()]
+        base_path = self.path_text.text()
+
+        # Tracked here rather than read back from the widgets: a checkbox
+        # reports isVisible() False whenever its window is not on screen yet.
+        self._available_region_masks = set()
+        for tag, checkbox in self.region_mask_checkboxes.items():
+            available = any(
+                os.path.exists(self.region_mask_path(base_path, sample, tag))
+                for sample in selected
+            )
+            checkbox.setVisible(available)
+            if available:
+                self._available_region_masks.add(tag)
+            else:
+                checkbox.setChecked(False)
+
+    def selected_region_masks(self):
+        """Tags the user ticked, among those that are actually available."""
+        available = getattr(self, "_available_region_masks", set())
+        return [
+            tag
+            for tag, checkbox in self.region_mask_checkboxes.items()
+            if tag in available and checkbox.isChecked()
+        ]
 
     _PHENOTYPE_COLORS = ["Gray", "Red", "Green", "Blue", "Cyan", "Magenta", "Yellow", "White"]
     _PHENOTYPE_COLOR_MAP = {
@@ -2590,6 +2743,7 @@ class MainWindow(QMainWindow):
             show_segmentation,
             show_phenotype_segmentations,
             phenotype_colors,
+            self.selected_region_masks(),
         )
         self.viewer_worker.data_loaded.connect(self._launch_napari_viewer)
         self.viewer_worker.error_occurred.connect(self._viewer_error)
@@ -2622,10 +2776,8 @@ class MainWindow(QMainWindow):
         if signal.size == 0:
             return (0.0, max(data_max, 1.0)), (0.0, max(data_max, 1.0))
 
-        background = float(np.percentile(signal, 5))
-        foreground = float(np.percentile(signal, 99.5))
-        if foreground <= background:
-            foreground = background + 1.0
+        background = float(np.median(signal))
+        foreground = float(np.percentile(signal, 99.95))
 
         return (background, foreground), (0.0, max(data_max, foreground))
 
@@ -2696,6 +2848,21 @@ class MainWindow(QMainWindow):
                         metadata=dict(seg_metadata),
                     )
 
+            # Whole-cell / cytoplasm masks carry the same cell labels as the
+            # segmentation, so they get its metadata too and the property
+            # filter works on them as well.
+            for region in sample_data.get("region_masks", []):
+                viewer.add_labels(
+                    region["data"],
+                    name=f"{sample} {region['name']} segmentation",
+                    visible=True,
+                    blending="additive",
+                    rendering="iso_categorical",
+                    scale=voxel_size,
+                    iso_gradient_mode="smooth",
+                    metadata=dict(seg_metadata),
+                )
+
             for pheno in sample_data.get("phenotype_masks", []):
                 mask = pheno["data"]
                 pheno_name = pheno["name"]
@@ -2728,6 +2895,29 @@ class MainWindow(QMainWindow):
             attach_property_filter(viewer)
         except Exception as e:
             print(f"Could not attach property filter widget: {e}")
+
+        self._release_files_when_closed(viewer)
+
+    def _release_files_when_closed(self, viewer):
+        """Drop the layers when the viewer window goes away.
+
+        Layers hold the lazily-loaded arrays, which hold the open source files.
+        Until they are released the sample cannot be moved, renamed or deleted
+        on Windows, so closing the viewer has to actually let go.
+        """
+        def release(*_):
+            try:
+                viewer.layers.clear()
+            except Exception:
+                pass
+            gc.collect()
+
+        try:
+            viewer.window._qt_window.destroyed.connect(release)
+        except Exception as error:
+            # Private napari API: if it moves, the files stay open until the
+            # objects are collected anyway, so this is not worth failing over.
+            print(f"Note: could not hook viewer teardown ({error}).")
 
     def _viewer_error(self, error_message):
         self.view_button.setEnabled(True)
@@ -3018,7 +3208,8 @@ class ViewerWorker(QThread):
 
     def __init__(
         self, selected, base_path, channel_names, channel_colors, show_segmentation,
-        show_phenotype_segmentations=False, phenotype_colors=None
+        show_phenotype_segmentations=False, phenotype_colors=None,
+        show_region_masks=()
     ):
         super().__init__()
         self.selected = selected
@@ -3028,11 +3219,11 @@ class ViewerWorker(QThread):
         self.show_segmentation = show_segmentation
         self.show_phenotype_segmentations = show_phenotype_segmentations
         self.phenotype_colors = phenotype_colors or {}
+        self.show_region_masks = list(show_region_masks or ())
 
     def run(self):
         try:
             import numpy as np
-            from imaris_ims_file_reader.ims import ims
 
             samples_data = []
             for sample in self.selected:
@@ -3080,6 +3271,20 @@ class ViewerWorker(QThread):
                     f"segmentation {segmentation.shape if segmentation is not None else 'None'}"
                 )
 
+                region_masks = []
+                for tag in self.show_region_masks:
+                    mask_path = os.path.join(
+                        self.base_path, sample, f"{sample}_segmented_{tag}.tif"
+                    )
+                    if os.path.exists(mask_path):
+                        region_masks.append(
+                            {
+                                "name": tag.replace("_", " "),
+                                "data": tifffile.imread(mask_path),
+                            }
+                        )
+                        print(f"Loaded {tag} mask: {os.path.basename(mask_path)}")
+
                 phenotype_masks = []
                 if self.show_phenotype_segmentations:
                     sample_dir = os.path.join(self.base_path, sample)
@@ -3100,6 +3305,7 @@ class ViewerWorker(QThread):
                         "movie": movie,
                         "voxel_size": voxel_size,
                         "segmentation": segmentation,
+                        "region_masks": region_masks,
                         "phenotype_masks": phenotype_masks,
                         "properties_path": (
                             properties_path

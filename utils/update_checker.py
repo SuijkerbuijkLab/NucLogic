@@ -5,7 +5,7 @@ import json
 from PySide6.QtCore import QThread, Signal
 
 _PROJECT_ROOT = Path(__file__).parent.parent
-_REPO = "SebastianVanDijk/organoid_segmenter"
+_REPO = "SuijkerbuijkLab/NucLogic"
 _API_URL = f"https://api.github.com/repos/{_REPO}/releases/latest"
 
 
