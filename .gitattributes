@@ -7,8 +7,4 @@
 
 # Binary / LFS tracked files: -text keeps them out of any line-ending conversion.
 # These lines must stay AFTER the policy above (later rules win).
-*.pt filter=lfs diff=lfs merge=lfs -text
-models/sam2.1_hiera_s.yaml filter=lfs diff=lfs merge=lfs -text
-models/2d_high_quality_model filter=lfs diff=lfs merge=lfs -text
-models/2d_low_quality_model filter=lfs diff=lfs merge=lfs -text
 miscellaneous/example_movie.mp4 filter=lfs diff=lfs merge=lfs -text

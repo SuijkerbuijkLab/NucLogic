@@ -43,6 +43,35 @@ def _dependencies_removed(new_toml, current_toml):
         return True
 
 
+def _grant_all_users_access(root):
+    r"""Re-apply inheritable full access for BUILTIN\Users after a pixi install.
+
+    pixi/rattler hardlinks package files from PIXI_CACHE_DIR into .pixi\envs, and a
+    hardlink carries the cache file's own DACL rather than inheriting the install
+    folder's ACL. Packages freshly downloaded during an update therefore land
+    without a Users ACE, so standard accounts hit "Access is denied" loading their
+    DLLs -- the one-time icacls grant in NucLogic.bat only covered files that
+    existed at first-time setup. Re-granting here fixes every account.
+
+    Best-effort. takeown lets us rewrite the DACL even on files owned by another
+    account. icacls /reset then discards each file's explicit ACL and forces it to
+    re-inherit the install folder's (permissive) ACL -- this is what clears the
+    protected, inheritance-disabled DACLs that pip/uv package files land with (a
+    plain /grant would only append an entry and leave the protected flag set). /T
+    recurses, /C keeps going past briefly locked files, /Q hides success spam. Any
+    failure is non-fatal -- the install itself already succeeded.
+    """
+    root = str(root)
+    for cmd in (
+        ["takeown", "/F", root, "/R", "/D", "Y"],
+        ["icacls", root, "/reset", "/T", "/C", "/Q"],
+    ):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True)
+        except Exception:
+            pass
+
+
 def _is_lfs_pointer(path):
     try:
         with open(path, "rb") as f:
@@ -162,6 +191,12 @@ class Updater(QThread):
             )
             if result.returncode != 0:
                 raise RuntimeError(f"pixi install failed:\n{result.stderr}")
+
+            # Packages freshly hardlinked from the cache during this install do not
+            # inherit the install folder's ACLs, so re-apply them or standard
+            # accounts get "Access is denied" loading the new DLLs.
+            self.progress.emit("Updating file permissions for all users…")
+            _grant_all_users_access(_PROJECT_ROOT)
 
             # Record the installed version locally. version.txt is not part of the
             # release archive (it is gitignored), so we write it from the tag we
