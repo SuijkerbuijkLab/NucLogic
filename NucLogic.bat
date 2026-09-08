@@ -46,7 +46,7 @@ REM inheritable, which covers plain files created later. It does NOT cover packa
 REM that pixi/rattler hardlinks in from pixi_cache: a hardlink keeps the cache
 REM file's own DACL instead of inheriting this folder's. So the in-app updater
 REM re-applies this same grant itself after its pixi install (see utils/updater.py
-REM _grant_all_users_access); that is what keeps updates working for every account.
+REM _grant_new_files_access); that is what keeps updates working for every account.
 if not exist "%~dp0.pixi\envs\default" (
     REM First-time setup needs admin rights for takeown/icacls below. If we're not
     REM elevated, relaunch this script as administrator and let that copy do the

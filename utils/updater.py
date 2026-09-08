@@ -1,6 +1,8 @@
 from pathlib import Path
+import os
 import subprocess
 import tempfile
+import time
 import shutil
 import zipfile
 import urllib.request
@@ -43,8 +45,88 @@ def _dependencies_removed(new_toml, current_toml):
         return True
 
 
+# Above this many changed files, per-file icacls calls cost more than one
+# recursive pass (a full environment rebuild lands ~70k files).
+_BULK_ACL_THRESHOLD = 2000
+
+
+def _iter_files(root):
+    """Walk `root` with scandir, yielding DirEntry for each file.
+
+    On Windows the directory read already carries the metadata, so
+    entry.stat() below costs no extra syscall -- roughly an order of magnitude
+    faster than pathlib.rglob + stat over an environment's ~70k files.
+    Unreadable directories are skipped rather than aborting the walk.
+    """
+    stack = [str(root)]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                    elif entry.is_file(follow_symlinks=False):
+                        yield entry
+        except OSError:
+            continue
+
+
+def _grant_new_files_access(root, since):
+    r"""Re-apply access to just the files this install created.
+
+    _grant_all_users_access walks the whole tree twice, which is ~225k file
+    operations and takes minutes on every update even when pixi installed
+    nothing. Only files freshly linked in by this install can carry a cache
+    DACL, so only those need fixing.
+
+    Scoped to .pixi: a hardlink shares one inode with its pixi_cache source, so
+    resetting the env copy already fixes the cache copy.
+
+    Packages already present in the cache keep their old mtime and are skipped;
+    those were granted by an earlier run or by NucLogic.bat's first-time setup.
+    """
+    if not root.exists():
+        return
+
+    try:
+        changed = [e.path for e in _iter_files(root) if e.stat().st_mtime > since]
+    except OSError:
+        _grant_all_users_access(root)
+        return
+
+    if not changed:
+        return
+    if len(changed) > _BULK_ACL_THRESHOLD:
+        _grant_all_users_access(root)
+        return
+
+    for path in changed:
+        try:
+            result = subprocess.run(
+                ["icacls", str(path), "/reset", "/C", "/Q"],
+                capture_output=True,
+                text=True,
+            )
+            # takeown is only needed when the file belongs to another account,
+            # so it is paid for on failure rather than up front.
+            if result.returncode != 0:
+                subprocess.run(
+                    ["takeown", "/F", str(path)], capture_output=True, text=True
+                )
+                subprocess.run(
+                    ["icacls", str(path), "/reset", "/C", "/Q"],
+                    capture_output=True,
+                    text=True,
+                )
+        except Exception:
+            pass
+
+
 def _grant_all_users_access(root):
-    r"""Re-apply inheritable full access for BUILTIN\Users after a pixi install.
+    r"""Re-apply inheritable full access for BUILTIN\Users across a whole tree.
+
+    The fallback for _grant_new_files_access: used for a full rebuild, or when
+    the tree cannot be scanned.
 
     pixi/rattler hardlinks package files from PIXI_CACHE_DIR into .pixi\envs, and a
     hardlink carries the cache file's own DACL rather than inheriting the install
@@ -183,6 +265,10 @@ class Updater(QThread):
             pixi_exe = _PROJECT_ROOT / "tools" / "pixi.exe"
             if not pixi_exe.exists():
                 pixi_exe = "pixi"  # fall back to PATH
+            # Timestamped so the permission step below can tell which files this
+            # install actually produced. Taken before the run, and nudged back a
+            # second to absorb filesystem timestamp granularity.
+            install_started = time.time() - 1
             result = subprocess.run(
                 [str(pixi_exe), "install"],
                 cwd=str(_PROJECT_ROOT),
@@ -196,7 +282,7 @@ class Updater(QThread):
             # inherit the install folder's ACLs, so re-apply them or standard
             # accounts get "Access is denied" loading the new DLLs.
             self.progress.emit("Updating file permissions for all users…")
-            _grant_all_users_access(_PROJECT_ROOT)
+            _grant_new_files_access(_PROJECT_ROOT / ".pixi", install_started)
 
             # Record the installed version locally. version.txt is not part of the
             # release archive (it is gitignored), so we write it from the tag we
