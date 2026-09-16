@@ -1145,12 +1145,27 @@ class MainWindow(QMainWindow):
 
         return layout
 
+    def _select_advanced_statistic(self, name):
+        """Select one entry in the advanced-statistics list and scroll to it."""
+        for i in range(self.calculate_advanced_statistics_list.count()):
+            item = self.calculate_advanced_statistics_list.item(i)
+            if item.text() == name:
+                if not item.isSelected():
+                    item.setSelected(True)
+                    self.calculate_advanced_statistics_list.scrollToItem(item)
+                return
+
     def _cytoplasm_measurement_toggled(self):
         selected_option = self.nuclei_or_cytoplasm_checkbox.currentText()
         if selected_option == "Cytoplasm" or selected_option == "Whole cell":
             self.QLabel_cytoplasm_size.setVisible(True)
             self.cytoplasm_size_input.setVisible(True)
             self.save_measurement_mask_checkbox.setVisible(True)
+            # Measuring in the cytoplasm/whole cell is pointless without a mean
+            # intensity, so select it rather than making the user find it in the
+            # advanced settings. Never deselected again: switching back to
+            # Nuclei leaves the user's choice alone.
+            self._select_advanced_statistic("intensity_mean")
         else:
             self.QLabel_cytoplasm_size.setVisible(False)
             self.cytoplasm_size_input.setVisible(False)
