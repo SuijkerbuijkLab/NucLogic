@@ -23,6 +23,8 @@ torch = ">=2.5.1"
 torchvision = ">=0.20.1"
 torchaudio = "*"
 napari = { version = "*", extras = ["pyside6"] }
+napari-animation = "*"
+napari-plugin-manager = "*"
 imaris-ims-file-reader = "*"
 hdf5plugin = "*"
 alive-progress = "*"
