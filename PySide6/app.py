@@ -62,6 +62,18 @@ from PySide6.QtWidgets import (
 )
 import qdarktheme
 
+# A KeyError during a sample almost always means a column/channel lookup missed,
+# which is what happens when channel names differ from the previous run.
+CHANNEL_NAME_HINT = (
+    "Hint: this looks like a missing name lookup — check that the channel names "
+    "are spelled exactly as in previous runs for this sample."
+)
+
+
+def _is_key_error(error_line):
+    """True if a formatted traceback's last line is a KeyError."""
+    return error_line.lstrip().startswith("KeyError")
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1525,6 +1537,13 @@ class MainWindow(QMainWindow):
             False
         )  # Initially hidden, show after segmentation
         layout.addWidget(self.segmentation_summary_label)
+        # Separate line for skipped samples: the summary label above is
+        # rewritten every second by the watchdog, so failures need their own.
+        self.segmentation_failures_label = QLabel("")
+        self.segmentation_failures_label.setStyleSheet("color: #FFA500;")
+        self.segmentation_failures_label.setWordWrap(True)
+        self.segmentation_failures_label.setVisible(False)
+        layout.addWidget(self.segmentation_failures_label)
         return layout
 
     def _create_advanced_settings_layout(self):
@@ -2024,6 +2043,11 @@ class MainWindow(QMainWindow):
         self.run_segmentation_btn.setEnabled(False)
         self.continue_segmentation_btn.setVisible(False)
         self.segmentation_summary_label.setVisible(False)
+        if sample_override is None:
+            # Fresh run: clear failures. A continuation keeps the earlier ones.
+            self._failed_samples = []
+            self.segmentation_failures_label.setVisible(False)
+            self.segmentation_failures_label.setText("")
         QApplication.processEvents()
 
         model_path = self.get_model_path()
@@ -2159,6 +2183,7 @@ class MainWindow(QMainWindow):
         self.worker.stopped.connect(self.segmentation_stopped)
         self.worker.error_occurred.connect(self.segmentation_error)
         self.worker.heartbeat.connect(self._on_worker_heartbeat)
+        self.worker.sample_failed.connect(self._on_sample_failed)
         self.stop_segmentation_btn.setVisible(True)
         self.stop_segmentation_btn.setEnabled(True)
         self.worker.start()
@@ -2187,10 +2212,21 @@ class MainWindow(QMainWindow):
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
 
-        self.segmentation_summary_label.setStyleSheet("color: #44BB44;")
-        summary_text = f"Segmented {len(self.get_selected_samples())} samples.\nSegmentation completed at {finish_time} (took {minutes}m {seconds}s)"
+        failed_count = len(getattr(self, "_failed_samples", []))
+        total = len(self.get_selected_samples())
+        if failed_count:
+            self.segmentation_summary_label.setStyleSheet("color: #FFA500;")
+            summary_text = (
+                f"Segmented {total - failed_count} of {total} samples "
+                f"({failed_count} skipped after errors).\n"
+                f"Segmentation completed at {finish_time} (took {minutes}m {seconds}s)"
+            )
+        else:
+            self.segmentation_summary_label.setStyleSheet("color: #44BB44;")
+            summary_text = f"Segmented {total} samples.\nSegmentation completed at {finish_time} (took {minutes}m {seconds}s)"
         self.segmentation_summary_label.setText(summary_text)
         self.segmentation_summary_label.setVisible(True)
+        self._refresh_failures_label()
 
     def segmentation_stopped(self, elapsed_time, stopped_idx):
         """Called when the user stops segmentation between samples"""
@@ -2222,6 +2258,7 @@ class MainWindow(QMainWindow):
             f"Stopped by user after {minutes}m {seconds}s.{remaining_text}"
         )
         self.segmentation_summary_label.setVisible(True)
+        self._refresh_failures_label()
 
     def segmentation_error(self, error_message):
         """Called when an error occurs during segmentation"""
@@ -2238,6 +2275,7 @@ class MainWindow(QMainWindow):
         self.segmentation_summary_label.setStyleSheet("color: #FF4444;")
         self.segmentation_summary_label.setText(f"Error: {error_message}")
         self.segmentation_summary_label.setVisible(True)
+        self._refresh_failures_label()
 
     def _request_stop(self):
         if hasattr(self, "worker"):
@@ -2253,6 +2291,37 @@ class MainWindow(QMainWindow):
                 index_offset=getattr(self, "_continuation_index_offset", 0),
                 total_count=getattr(self, "_continuation_total_count", len(paths)),
             )
+
+    def _on_sample_failed(self, sample_path, last_error_line):
+        """A single sample errored; the run continues with the next one."""
+        if not hasattr(self, "_failed_samples"):
+            self._failed_samples = []
+        name = os.path.basename(os.path.normpath(sample_path)) or sample_path
+        self._failed_samples.append((name, last_error_line))
+        self._refresh_failures_label()
+
+    def _refresh_failures_label(self):
+        """Show the skipped-sample count plus the most recent error line."""
+        failures = getattr(self, "_failed_samples", [])
+        if not failures:
+            self.segmentation_failures_label.setVisible(False)
+            return
+        name, last_error_line = failures[-1]
+        count = len(failures)
+        prefix = (
+            "1 sample was skipped"
+            if count == 1
+            else f"{count} samples were skipped"
+        )
+        text = f"⚠ {prefix} due to errors. Last failure — {name}: {last_error_line}"
+        if _is_key_error(last_error_line):
+            text += f"\n{CHANNEL_NAME_HINT}"
+        self.segmentation_failures_label.setText(text)
+        tooltip = "\n".join(f"{n}: {err}" for n, err in failures)
+        if any(_is_key_error(err) for _, err in failures):
+            tooltip += f"\n\n{CHANNEL_NAME_HINT}"
+        self.segmentation_failures_label.setToolTip(tooltip)
+        self.segmentation_failures_label.setVisible(True)
 
     def _on_worker_heartbeat(self, msg):
         import time
@@ -2278,6 +2347,7 @@ class MainWindow(QMainWindow):
                 "Error: the segmentation process stopped unexpectedly. Check the terminal output for details."
             )
             self.segmentation_summary_label.setVisible(True)
+            self._refresh_failures_label()
             return
         elapsed = int(time.time() - self._last_heartbeat_time)
         minutes, seconds = divmod(elapsed, 60)
@@ -3445,6 +3515,7 @@ class SegmentationWorker(QThread):
     stopped = Signal(float, int)
     error_occurred = Signal(str)
     heartbeat = Signal(str)
+    sample_failed = Signal(str, str)  # sample path, last line of the traceback
 
     def __init__(
         self,
@@ -3747,6 +3818,21 @@ class SegmentationWorker(QThread):
                     traceback.print_exc()
                     failed_samples.append(f"{i}: {sample_error}")
                     print(f"Skipping sample due to error: {i}")
+                    formatted = traceback.format_exc().strip().splitlines()
+                    last_line = (
+                        formatted[-1].strip()
+                        if formatted
+                        else f"{type(sample_error).__name__}: {sample_error}"
+                    )
+                    if isinstance(sample_error, KeyError) and not _is_key_error(
+                        last_line
+                    ):
+                        # Multi-line KeyError messages: make sure the UI can
+                        # still recognise the type from this single line.
+                        last_line = f"KeyError: {sample_error}".replace("\n", " ")
+                    if _is_key_error(last_line):
+                        print(CHANNEL_NAME_HINT)
+                    self.sample_failed.emit(i, last_line)
                 finally:
                     progress = int((global_idx + 1) / self.total_count * 100)
                     self.progress_updated.emit(progress)
