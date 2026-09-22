@@ -4,20 +4,29 @@ import numpy as np
 
 from utils.load_image import load_image
 from utils.save_as_tiff import save_as_tiff
+from main_functions.calculate_phenotypes import phenotype_column_name
 
 
-def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
+def split_phenotype_mask(
+    input_directory,
+    phenotype_1,
+    phenotype_2,
+    phenotype_1_region="nuclei",
+    phenotype_2_region="nuclei",
+):
     properties = pd.read_csv(
         os.path.join(
             input_directory, f"{os.path.basename(input_directory)}_properties.tsv"
         ),
         sep="\t",
     )
-    phenotype_column_name = f"phenotype_{phenotype_1}_vs_{phenotype_2}"
+    phenotype_column = phenotype_column_name(
+        phenotype_1, phenotype_1_region, phenotype_2, phenotype_2_region
+    )
 
-    if phenotype_column_name not in properties.columns:
+    if phenotype_column not in properties.columns:
         print(
-            f"Did not find correct phenotype column ({phenotype_column_name}) in properties file. Please run the calculate_phenotypes function first to generate the phenotype column."
+            f"Did not find correct phenotype column ({phenotype_column}) in properties file. Please run the calculate_phenotypes function first to generate the phenotype column."
         )
         return
 
@@ -42,10 +51,10 @@ def split_phenotype_mask(input_directory, phenotype_1, phenotype_2):
         time_mask = segmentation[timepoint]  # Z, Y, X
 
         labels_1 = time_properties[
-            time_properties[phenotype_column_name] == phenotype_1
+            time_properties[phenotype_column] == phenotype_1
         ]["label"].values
         labels_2 = time_properties[
-            time_properties[phenotype_column_name] == phenotype_2
+            time_properties[phenotype_column] == phenotype_2
         ]["label"].values
 
         mask_phenotype_1 = np.isin(time_mask, labels_1)

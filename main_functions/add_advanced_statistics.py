@@ -10,6 +10,7 @@ from utils.compute_shape_descriptors import (
 from utils.find_input_file import find_input_file
 from utils.expand_mask import expand_mask_3d
 from utils.offset_image import offset_image
+from utils.properties_channel import properties_channel
 from utils.compute_knn_features import compute_knn_features
 from utils.get_touching_neigbhours_3d import get_touching_neighbors_3d
 from utils.load_image import as_numpy, load_image
@@ -17,12 +18,24 @@ from utils.save_as_tiff import save_as_tiff
 from utils.voxel_size import resolve_voxel_size
 
 
+REGIONS = ("nuclei", "cytoplasm", "whole_cell")
+
+
+def _region_mask(nuclei, expanded, region):
+    """Mask to measure in. Works on ZYX or TZYX."""
+    if region == "nuclei":
+        return nuclei
+    if region == "whole_cell":
+        return expanded
+    # Cytoplasm: expanded labels outside the nucleus, keeping per-cell labeling.
+    return np.where(nuclei == 0, expanded, 0).astype(expanded.dtype)
+
+
 def add_advanced_statistics(
     input_directory,
     extra_props,
     channel_names,
-    do_crop_sample=False,
-    measure_intensity_in="Nuclei",
+    measure_regions=("nuclei",),
     cytoplasm_size=5,
     save_measurement_mask=False,
     user_voxel_size=None,
@@ -34,6 +47,14 @@ def add_advanced_statistics(
 ):
     extra_props = extra_props or []
 
+    regions = list(measure_regions or ("nuclei",))
+    unknown = [r for r in regions if r not in REGIONS]
+    if unknown:
+        raise ValueError(f"Unknown measurement region(s): {unknown}. Expected {REGIONS}.")
+    # Nuclei mean intensities are written by segment_organoid; only the expanded
+    # regions need measuring here.
+    expanded_regions = [r for r in regions if r != "nuclei"]
+
     should_run_knn = (
         calculate_neighbour_statistics and use_knn_neighbours and bool(knn_list)
     )
@@ -43,7 +64,12 @@ def add_advanced_statistics(
         and touching_dilation_um is not None
     )
 
-    if not extra_props and not should_run_knn and not should_run_touching:
+    if (
+        not extra_props
+        and not should_run_knn
+        and not should_run_touching
+        and not expanded_regions
+    ):
         print(
             "No extra properties selected and neighbour statistics are disabled. Nothing to add."
         )
@@ -112,67 +138,54 @@ def add_advanced_statistics(
             f"Unexpected segmented image shape {segmented_movie.shape}; expected TZYX or ZYX."
         )
 
-    if do_crop_sample:
-        input_file = [
-            os.path.join(input_directory, f)
-            for f in os.listdir(input_directory)
-            if f.endswith(("_cropped.ims", "_cropped.tif"))
-        ]
-        input_file = input_file[0] if input_file else None
-        name = (
-            os.path.basename(input_file).split("_cropped.")[0] if input_file else None
-        )
-        if input_file is None:
-            print(
-                f"No cropped file found in {input_directory}. Please run crop_sample first or set do_crop_sample to False."
-            )
-            return
-    else:
-        input_file = find_input_file(input_directory)
-        name = os.path.basename(input_file).split(".")[0]
+    # A cropped file in the folder is what the segmentation was made from, so it
+    # wins regardless of the crop setting of this run. The shape check below still
+    # decides, in case a stale cropped file sits next to an uncropped segmentation.
+    cropped = [
+        os.path.join(input_directory, f)
+        for f in os.listdir(input_directory)
+        if f.endswith(("_cropped.ims", "_cropped.tif"))
+    ]
+    candidates = cropped + [find_input_file(input_directory)]
 
     # Load source movie with expected shape T, C, Z, Y, X. Lazy: timepoints are
     # materialised one at a time in the loop below.
-    loaded_movie, voxel_size, time_interval, metadata_missing = load_image(input_file)
+    for input_file in [c for c in candidates if c]:
+        loaded_movie, voxel_size, time_interval, metadata_missing = load_image(
+            input_file
+        )
+        if loaded_movie.shape[-3:] == segmented_movie.shape[-3:]:
+            break
+    else:
+        print(
+            f"No image in {input_directory} matches the segmentation shape "
+            f"{tuple(segmented_movie.shape[-3:])}. Re-run segmentation for this sample."
+        )
+        return
 
     voxel_size = resolve_voxel_size(voxel_size, user_voxel_size, metadata_missing)
 
-    measure_region = measure_intensity_in.lower().strip()
-    if measure_region == "nuclei":
-        mask_to_use = segmented_movie
-        region_tag = "nuclei"
-    elif measure_region == "whole cell":
-        mask_to_use = expand_mask_3d(
+    # Cytoplasm and whole cell share a single expansion.
+    expanded_movie = (
+        expand_mask_3d(
             segmented_movie,
             dilation_size_um=float(cytoplasm_size),
             voxel_size=voxel_size,
         )
-        region_tag = "whole_cell"
-    elif measure_region == "cytoplasm":
-        whole_cell_mask = expand_mask_3d(
-            segmented_movie,
-            dilation_size_um=float(cytoplasm_size),
-            voxel_size=voxel_size,
-        )
-        # Keep expanded cell labels only outside the nucleus to preserve per-cell labeling.
-        mask_to_use = np.where(segmented_movie == 0, whole_cell_mask, 0).astype(
-            whole_cell_mask.dtype
-        )
-        region_tag = "cytoplasm"
-    else:
-        raise ValueError(
-            "measure_intensity_in must be one of: 'Nuclei', 'Cytoplasm', 'Whole cell'."
-        )
+        if expanded_regions
+        else None
+    )
 
-    if save_measurement_mask and measure_region != "nuclei":
+    if save_measurement_mask:
         sample_name = os.path.basename(input_directory)
-        save_as_tiff(
-            os.path.join(input_directory, f"{sample_name}_segmented_{region_tag}.tif"),
-            mask_to_use,
-            "TZYX",
-            voxel_size,
-            time_interval,
-        )
+        for region in expanded_regions:
+            save_as_tiff(
+                os.path.join(input_directory, f"{sample_name}_segmented_{region}.tif"),
+                _region_mask(segmented_movie, expanded_movie, region),
+                "TZYX",
+                voxel_size,
+                time_interval,
+            )
 
     touching_expanded_movie = None
     touching_prefix = None
@@ -201,7 +214,7 @@ def add_advanced_statistics(
 
     n_timepoints = min(
         len(props["timepoint"].unique()),
-        mask_to_use.shape[0],
+        segmented_movie.shape[0],
         loaded_movie.shape[0],
     )
     if n_timepoints == 0:
@@ -216,7 +229,10 @@ def add_advanced_statistics(
             continue
 
         time_props = props[props["timepoint"] == timepoint].copy()
-        mask_3d = mask_to_use[timepoint_int]
+        # Shape properties describe the segmentation itself, so they stay on the
+        # nuclei mask; only intensities are measured per region.
+        mask_3d = segmented_movie[timepoint_int]
+        expanded_3d = None if expanded_movie is None else expanded_movie[timepoint_int]
         # Read this timepoint once; everything below works on real numpy.
         frame = as_numpy(loaded_movie[timepoint_int])  # C, Z, Y, X
 
@@ -243,32 +259,39 @@ def add_advanced_statistics(
             )
             time_props = _merge_overwrite(time_props, descriptor_df, key="label")
 
-        # Add intensity-dependent props for each channel as both raw and background-subtracted.
-        if intensity_props:
-            for ch_idx, channel_name in enumerate(channel_names):
-                if ch_idx >= frame.shape[0]:
-                    continue
+        # Measure each requested region, as both raw and background-subtracted.
+        if intensity_props or expanded_regions:
+            offsets = [offset_image(frame[c], "median") for c in range(frame.shape[0])]
+            for region in regions:
+                region_mask = _region_mask(mask_3d, expanded_3d, region)
+                for ch_idx, channel_name in enumerate(channel_names):
+                    if ch_idx >= frame.shape[0]:
+                        continue
 
-                raw_intensity_df = get_extra_mask_properties(
-                    mask_3d,
-                    intensity_image=frame[ch_idx],
-                    extra_props=intensity_props,
-                    channel_name=f"{channel_name}_{region_tag}_raw",
-                    voxel_size=voxel_size,
-                )
-                time_props = _merge_overwrite(time_props, raw_intensity_df, key="label")
-
-                offset_ch = offset_image(frame[ch_idx], "median")
-                bgsub_intensity_df = get_extra_mask_properties(
-                    mask_3d,
-                    intensity_image=offset_ch,
-                    extra_props=intensity_props,
-                    channel_name=f"{channel_name}_{region_tag}_background_subtracted",
-                    voxel_size=voxel_size,
-                )
-                time_props = _merge_overwrite(
-                    time_props, bgsub_intensity_df, key="label"
-                )
+                    for image, kind in (
+                        (frame[ch_idx], "raw"),
+                        (offsets[ch_idx], "background_subtracted"),
+                    ):
+                        tag = f"{channel_name}_{region}_{kind}"
+                        # Mean intensity for the expanded regions; nuclei already have it.
+                        if region != "nuclei":
+                            time_props = _merge_overwrite(
+                                time_props,
+                                properties_channel(region_mask, image, tag),
+                                key="label",
+                            )
+                        if intensity_props:
+                            time_props = _merge_overwrite(
+                                time_props,
+                                get_extra_mask_properties(
+                                    region_mask,
+                                    intensity_image=image,
+                                    extra_props=intensity_props,
+                                    channel_name=tag,
+                                    voxel_size=voxel_size,
+                                ),
+                                key="label",
+                            )
 
         if should_run_knn:
             for knn in knn_list:
@@ -278,8 +301,8 @@ def add_advanced_statistics(
                     position_columns=["z", "y", "x"],
                     get_phenotype_score=False,
                     label_column="label",
-                    distance_column=f"mean_distance_{knn}_KNN",
-                    neighbors_column=f"neighbours_{knn}_KNN",
+                    distance_column=f"mean_distance_{knn}_knn",
+                    neighbors_column=f"neighbours_{knn}_knn",
                     add_cell_id=False,
                 )
 

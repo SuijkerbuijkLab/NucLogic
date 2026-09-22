@@ -19,7 +19,6 @@ from utils.find_input_file import find_input_file
 from utils.compensate_voxel_size import compensate_voxel_size
 from utils.properties_channel import properties_channel
 from utils.offset_image import offset_image
-from utils.expand_mask import expand_mask_3d
 
 
 def extract_frame_number(filename):
@@ -37,15 +36,9 @@ def segment_organoid(
     do_crop_sample=False,
     save_frames=True,
     save_segmentation=True,
-    measure_intensity_in="Nuclei",
-    cytoplasm_size=5,
-    save_measurement_mask=False,
     user_voxel_size=None,
 ):
     nuclei_channels = []
-
-
-    measure_region = measure_intensity_in.lower().strip()
 
     for i, channel_type in enumerate(channel_types):
         if "nuclei" in channel_type.lower():
@@ -77,7 +70,6 @@ def segment_organoid(
     voxel_size = resolve_voxel_size(voxel_size, user_voxel_size, metadata_missing)
 
     segmented_movie = []
-    measurement_mask_movie = []
     properties = []
     print(f"Loaded movie shape (T, C, Z, Y, X): {loaded_movie.shape}")
     # print(f"full movie shape {loaded_movie.shape}")
@@ -179,49 +171,19 @@ def segment_organoid(
         # Compensate for voxel size to get real world xyz distance values instead of pixel values
         props = compensate_voxel_size(props, voxel_size)
 
-        if measure_region == "nuclei":
-            mask_for_intensity = segmented_stack_stitched
-            region_tag = "nuclei"
-        elif measure_region == "whole cell":
-            print(
-                f"Expanding nuclei masks to whole cell masks with cytoplasm size {cytoplasm_size} um for timepoint {timepoint}..."
-            )
-            mask_for_intensity = expand_mask_3d(
-                segmented_stack_stitched, dilation_size_um=cytoplasm_size
-            )
-            region_tag = "whole_cell"
-        elif measure_region == "cytoplasm":
-            print(
-                f"Expanding nuclei masks to cytoplasm masks with cytoplasm size {cytoplasm_size} um for timepoint {timepoint}..."
-            )
-            whole_cell_mask = expand_mask_3d(
-                segmented_stack_stitched, dilation_size_um=cytoplasm_size
-            )
-            mask_for_intensity = np.where(
-                segmented_stack_stitched == 0, whole_cell_mask, 0
-            ).astype(whole_cell_mask.dtype)
-            region_tag = "cytoplasm"
-        else:
-            raise ValueError(
-                "measure_intensity_in must be one of: 'Nuclei', 'Cytoplasm', 'Whole cell'."
-            )
-
-        if save_measurement_mask and measure_region != "nuclei":
-            measurement_mask_movie.append(mask_for_intensity)
-
         channel_dfs = {}  # Store channel dataframes during for loop
         for i, channel in enumerate(channel_names):
             print(
                 f"Measuring properties for channel {channel} at timepoint {timepoint}..."
             )
             df_ch = properties_channel(
-                mask_for_intensity, frame[i], f"{channel.lower()}_raw"
+                segmented_stack_stitched, frame[i], f"{channel.lower()}_nuclei_raw"
             )
             offset_ch = offset_image(frame[i], "median")
             df_ch_offset = properties_channel(
-                mask_for_intensity,
+                segmented_stack_stitched,
                 offset_ch,
-                f"{channel.lower()}_background_subtracted",
+                f"{channel.lower()}_nuclei_background_subtracted",
             )
             channel_dfs[channel] = pd.merge(df_ch, df_ch_offset, on="label")
 
@@ -245,16 +207,6 @@ def segment_organoid(
         voxel_size,
         time_interval,
     )
-
-    if save_measurement_mask and measure_region != "nuclei" and measurement_mask_movie:
-        measurement_mask_movie = np.stack(measurement_mask_movie, axis=0)
-        save_as_tiff(
-            os.path.join(input_directory, f"{name}_segmented_{region_tag}.tif"),
-            measurement_mask_movie,
-            "TZYX",
-            voxel_size,
-            time_interval,
-        )
 
     # Convert the data from all frames to a pandas data frame
     properties = pd.concat(properties, ignore_index=True)

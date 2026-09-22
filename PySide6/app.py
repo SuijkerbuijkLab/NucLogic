@@ -62,6 +62,9 @@ from PySide6.QtWidgets import (
 )
 import qdarktheme
 
+# Measurement regions, mapping the tag used in column names to its UI label.
+REGION_LABELS = {"nuclei": "Nuclei", "cytoplasm": "Cytoplasm", "whole_cell": "Whole cell"}
+
 # A KeyError during a sample almost always means a column/channel lookup missed,
 # which is what happens when channel names differ from the previous run.
 CHANNEL_NAME_HINT = (
@@ -922,17 +925,18 @@ class MainWindow(QMainWindow):
         # )
         layout1 = QHBoxLayout()
         layout1.addWidget(QLabel("Measure intensities inside the:"))
-        self.nuclei_or_cytoplasm_checkbox = QComboBox()
-        self.nuclei_or_cytoplasm_checkbox.addItems(
-            ["Nuclei", "Cytoplasm", "Whole cell"]
-        )
-        self.nuclei_or_cytoplasm_checkbox.currentTextChanged.connect(
-            self._cytoplasm_measurement_toggled
-        )
-        layout1.addWidget(self.nuclei_or_cytoplasm_checkbox)
-        layout1.addWidget(self._info_label(
-            "Phenotype/cell-type calling uses this same nuclei/cytoplasm/whole-cell intensity setting."
-        ))
+        # Nuclei are always measured; the expanded regions are opt-in and can be
+        # combined, so each run can report all three.
+        self.region_checkboxes = {}
+        for tag, label in REGION_LABELS.items():
+            box = QCheckBox(label)
+            if tag == "nuclei":
+                box.setChecked(True)
+                box.setEnabled(False)
+            else:
+                box.toggled.connect(self._region_selection_changed)
+            self.region_checkboxes[tag] = box
+            layout1.addWidget(box)
         layout1.addStretch()
         layout.addLayout(layout1)
 
@@ -1155,21 +1159,38 @@ class MainWindow(QMainWindow):
                     self.calculate_advanced_statistics_list.scrollToItem(item)
                 return
 
-    def _cytoplasm_measurement_toggled(self):
-        selected_option = self.nuclei_or_cytoplasm_checkbox.currentText()
-        if selected_option == "Cytoplasm" or selected_option == "Whole cell":
-            self.QLabel_cytoplasm_size.setVisible(True)
-            self.cytoplasm_size_input.setVisible(True)
-            self.save_measurement_mask_checkbox.setVisible(True)
-            # Measuring in the cytoplasm/whole cell is pointless without a mean
-            # intensity, so select it rather than making the user find it in the
-            # advanced settings. Never deselected again: switching back to
-            # Nuclei leaves the user's choice alone.
+    def _region_combo(self):
+        """Region picker holding the column tag as item data."""
+        combo = QComboBox()
+        for tag, label in REGION_LABELS.items():
+            combo.addItem(label, tag)
+        combo.currentTextChanged.connect(self._region_selection_changed)
+        return combo
+
+    def get_measure_regions(self):
+        """Region tags ticked in the advanced statistics settings."""
+        return [tag for tag, box in self.region_checkboxes.items() if box.isChecked()]
+
+    def phenotype_regions(self):
+        """Regions the two phenotype channels are measured in."""
+        return {
+            self.phenotype_1_region.currentData(),
+            self.phenotype_2_region.currentData(),
+        }
+
+    def _region_selection_changed(self):
+        """Show the extension settings whenever an expanded region is wanted —
+        by the statistics checkboxes or by either phenotype channel."""
+        regions = set(self.get_measure_regions()) | self.phenotype_regions()
+        expanded = bool(regions - {"nuclei", None})
+        self.QLabel_cytoplasm_size.setVisible(expanded)
+        self.cytoplasm_size_input.setVisible(expanded)
+        self.save_measurement_mask_checkbox.setVisible(expanded)
+        if expanded:
+            # An expanded region is pointless without a mean intensity, so select it
+            # rather than making the user find it in the advanced settings.
             self._select_advanced_statistic("intensity_mean")
         else:
-            self.QLabel_cytoplasm_size.setVisible(False)
-            self.cytoplasm_size_input.setVisible(False)
-            self.save_measurement_mask_checkbox.setVisible(False)
             self.save_measurement_mask_checkbox.setChecked(False)
 
     def _toggle_neighbour_statistics(self, checked):
@@ -1199,9 +1220,10 @@ class MainWindow(QMainWindow):
         ]
 
     def get_advanced_statistics_settings(self):
-        measure_intensity_in = self.nuclei_or_cytoplasm_checkbox.currentText()
+        measure_regions = self.get_measure_regions()
         cytoplasm_size = 5
-        if measure_intensity_in in ("Cytoplasm", "Whole cell"):
+        # The radius is only needed once an expanded region is measured somewhere.
+        if (set(measure_regions) | self.phenotype_regions()) - {"nuclei"}:
             try:
                 cytoplasm_size = int(self.cytoplasm_size_input.text())
             except ValueError as exc:
@@ -1284,7 +1306,7 @@ class MainWindow(QMainWindow):
         return (
             extra_props,
             advanced_statistics_only,
-            measure_intensity_in,
+            measure_regions,
             cytoplasm_size,
             save_measurement_mask,
             user_voxel_size,
@@ -1430,9 +1452,17 @@ class MainWindow(QMainWindow):
         self.phenotype_1 = QComboBox()
         self.phenotype_2 = QComboBox()
         self._update_phenotype_combos()
+        # Each channel is measured in its own region, independent of the regions
+        # ticked in the advanced statistics settings.
+        self.phenotype_1_region = self._region_combo()
+        self.phenotype_2_region = self._region_combo()
         layout2.addWidget(self.phenotype_1)
+        layout2.addWidget(QLabel("in"))
+        layout2.addWidget(self.phenotype_1_region)
         layout2.addWidget(QLabel("VS"))
         layout2.addWidget(self.phenotype_2)
+        layout2.addWidget(QLabel("in"))
+        layout2.addWidget(self.phenotype_2_region)
         layout2.addStretch()
         daughters_layout.addLayout(layout2)
 
@@ -2038,6 +2068,8 @@ class MainWindow(QMainWindow):
             raw_or_background_subtracted,
             phenotype_calling_only,
             create_split_phenotype_mask,
+            self.phenotype_1_region.currentData(),
+            self.phenotype_2_region.currentData(),
         )
 
     def start_segmentation(self, sample_override=None, index_offset=0, total_count=None):
@@ -2084,6 +2116,8 @@ class MainWindow(QMainWindow):
                 raw_or_background_subtracted,
                 phenotype_calling_only,
                 create_split_phenotype_mask,
+                phenotype_1_region,
+                phenotype_2_region,
             ) = self.get_phenotype_calling_settings()
         except ValueError as e:
             self.segmentation_error(str(e))
@@ -2098,7 +2132,7 @@ class MainWindow(QMainWindow):
             (
                 extra_props,
                 advanced_statistics_only,
-                measure_intensity_in,
+                measure_regions,
                 cytoplasm_size,
                 save_measurement_mask,
                 user_voxel_size,
@@ -2178,7 +2212,7 @@ class MainWindow(QMainWindow):
             save_segmentation,
             extra_props,
             advanced_statistics_only,
-            measure_intensity_in,
+            measure_regions,
             cytoplasm_size,
             save_measurement_mask,
             user_voxel_size,
@@ -2192,6 +2226,8 @@ class MainWindow(QMainWindow):
             manually_cropped_fixed_samples,
             index_offset=index_offset,
             total_count=total_count,
+            phenotype_1_region=phenotype_1_region,
+            phenotype_2_region=phenotype_2_region,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
         self.worker.finished.connect(self.segmentation_finished)
@@ -2415,7 +2451,9 @@ class MainWindow(QMainWindow):
             "cutoff_method": self.calculate_cutoff.currentText(),
             "custom_cutoff": self.custom_cutoff_input.text(),
             "raw_or_background_subtracted": self.raw_or_background_subtracted.currentText(),
-            "measure_intensity_in": self.nuclei_or_cytoplasm_checkbox.currentText(),
+            "phenotype_1_region": self.phenotype_1_region.currentData(),
+            "phenotype_2_region": self.phenotype_2_region.currentData(),
+            "measure_regions": self.get_measure_regions(),
             "cytoplasm_size": self.cytoplasm_size_input.text(),
             "save_measurement_mask": self.save_measurement_mask_checkbox.isChecked(),
             "calculate_neighbour_statistics": self.calculate_neighbour_statistics_checkbox.isChecked(),
@@ -2515,7 +2553,17 @@ class MainWindow(QMainWindow):
         _set_combo(self.calculate_cutoff, "cutoff_method")
         self.custom_cutoff_input.setText(config.get("custom_cutoff", "0.0"))
         _set_combo(self.raw_or_background_subtracted, "raw_or_background_subtracted")
-        _set_combo(self.nuclei_or_cytoplasm_checkbox, "measure_intensity_in", "Nuclei")
+        # Configs written before regions were multi-select carry a single label.
+        legacy = config.get("measure_intensity_in", "Nuclei").lower().replace(" ", "_")
+        regions = set(config.get("measure_regions") or [legacy])
+        for tag, box in self.region_checkboxes.items():
+            box.setChecked(tag == "nuclei" or tag in regions)
+        for combo, key in (
+            (self.phenotype_1_region, "phenotype_1_region"),
+            (self.phenotype_2_region, "phenotype_2_region"),
+        ):
+            index = combo.findData(config.get(key, "nuclei"))
+            combo.setCurrentIndex(index if index >= 0 else 0)
         self.cytoplasm_size_input.setText(config.get("cytoplasm_size", "5"))
         _set_check(self.save_measurement_mask_checkbox, "save_measurement_mask")
         _set_check(self.calculate_neighbour_statistics_checkbox, "calculate_neighbour_statistics")
@@ -2532,7 +2580,7 @@ class MainWindow(QMainWindow):
             item.setSelected(item.text() in selected)
 
         # Re-trigger toggle slots so dependent sub-widgets show/hide correctly
-        self._cytoplasm_measurement_toggled()
+        self._region_selection_changed()
         self._toggle_crop_suboptions(self.do_crop_sample.isChecked())
         self._toggle_phenotype_daughters(self.do_phenotype_calling_checkbox.isChecked())
         self._toggle_neighbour_statistics(self.calculate_neighbour_statistics_checkbox.isChecked())
@@ -3556,7 +3604,7 @@ class SegmentationWorker(QThread):
         save_segmentation,
         extra_props,
         advanced_statistics_only,
-        measure_intensity_in,
+        measure_regions,
         cytoplasm_size,
         save_measurement_mask,
         user_voxel_size,
@@ -3570,6 +3618,8 @@ class SegmentationWorker(QThread):
         manually_cropped_fixed_samples=None,
         index_offset=0,
         total_count=None,
+        phenotype_1_region="nuclei",
+        phenotype_2_region="nuclei",
     ):
         super().__init__()
         self._stop_requested = False
@@ -3586,6 +3636,8 @@ class SegmentationWorker(QThread):
         self.create_split_phenotype_mask = create_split_phenotype_mask
         self.phenotype_1 = phenotype_1
         self.phenotype_2 = phenotype_2
+        self.phenotype_1_region = phenotype_1_region
+        self.phenotype_2_region = phenotype_2_region
         self.cutoff_method = cutoff_method
         self.custom_cutoff = custom_cutoff
         self.raw_or_background_subtracted = raw_or_background_subtracted
@@ -3597,7 +3649,7 @@ class SegmentationWorker(QThread):
         self.save_segmentation = save_segmentation
         self.extra_props = extra_props
         self.advanced_statistics_only = advanced_statistics_only
-        self.measure_intensity_in = measure_intensity_in
+        self.measure_regions = measure_regions
         self.cytoplasm_size = cytoplasm_size
         self.save_measurement_mask = save_measurement_mask
         self.user_voxel_size = user_voxel_size
@@ -3626,7 +3678,10 @@ class SegmentationWorker(QThread):
             print("Preparing pipeline (loading libraries and model)...")
             from main_functions.segment_organoid import segment_organoid
             from utils.load_model import load_model
-            from main_functions.calculate_phenotypes import calculate_phenotypes
+            from main_functions.calculate_phenotypes import (
+                calculate_phenotypes,
+                phenotype_column_name,
+            )
             from main_functions.crop_sample import crop_sample
             from main_functions.split_phenotype_mask import split_phenotype_mask
             from main_functions.add_advanced_statistics import add_advanced_statistics
@@ -3714,39 +3769,42 @@ class SegmentationWorker(QThread):
                             self.do_crop_sample,
                             save_frames=self.save_frames,
                             save_segmentation=self.save_segmentation,
-                            measure_intensity_in=self.measure_intensity_in,
-                            cytoplasm_size=self.cytoplasm_size,
-                            save_measurement_mask=self.save_measurement_mask,
                             user_voxel_size=self.user_voxel_size,
                         )
 
-                        should_run_advanced_stats = bool(self.extra_props) or (
-                            self.calculate_neighbour_statistics
-                            and (
-                                (self.use_knn_neighbours and self.knn_list is not None)
-                                or (
-                                    self.use_touching_neighbours_3d
-                                    and self.touching_dilation_um is not None
-                                )
+                    # Statistics also measure the phenotype regions, so they run first.
+                    stats = (
+                        not self.phenotype_calling_only or self.advanced_statistics_only
+                    )
+                    regions = list(
+                        dict.fromkeys(
+                            (list(self.measure_regions) if stats else [])
+                            + (
+                                [self.phenotype_1_region, self.phenotype_2_region]
+                                if self.do_phenotype_calling
+                                else []
                             )
                         )
-                        if should_run_advanced_stats:
-                            print("Calculating advanced statistics...")
-                            add_advanced_statistics(
-                                i,
-                                self.extra_props,
-                                self.channel_names,
-                                do_crop_sample=self.do_crop_sample,
-                                measure_intensity_in=self.measure_intensity_in,
-                                cytoplasm_size=self.cytoplasm_size,
-                                save_measurement_mask=self.save_measurement_mask,
-                                user_voxel_size=self.user_voxel_size,
-                                calculate_neighbour_statistics=self.calculate_neighbour_statistics,
-                                use_knn_neighbours=self.use_knn_neighbours,
-                                knn_list=self.knn_list,
-                                use_touching_neighbours_3d=self.use_touching_neighbours_3d,
-                                touching_dilation_um=self.touching_dilation_um,
-                            )
+                    )
+                    if stats or any(region != "nuclei" for region in regions):
+                        print("Calculating advanced statistics...")
+                        add_advanced_statistics(
+                            i,
+                            self.extra_props if stats else [],
+                            self.channel_names,
+                            measure_regions=regions,
+                            cytoplasm_size=self.cytoplasm_size,
+                            save_measurement_mask=self.save_measurement_mask,
+                            user_voxel_size=self.user_voxel_size,
+                            calculate_neighbour_statistics=stats
+                            and self.calculate_neighbour_statistics,
+                            use_knn_neighbours=self.use_knn_neighbours,
+                            knn_list=self.knn_list,
+                            use_touching_neighbours_3d=self.use_touching_neighbours_3d,
+                            touching_dilation_um=self.touching_dilation_um,
+                        )
+
+                    phenotype_column = None
                     if self.do_phenotype_calling:
                         print("Calculating phenotypes...")
                         calculate_phenotypes(
@@ -3756,29 +3814,14 @@ class SegmentationWorker(QThread):
                             self.cutoff_method,
                             self.custom_cutoff,
                             self.raw_or_background_subtracted,
+                            phenotype_1_region=self.phenotype_1_region,
+                            phenotype_2_region=self.phenotype_2_region,
                         )
-                    if self.advanced_statistics_only:
-                        print("Calculating advanced statistics...")
-                        add_advanced_statistics(
-                            i,
-                            self.extra_props,
-                            self.channel_names,
-                            do_crop_sample=self.do_crop_sample,
-                            measure_intensity_in=self.measure_intensity_in,
-                            cytoplasm_size=self.cytoplasm_size,
-                            save_measurement_mask=self.save_measurement_mask,
-                            user_voxel_size=self.user_voxel_size,
-                            calculate_neighbour_statistics=self.calculate_neighbour_statistics,
-                            use_knn_neighbours=self.use_knn_neighbours,
-                            knn_list=self.knn_list,
-                            use_touching_neighbours_3d=self.use_touching_neighbours_3d,
-                            touching_dilation_um=self.touching_dilation_um,
-                        )
-
-                    phenotype_column = None
-                    if self.do_phenotype_calling:
-                        phenotype_column = (
-                            f"phenotype_{self.phenotype_1}_vs_{self.phenotype_2}"
+                        phenotype_column = phenotype_column_name(
+                            self.phenotype_1,
+                            self.phenotype_1_region,
+                            self.phenotype_2,
+                            self.phenotype_2_region,
                         )
 
                     if self.calculate_phenotype_similarity_knn:
@@ -3793,8 +3836,8 @@ class SegmentationWorker(QThread):
                             for knn in self.knn_list:
                                 add_phenotype_similarity(
                                     i,
-                                    neighbors_column=f"neighbours_{knn}_KNN",
-                                    output_column=f"phenotype_similarity_ratio_{knn}_KNN",
+                                    neighbors_column=f"neighbours_{knn}_knn",
+                                    output_column=f"phenotype_similarity_ratio_{knn}_knn",
                                     phenotype_column=phenotype_column,
                                 )
 
@@ -3823,7 +3866,13 @@ class SegmentationWorker(QThread):
 
                     if self.do_phenotype_calling and self.create_split_phenotype_mask:
                         print("Creating split phenotype mask...")
-                        split_phenotype_mask(i, self.phenotype_1, self.phenotype_2)
+                        split_phenotype_mask(
+                            i,
+                            self.phenotype_1,
+                            self.phenotype_2,
+                            self.phenotype_1_region,
+                            self.phenotype_2_region,
+                        )
                     print(
                         f"Finished processing sample {i}\n{idx + 1}/{len(self.sample_path_list)}"
                     )
