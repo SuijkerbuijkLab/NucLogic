@@ -71,8 +71,36 @@ keywords:
   - microscopy
   - image analysis
   - Cellpose
-# Add when tagging a release, matching the tag (e.g. 1.0.0), and add the
-# Zenodo DOI once the first archive exists:
-# version: "1.0.0"
-# date-released: "2026-MM-DD"
-# doi: "10.5281/zenodo.XXXXXXX"
+# Update version and date-released with every release, matching the tag.
+version: "1.0.0"
+date-released: "2026-10-02"
+# Concept DOI: always resolves to the latest archived version.
+doi: "10.5281/zenodo.23110801"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.23110801"
+    description: "Concept DOI, representing all versions of NucLogic (resolves to the latest)."
+  - type: doi
+    value: "10.5281/zenodo.23110802"
+    description: "Version DOI for NucLogic v1.0.0."
+references:
+  - type: data
+    title: "NucLogic pretrained models"
+    abstract: >-
+      Pretrained model weights used by NucLogic: fine-tuned Cellpose-SAM nuclear
+      segmentation models and the SAM 2.1 checkpoint used for organoid cropping.
+    authors:
+      - given-names: "Sebastian G."
+        family-names: "van Dijk"
+        orcid: "https://orcid.org/0009-0001-4470-4152"
+      - given-names: "Saskia J. E."
+        family-names: "Suijkerbuijk"
+        orcid: "https://orcid.org/0000-0002-3197-1307"
+    version: "v1.0.0"
+    date-released: "2026-10-02"
+    doi: "10.5281/zenodo.23110965"
+    publisher:
+      name: "Zenodo"
+    license:
+      - Apache-2.0
+      - BSD-3-Clause
