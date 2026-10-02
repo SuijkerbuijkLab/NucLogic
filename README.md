@@ -52,13 +52,15 @@ NucLogic reads 3D and 4D imaging data in the following formats:
 | --- | --- |
 | TIFF (OME-TIFF, ImageJ, plain) | `.tif`, `.tiff`, `.ome.tif` |
 | Imaris | `.ims` |
-| Nikon | `.nd2` |
-| Zeiss | `.czi`, `.lsm` |
-| Leica | `.lif` |
+| Nikon* | `.nd2` |
+| Zeiss* | `.czi`, `.lsm` |
+| Leica* | `.lif` |
 | OME-Zarr / NGFF | `.zarr`, `.ome.zarr` |
-| MetaMorph | `.nd`, `.stk` |
+| MetaMorph | `.nd`, `.STK (per channel)` |
 
 Voxel size and timepoint interval are read from the file where available, and fall back to the values set in the advanced settings otherwise. Timelapses should be saved as a single file, not split per timeframe.
+
+\* ND2, CZI and LIF files can hold several stage positions or scenes in one container. NucLogic detects these and offers to write each position out as its own sample, so that a whole plate can be analysed rather than just its first position. The original file is left untouched, and you are asked afterwards whether to delete it.
 
 **Preparing your data:**  
 Place all files you want to analyse into a single folder and navigate to it in NucLogic. You will be prompted to generate a subfolder for each sample — this is required, as NucLogic expects each sample in its own folder to keep output files organised.
