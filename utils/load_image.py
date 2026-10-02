@@ -217,28 +217,44 @@ def _nd2_position_labels(path):
     return [None] * _count_nd2_positions(path)
 
 
-def _count_bioio_positions(path):
-    from bioio import BioImage
+def _count_czi_positions(path):
+    from pylibCZIrw import czi as pyczi
 
-    return _bioio_scene_count(BioImage(path))
+    with pyczi.open_czi(str(path)) as czi:
+        return len(_czi_scenes(czi))
 
 
-def _bioio_position_labels(path):
-    from bioio import BioImage
+def _czi_position_labels(path):
+    from pylibCZIrw import czi as pyczi
 
-    return list(BioImage(path).scenes)
+    with pyczi.open_czi(str(path)) as czi:
+        return _czi_scene_names(czi, len(_czi_scenes(czi)))
+
+
+def _count_lif_positions(path):
+    import liffile
+
+    with liffile.LifFile(str(path)) as lif:
+        return len(lif.images)
+
+
+def _lif_position_labels(path):
+    import liffile
+
+    with liffile.LifFile(str(path)) as lif:
+        return [image.name for image in lif.images]
 
 
 _POSITION_COUNTERS = {
     ".nd2": _count_nd2_positions,
-    ".czi": _count_bioio_positions,
-    ".lif": _count_bioio_positions,
+    ".czi": _count_czi_positions,
+    ".lif": _count_lif_positions,
 }
 
 _POSITION_LABELLERS = {
     ".nd2": _nd2_position_labels,
-    ".czi": _bioio_position_labels,
-    ".lif": _bioio_position_labels,
+    ".czi": _czi_position_labels,
+    ".lif": _lif_position_labels,
 }
 
 
@@ -812,87 +828,29 @@ def _nd2_time_interval_hours(reader):
     return 1.0
 
 
-# ── Zeiss .czi ────────────────────────────────────────────────────────────────
+# ── Scenes (.czi, .lif) ───────────────────────────────────────────────────────
+# Positions are scenes in both formats, not an array axis. For CZI they are
+# usually one acquisition at several stage positions; a .lif is more of a project
+# file, so its scenes routinely differ in Z depth and even in channel count. That
+# is why `position` exists: it never needs the scenes to agree.
 
 
-def _load_bioio(path, lazy, all_positions=False, position=None):
-    """Zeiss .czi and Leica .lif, both read through bioio.
-
-    Positions are scenes here, not an array axis. For CZI they are usually one
-    acquisition at several stage positions; a .lif is more of a project file,
-    so its scenes routinely differ in Z depth and even in channel count. That
-    is why `position` exists: it never needs the scenes to agree.
-    """
-    from bioio import BioImage
-
-    # reconstruct_mosaic defaults to True, so tiled acquisitions arrive already
-    # stitched and the mosaic axis never reaches us.
-    image = BioImage(path)
-    scene_count = _bioio_scene_count(image)
-
+def _scene_indices(path, count, all_positions, position):
     if all_positions:
-        data = _stack_bioio_scenes(path, image, lazy)
-        return (data,) + _bioio_metadata(image)
-
-    if position is not None and int(position) > 0:
-        image.set_scene(int(position))
-    elif position is None and scene_count > 1:
+        return list(range(count))
+    if position is not None:
+        return [int(position)]
+    if count > 1:
         print(
-            f"Warning: {os.path.basename(str(path))} contains {scene_count} "
+            f"Warning: {os.path.basename(str(path))} contains {count} "
             f"scenes; using the first one. Generate sample folders to analyse "
             f"every position."
         )
-
-    # bioio guarantees the TCZYX order, so no _to_tczyx guessing is needed.
-    data = image.dask_data if lazy else image.data
-    return (data,) + _bioio_metadata(image)
+    return [0]
 
 
-def _bioio_metadata(image):
-    """Voxel size, time interval and missing flag for the current scene.
-
-    Read after any set_scene call: .lif scenes each carry their own calibration.
-    """
-    pixel_sizes = image.physical_pixel_sizes  # (Z, Y, X) in micrometres
-    voxel_size = (
-        float(pixel_sizes.Z or 0.0),
-        float(pixel_sizes.Y or 0.0),
-        float(pixel_sizes.X or 0.0),
-    )
-    metadata_missing = any(v <= 0 for v in voxel_size)
-    if metadata_missing:
-        voxel_size = (1.0, 1.0, 1.0)
-
-    return voxel_size, _bioio_time_interval_hours(image), metadata_missing
-
-
-def _bioio_scene_count(image):
-    """Scene count, or 1 when the file carries no usable scene metadata.
-
-    bioio_czi raises UnsupportedMetadataError rather than reporting a single
-    scene for files written without scene records, so this must never be the
-    thing that stops an otherwise readable file from loading.
-    """
-    try:
-        return len(image.scenes)
-    except Exception:
-        return 1
-
-
-def _stack_bioio_scenes(path, image, lazy):
-    """Stack every scene into a leading position axis.
-
-    Scenes are not an array axis in bioio, they are a reader mode, so each one
-    is opened on its own BioImage rather than by re-pointing a shared reader.
-    """
-    from bioio import BioImage
-
-    arrays = []
-    for index in range(_bioio_scene_count(image)):
-        scene_image = image if index == 0 else BioImage(path)
-        scene_image.set_scene(index)
-        arrays.append(scene_image.dask_data if lazy else scene_image.data)
-
+def _stack_scenes(arrays, path, lazy):
+    """Stack scenes into a leading position axis; they must share one shape."""
     shapes = {tuple(array.shape) for array in arrays}
     if len(shapes) > 1:
         raise ValueError(
@@ -900,7 +858,6 @@ def _stack_bioio_scenes(path, image, lazy):
             f"({sorted(shapes)}); they cannot share one position axis. Read "
             f"them one at a time with load_image(path, position=i) instead."
         )
-
     if lazy:
         import dask.array as da
 
@@ -908,15 +865,217 @@ def _stack_bioio_scenes(path, image, lazy):
     return np.stack(arrays)
 
 
-def _bioio_time_interval_hours(image):
-    """Best-effort timepoint interval from a bioio TimeInterval, if present."""
+def _timepoints_array(read_timepoint, n_timepoints, frame_shape, dtype, lazy):
+    """T, C, Z, Y, X from a per-timepoint reader, one dask chunk per timepoint."""
+    if not lazy:
+        return np.stack([read_timepoint(t) for t in range(n_timepoints)])
+    import dask
+    import dask.array as da
+
+    return da.stack([
+        da.from_delayed(dask.delayed(read_timepoint)(t), shape=frame_shape, dtype=dtype)
+        for t in range(n_timepoints)
+    ])
+
+
+def _load_scenes(path, lazy, all_positions, position, count, read_scene):
+    indices = _scene_indices(path, count, all_positions, position)
+    scenes = [read_scene(index, lazy) for index in indices]
+    # Metadata of the first scene read; each .lif scene carries its own calibration.
+    voxel_size, time_interval, metadata_missing = scenes[0][1:]
+    if all_positions:
+        data = _stack_scenes([scene[0] for scene in scenes], path, lazy)
+    else:
+        data = scenes[0][0]
+    return data, voxel_size, time_interval, metadata_missing
+
+
+def _calibration(voxel_size):
+    metadata_missing = any(v <= 0 for v in voxel_size)
+    return ((1.0, 1.0, 1.0) if metadata_missing else voxel_size), metadata_missing
+
+
+# ── Zeiss .czi (pylibCZIrw, Zeiss's own reader) ──────────────────────────────
+
+
+_CZI_DTYPES = {"Gray8": np.uint8, "Gray16": np.uint16, "Gray32Float": np.float32}
+
+
+def _czi_scenes(czi):
+    """[(scene index, bounding rectangle)]; one whole-image entry without scenes."""
+    boxes = czi.scenes_bounding_rectangle
+    if boxes:
+        return [(index, boxes[index]) for index in sorted(boxes)]
+    return [(None, czi.total_bounding_rectangle)]
+
+
+def _czi_dimensions(czi):
+    return czi.metadata["ImageDocument"]["Metadata"]["Information"]["Image"]["Dimensions"]
+
+
+def _czi_scene_names(czi, count):
     try:
-        interval = getattr(image, "time_interval", None)
-        if interval:
-            return _time_to_hours(float(interval), "s")
-    except Exception as error:
-        print(f"Warning: could not read time interval: {error}")
+        scenes = _czi_dimensions(czi)["S"]["Scenes"]["Scene"]
+    except (KeyError, TypeError):
+        return [None] * count
+    scenes = scenes if isinstance(scenes, list) else [scenes]
+    scenes = sorted(scenes, key=lambda s: int(s.get("@Index", 0)))
+    names = [scene.get("@Name") or scene.get("Name") for scene in scenes]
+    return (names + [None] * count)[:count]
+
+
+def _czi_voxel_size(czi):
+    """(z, y, x) in micrometres; CZI stores metres per pixel, 0 where absent."""
+    try:
+        items = czi.metadata["ImageDocument"]["Metadata"]["Scaling"]["Items"]["Distance"]
+    except (KeyError, TypeError):
+        return (0.0, 0.0, 0.0)
+    items = items if isinstance(items, list) else [items]
+    scale = {item.get("@Id"): float(item.get("Value") or 0) * 1e6 for item in items}
+    return (scale.get("Z", 0.0), scale.get("Y", 0.0), scale.get("X", 0.0))
+
+
+def _czi_time_interval_hours(czi):
+    """Best-effort timepoint interval from the T dimension's increment (seconds)."""
+    try:
+        increment = _czi_dimensions(czi)["T"]["Positions"]["Interval"]["Increment"]
+        if increment and float(increment) > 0:
+            return _time_to_hours(float(increment), "s")
+    except (KeyError, TypeError, ValueError):
+        pass
     return 1.0
+
+
+def _czi_pixel_type(czi, path):
+    """One pixel type for every channel, so channels stack into one array."""
+    types = set(czi.pixel_types.values())
+    unsupported = types - set(_CZI_DTYPES)
+    if unsupported:
+        raise ValueError(
+            f"{os.path.basename(str(path))} has {', '.join(sorted(unsupported))} "
+            f"channels; only greyscale (fluorescence) CZI files are supported."
+        )
+    if len(types) == 1:
+        return types.pop()
+    # Mixed 8/16-bit channels are read at the widest type, never truncated.
+    return "Gray32Float" if "Gray32Float" in types else "Gray16"
+
+
+def _load_czi(path, lazy, all_positions=False, position=None):
+    from pylibCZIrw import czi as pyczi
+
+    path = str(path)
+    with pyczi.open_czi(path) as czi:
+        scenes = _czi_scenes(czi)
+        box = czi.total_bounding_box  # T, Z and C are always (0, size)
+        n_t, n_c, n_z = box["T"][1], box["C"][1], box["Z"][1]
+        pixel_type = _czi_pixel_type(czi, path)
+        voxel_size, metadata_missing = _calibration(_czi_voxel_size(czi))
+        time_interval = _czi_time_interval_hours(czi)
+
+    def read_scene(index, lazy):
+        scene, rect = scenes[index]
+
+        def read_timepoint(t):
+            # Reading within the scene's own rectangle stitches mosaic tiles and
+            # keeps far-apart stage positions from sharing one huge canvas.
+            out = np.empty((n_c, n_z, rect.h, rect.w), _CZI_DTYPES[pixel_type])
+            with pyczi.open_czi(path) as czi:
+                for c in range(n_c):
+                    for z in range(n_z):
+                        out[c, z] = czi.read(
+                            roi=rect,
+                            plane={"T": t, "C": c, "Z": z},
+                            scene=scene,
+                            pixel_type=pixel_type,
+                        )[..., 0]
+            return out
+
+        data = _timepoints_array(
+            read_timepoint, n_t, (n_c, n_z, rect.h, rect.w), _CZI_DTYPES[pixel_type], lazy
+        )
+        return data, voxel_size, time_interval, metadata_missing
+
+    return _load_scenes(path, lazy, all_positions, position, len(scenes), read_scene)
+
+
+# ── Leica .lif (liffile) ──────────────────────────────────────────────────────
+
+
+def _lif_step_um(coords, axis):
+    values = coords.get(axis)
+    if values is None or len(values) < 2:
+        return 0.0
+    return float(abs(values[1] - values[0])) * 1e6  # liffile coordinates are metres
+
+
+def _lif_time_interval_hours(coords):
+    """Best-effort timepoint interval from the T coordinates."""
+    try:
+        values = coords.get("T")
+        if values is not None and len(values) > 1:
+            step = values[1] - values[0]
+            if isinstance(step, np.timedelta64):
+                seconds = step / np.timedelta64(1, "s")
+            else:
+                seconds = float(step)
+            if seconds > 0:
+                return _time_to_hours(seconds, "s")
+    except Exception as error:
+        print(f"Warning: could not read LIF time interval: {error}")
+    return 1.0
+
+
+def _load_lif(path, lazy, all_positions=False, position=None):
+    import liffile
+
+    path = str(path)
+    with liffile.LifFile(path) as lif:
+        count = len(lif.images)
+
+    def read_scene(index, lazy):
+        with liffile.LifFile(path) as lif:
+            image = list(lif.images)[index]
+            sizes = dict(image.sizes)
+            dtype = image.dtype
+            coords = dict(image.coords)
+            name = image.name
+
+        # Tile scans arrive as unstitched tiles along M (and other acquisition
+        # modes add their own axes). Refuse them rather than return a wrong image.
+        extra = {axis: n for axis, n in sizes.items() if axis not in "TCZYX" and n > 1}
+        if extra:
+            described = ", ".join(f"{axis}={n}" for axis, n in extra.items())
+            raise ValueError(
+                f"Scene '{name}' in {os.path.basename(path)} has extra axes "
+                f"({described}). Tiled mosaics and other multi-dimensional LIF "
+                f"acquisitions are not supported yet; export the scene as TIFF "
+                f"from LAS X instead."
+            )
+        singletons = {axis: 0 for axis in sizes if axis not in "TCZYX"}
+        n_t, n_c, n_z, n_y, n_x = (sizes.get(axis, 1) for axis in "TCZYX")
+
+        def read_timepoint(t):
+            out = np.empty((n_c, n_z, n_y, n_x), dtype)
+            with liffile.LifFile(path) as lif:
+                image = list(lif.images)[index]
+                for c in range(n_c):
+                    for z in range(n_z):
+                        indices = dict(singletons)
+                        indices.update(
+                            {axis: value for axis, value in (("T", t), ("C", c), ("Z", z))
+                             if axis in sizes}
+                        )
+                        out[c, z] = image.frame(**indices)
+            return out
+
+        voxel_size, metadata_missing = _calibration(
+            tuple(_lif_step_um(coords, axis) for axis in "ZYX")
+        )
+        data = _timepoints_array(read_timepoint, n_t, (n_c, n_z, n_y, n_x), dtype, lazy)
+        return data, voxel_size, _lif_time_interval_hours(coords), metadata_missing
+
+    return _load_scenes(path, lazy, all_positions, position, count, read_scene)
 
 
 # ── OME-Zarr / NGFF ───────────────────────────────────────────────────────────
@@ -1011,8 +1170,8 @@ _LOADERS = {
     ".lsm": _load_tiff,
     ".ims": _load_ims,
     ".nd2": _load_nd2,
-    ".czi": _load_bioio,
-    ".lif": _load_bioio,
+    ".czi": _load_czi,
+    ".lif": _load_lif,
     ".zarr": _load_ome_zarr,
     ".ome.zarr": _load_ome_zarr,
 }

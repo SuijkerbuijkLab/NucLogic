@@ -24,3 +24,4 @@ miscellaneous/version.txt
 # on first run, not stored in the repo. Only the small SAM config stays tracked.
 models/*
 !models/sam2.1_hiera_s.yaml
+!models/LICENSE.txt

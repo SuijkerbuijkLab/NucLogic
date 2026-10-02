@@ -1,4 +1,5 @@
 import os
+from utils.cropped_files import CROPPED_SUFFIXES
 from utils.find_input_file import find_input_file
 from utils.max_project import max_project
 from utils.crop_fixed import crop_fixed
@@ -25,8 +26,9 @@ def crop_sample(
         if "nuclei" in channel_type.lower():
             nuclei_channels.append(i)
 
-    # Find the biggest existing IMS or Tiff file in this folder and use it as the input
-    input_file = find_input_file(input_directory=input_directory)
+    # Find the biggest existing IMS or Tiff file in this folder and use it as the input.
+    # Earlier cropped files are excluded, so re-cropping never crops a cropped file.
+    input_file = find_input_file(input_directory=input_directory, exclude=CROPPED_SUFFIXES)
 
     # Get what the file name is without the extension to use for new file generation
     name = os.path.basename(input_file).split(".")[0]

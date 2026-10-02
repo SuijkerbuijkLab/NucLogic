@@ -45,11 +45,9 @@ def segment_organoid(
             nuclei_channels.append(i)
 
     if do_crop_sample:
-        input_file = [
-            os.path.join(input_directory, f)
-            for f in os.listdir(input_directory)
-            if f.endswith(("_cropped.ims", "_cropped.tif"))
-        ]
+        from utils.cropped_files import find_cropped_files
+
+        input_file = find_cropped_files(input_directory)
         input_file = input_file[0] if input_file else None
         name = (
             os.path.basename(input_file).split("_cropped.")[0] if input_file else None

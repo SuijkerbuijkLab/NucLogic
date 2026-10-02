@@ -262,7 +262,7 @@ class Updater(QThread):
             else:
                 self.progress.emit("Syncing dependencies (pixi install)…")
 
-            pixi_exe = _PROJECT_ROOT / "tools" / "pixi.exe"
+            pixi_exe = _PROJECT_ROOT / "tools" / ("pixi.exe" if os.name == "nt" else "pixi")
             if not pixi_exe.exists():
                 pixi_exe = "pixi"  # fall back to PATH
             # Timestamped so the permission step below can tell which files this
