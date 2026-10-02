@@ -1,5 +1,3 @@
-from matplotlib import scale
-from skimage.measure import regionprops, regionprops_table
 import numpy as np
 from dataclasses import dataclass
 import scipy.spatial

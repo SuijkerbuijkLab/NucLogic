@@ -2,6 +2,7 @@ from datetime import datetime
 import gc
 import sys
 import os
+import re
 
 # Pin the Qt binding for the whole process (app, napari, matplotlib-qtagg, and
 # any qtpy-based widget). Without this, if anything imports qtpy before PySide6
@@ -31,6 +32,7 @@ from utils.merge_nd import merge_file, scan_directory as scan_nd_directory
 from utils.update_checker import UpdateChecker, _read_local_version
 from utils.updater import Updater
 from utils.download_models import ModelDownloader, optional_assets
+from utils.cropped_files import find_cropped_files, needs_crop, remove_stale_cropped_files
 
 # Import PySide6 FIRST
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
@@ -59,6 +61,8 @@ from PySide6.QtWidgets import (
     QFrame,
     QDialog,
     QDialogButtonBox,
+    QRadioButton,
+    QButtonGroup,
 )
 import qdarktheme
 
@@ -418,6 +422,7 @@ class MainWindow(QMainWindow):
 
         # Populate both lists with current samples data
         self._update_sample_lists()
+        self._update_crop_status()
 
     def _create_sample_list_widgets(self):
         """Create the list widgets for Load Data and View Data tabs (first time only)"""
@@ -452,9 +457,10 @@ class MainWindow(QMainWindow):
 
     def _get_samples(self, dir_name):
         """Get list of subdirectories (samples)"""
-        return [
-            d for d in os.listdir(dir_name) if os.path.isdir(os.path.join(dir_name, d))
-        ]
+        return sorted(
+            (d for d in os.listdir(dir_name) if os.path.isdir(os.path.join(dir_name, d))),
+            key=lambda d: [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", d.lower())],
+        )
 
     def _get_image_files(self, dir_name):
         """Get list of image files in root directory"""
@@ -1349,17 +1355,34 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setSpacing(0)
 
-        # Crop samples before segmentation checkbox
-        self.do_crop_sample = QCheckBox("Crop samples before segmentation")
-        self.do_crop_sample.setChecked(True)
-        self.do_crop_sample.toggled.connect(self._toggle_crop_suboptions)
         crop_row = QHBoxLayout()
-        crop_row.addWidget(self.do_crop_sample)
+        crop_row.addWidget(QLabel("Cropping before segmentation:"))
         crop_row.addWidget(self._info_label(
-            "Timelapses are cropped automatically; fixed samples can use manual or automatic cropping."
+            "Timelapses are cropped automatically; fixed samples can use manual or automatic cropping.\n"
+            "Samples that already have a cropped file reuse it, unless you choose to crop them again."
         ))
         crop_row.addStretch()
         layout.addLayout(crop_row)
+
+        # One crop mode instead of separate crop/skip checkboxes. The first option's
+        # label and the status line adapt to the selected samples (_update_crop_status).
+        self.crop_new_radio = QRadioButton("Crop samples")
+        self.crop_again_radio = QRadioButton(
+            "Crop all selected samples again (replaces existing cropped files)"
+        )
+        self.no_crop_radio = QRadioButton("Don't crop")
+        self.crop_mode_group = QButtonGroup(self)
+        for button in (self.crop_new_radio, self.crop_again_radio, self.no_crop_radio):
+            self.crop_mode_group.addButton(button)
+            layout.addWidget(button)
+        self.crop_new_radio.setChecked(True)
+        self.crop_mode_group.buttonToggled.connect(self._on_crop_mode_changed)
+
+        self.crop_status_label = QLabel("")
+        self.crop_status_label.setWordWrap(True)
+        self.crop_status_label.setContentsMargins(20, 2, 0, 2)
+        self.crop_status_label.setStyleSheet("color: gray;")
+        layout.addWidget(self.crop_status_label)
 
         # All suboptions in one indented container — shown/hidden together
         self.crop_suboptions_widget = QWidget()
@@ -1372,12 +1395,6 @@ class MainWindow(QMainWindow):
         )
         self.manual_crop_fixed_checkbox.setChecked(False)
         sub_layout.addWidget(self.manual_crop_fixed_checkbox)
-
-        self.skip_crop_existing_files_checkbox = QCheckBox(
-            "Skip cropping — cropped files already exist"
-        )
-        self.skip_crop_existing_files_checkbox.setChecked(False)
-        sub_layout.addWidget(self.skip_crop_existing_files_checkbox)
 
         combo_row = QHBoxLayout()
         combo_row.setContentsMargins(0, 2, 0, 0)
@@ -1394,12 +1411,64 @@ class MainWindow(QMainWindow):
         sub_layout.addLayout(combo_row)
 
         layout.addWidget(self.crop_suboptions_widget)
-        self._toggle_crop_suboptions(self.do_crop_sample.isChecked())
+        self._on_crop_mode_changed()
 
         return layout
 
-    def _toggle_crop_suboptions(self, checked):
-        self.crop_suboptions_widget.setVisible(checked)
+    def _crop_mode(self):
+        if self.no_crop_radio.isChecked():
+            return "none"
+        if self.crop_again_radio.isChecked():
+            return "recrop"
+        return "crop"
+
+    def _on_crop_mode_changed(self, *_):
+        self.crop_suboptions_widget.setVisible(self._crop_mode() != "none")
+        self._update_crop_status()
+
+    def _update_crop_status(self):
+        """Adapt the crop options and status line to the selected samples' cropped files."""
+        if not hasattr(self, "crop_status_label"):
+            return
+        paths = self.get_sample_path_list() if self.sample_list is not None else []
+        total = len(paths)
+        cropped = sum(1 for path in paths if find_cropped_files(path))
+        mode = self._crop_mode()
+
+        if cropped == 0:
+            self.crop_new_radio.setText("Crop samples")
+        elif cropped == total:
+            self.crop_new_radio.setText("Use existing cropped files")
+        else:
+            self.crop_new_radio.setText("Crop samples, reusing existing cropped files")
+
+        # Cropping "again" only means something when there is a cropped file to replace.
+        # Without one both options do the same, so fall back rather than hide a checked one.
+        self.crop_again_radio.setVisible(cropped > 0)
+        if cropped == 0 and mode == "recrop":
+            self.crop_new_radio.setChecked(True)  # re-enters via _on_crop_mode_changed
+            return
+
+        samples = "the selected sample" if total == 1 else f"all {total} selected samples"
+        if total == 0 or mode == "none":
+            text = ""
+        elif mode == "recrop":
+            text = f"{samples.capitalize()} will be cropped again, replacing existing cropped files."
+        elif cropped == 0:
+            text = f"No cropped files found yet, so {samples} will be cropped."
+        elif cropped == total:
+            verb = "has" if total == 1 else "have"
+            text = f"{samples.capitalize()} already {verb} a cropped file, which will be reused."
+        else:
+            text = (
+                f"{cropped} of {total} selected samples already have a cropped file, which will "
+                f"be reused; the other {total - cropped} will be cropped."
+            )
+        self.crop_status_label.setText(text)
+        self.crop_status_label.setVisible(bool(text))
+
+        # When every sample reuses its cropped file, nothing gets cropped.
+        self.crop_suboptions_widget.setEnabled(not (mode == "crop" and total and cropped == total))
 
     def _create_phenotype_settings_layout(self):
         layout = QVBoxLayout()
@@ -1568,6 +1637,7 @@ class MainWindow(QMainWindow):
         """Update the segment tab label with selected samples count"""
         count = len(self.get_selected_samples())
         self.segment_tab_label.setText(f"Selected {count} samples for segmentation")
+        self._update_crop_status()
 
     def _create_progress_bar(self):
         layout = QVBoxLayout()
@@ -2122,9 +2192,9 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             self.segmentation_error(str(e))
             return
-        do_crop_sample = self.do_crop_sample.isChecked()
+        crop_mode = self._crop_mode()
+        do_crop_sample = crop_mode != "none"
         manual_crop_fixed = self.manual_crop_fixed_checkbox.isChecked()
-        skip_crop_existing_files = self.skip_crop_existing_files_checkbox.isChecked()
         save_crop_as = self.save_crop_as.currentText()
         save_frames = self.save_frames_checkbox.isChecked()
         save_segmentation = self.save_segmentation_checkbox.isChecked()
@@ -2154,7 +2224,6 @@ class MainWindow(QMainWindow):
             and manual_crop_fixed
             and not phenotype_calling_only
             and not advanced_statistics_only
-            and not skip_crop_existing_files
         ):
             try:
                 from main_functions.crop_sample import crop_sample
@@ -2168,7 +2237,10 @@ class MainWindow(QMainWindow):
                 self.progressbar.setRange(0, 0)
                 QApplication.processEvents()
 
+                # Only samples that will actually be cropped; the rest reuse their file.
                 for sample_path in sample_path_list:
+                    if not needs_crop(sample_path, crop_mode):
+                        continue
                     was_cropped = crop_sample(
                         sample_path,
                         channel_types,
@@ -2179,6 +2251,7 @@ class MainWindow(QMainWindow):
                         user_voxel_size=user_voxel_size,
                     )
                     if was_cropped:
+                        remove_stale_cropped_files(sample_path, save_crop_as)
                         manually_cropped_fixed_samples.append(sample_path)
 
                 # Restore determinate progress for worker phase.
@@ -2206,7 +2279,7 @@ class MainWindow(QMainWindow):
             raw_or_background_subtracted,
             do_crop_sample,
             manual_crop_fixed,
-            skip_crop_existing_files,
+            crop_mode,
             save_crop_as,
             save_frames,
             save_segmentation,
@@ -2278,10 +2351,12 @@ class MainWindow(QMainWindow):
         self.segmentation_summary_label.setText(summary_text)
         self.segmentation_summary_label.setVisible(True)
         self._refresh_failures_label()
+        self._update_crop_status()  # the run may have written new cropped files
 
     def segmentation_stopped(self, elapsed_time, stopped_idx):
         """Called when the user stops segmentation between samples"""
         self._segmentation_running = False
+        self._update_crop_status()
         if hasattr(self, "_watchdog_timer"):
             self._watchdog_timer.stop()
         self.run_segmentation_btn.setEnabled(True)
@@ -2432,9 +2507,8 @@ class MainWindow(QMainWindow):
                 {"name": le.text(), "type": cb.currentText()}
                 for _, (_, cb, le) in sorted(self.channel_widgets.items())
             ],
-            "do_crop_sample": self.do_crop_sample.isChecked(),
+            "crop_mode": self._crop_mode(),
             "manual_crop_fixed": self.manual_crop_fixed_checkbox.isChecked(),
-            "skip_crop_existing_files": self.skip_crop_existing_files_checkbox.isChecked(),
             "save_crop_as": self.save_crop_as.currentText(),
             "run_mode": self.run_mode_combo.currentText(),
             "breaking_threshold": self.breaking_threshold_input.text(),
@@ -2534,9 +2608,17 @@ class MainWindow(QMainWindow):
             if idx >= 0:
                 widget.setCurrentIndex(idx)
 
-        _set_check(self.do_crop_sample, "do_crop_sample", True)
+        crop_mode = config.get("crop_mode")
+        if crop_mode is None:
+            # Configs from before crop_mode stored crop/skip checkboxes. Crop without skip
+            # maps to "crop", not "recrop", so loading a config never overwrites crops.
+            crop_mode = "crop" if config.get("do_crop_sample", True) else "none"
+        {
+            "crop": self.crop_new_radio,
+            "recrop": self.crop_again_radio,
+            "none": self.no_crop_radio,
+        }.get(crop_mode, self.crop_new_radio).setChecked(True)
         _set_check(self.manual_crop_fixed_checkbox, "manual_crop_fixed")
-        _set_check(self.skip_crop_existing_files_checkbox, "skip_crop_existing_files")
         _set_combo(self.save_crop_as, "save_crop_as", ".tif")
         _set_combo(self.run_mode_combo, "run_mode", "Full pipeline")
         self.breaking_threshold_input.setText(config.get("breaking_threshold", "2.5"))
@@ -2581,7 +2663,7 @@ class MainWindow(QMainWindow):
 
         # Re-trigger toggle slots so dependent sub-widgets show/hide correctly
         self._region_selection_changed()
-        self._toggle_crop_suboptions(self.do_crop_sample.isChecked())
+        self._on_crop_mode_changed()
         self._toggle_phenotype_daughters(self.do_phenotype_calling_checkbox.isChecked())
         self._toggle_neighbour_statistics(self.calculate_neighbour_statistics_checkbox.isChecked())
         self._toggle_knn_neighbour_options(self.calculate_neighbours_knn_checkbox.isChecked())
@@ -3598,7 +3680,7 @@ class SegmentationWorker(QThread):
         raw_or_background_subtracted,
         do_crop_sample,
         manual_crop_fixed,
-        skip_crop_existing_files,
+        crop_mode,
         save_crop_as,
         save_frames,
         save_segmentation,
@@ -3643,7 +3725,7 @@ class SegmentationWorker(QThread):
         self.raw_or_background_subtracted = raw_or_background_subtracted
         self.do_crop_sample = do_crop_sample
         self.manual_crop_fixed = manual_crop_fixed
-        self.skip_crop_existing_files = skip_crop_existing_files
+        self.crop_mode = crop_mode
         self.save_crop_as = save_crop_as
         self.save_frames = save_frames
         self.save_segmentation = save_segmentation
@@ -3669,6 +3751,12 @@ class SegmentationWorker(QThread):
 
     def stop(self):
         self._stop_requested = True
+
+    def _needs_crop(self, sample_path):
+        # Samples cropped manually before the worker started are already done.
+        if os.path.normcase(os.path.normpath(sample_path)) in self.manually_cropped_fixed_samples:
+            return False
+        return needs_crop(sample_path, self.crop_mode)
 
     def run(self):
         try:
@@ -3700,15 +3788,9 @@ class SegmentationWorker(QThread):
             loaded_cell_model = load_model(self.cell_model_path)
 
             needs_auto_crop = (
-                self.do_crop_sample
-                and not self.skip_crop_existing_files
-                and not self.phenotype_calling_only
+                not self.phenotype_calling_only
                 and not self.advanced_statistics_only
-                and any(
-                    os.path.normcase(os.path.normpath(sample_path))
-                    not in self.manually_cropped_fixed_samples
-                    for sample_path in self.sample_path_list
-                )
+                and any(self._needs_crop(sample_path) for sample_path in self.sample_path_list)
             )
 
             if needs_auto_crop:
@@ -3739,26 +3821,18 @@ class SegmentationWorker(QThread):
                         not self.phenotype_calling_only
                         and not self.advanced_statistics_only
                     ):
-                        if self.do_crop_sample:
-                            if self.skip_crop_existing_files:
-                                print(
-                                    f"Skipping crop for {i}: using existing cropped files."
-                                )
-                            else:
-                                normalized_i = os.path.normcase(os.path.normpath(i))
-                                if normalized_i in self.manually_cropped_fixed_samples:
-                                    print(
-                                        f"Skipping crop for {i}: fixed sample was manually cropped in UI thread."
-                                    )
-                                else:
-                                    crop_sample(
-                                        i,
-                                        self.channel_types,
-                                        organoid_model,
-                                        manual_fixed=self.manual_crop_fixed,
-                                        save_as=self.save_crop_as,
-                                        user_voxel_size=self.user_voxel_size,
-                                    )
+                        if self._needs_crop(i):
+                            crop_sample(
+                                i,
+                                self.channel_types,
+                                organoid_model,
+                                manual_fixed=self.manual_crop_fixed,
+                                save_as=self.save_crop_as,
+                                user_voxel_size=self.user_voxel_size,
+                            )
+                            remove_stale_cropped_files(i, self.save_crop_as)
+                        elif self.do_crop_sample:
+                            print(f"Skipping crop for {i}: using its existing cropped file.")
                         segment_organoid(
                             i,
                             loaded_cell_model,
