@@ -3,8 +3,6 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23110801.svg)](https://doi.org/10.5281/zenodo.23110801)
 [![Models DOI](https://img.shields.io/badge/models%20DOI-10.5281%2Fzenodo.23110965-blue)](https://doi.org/10.5281/zenodo.23110965)
 
-Software archived at [10.5281/zenodo.23110801](https://doi.org/10.5281/zenodo.23110801); pretrained models archived at [10.5281/zenodo.23110965](https://doi.org/10.5281/zenodo.23110965).
-
 We present NucLogic, a fast and robust 3D nuclear segmentation algorithm that combines the maturity of 2D segmentation with geometric stitching rules based on nuclear shape, orientation, and intensity, to reconstruct accurate 3D volumes. NucLogic reliably segments challenging datasets including long-term timelapse imaging of organoids, and large dense structures such as the zebrafish brain. Benchmarked against other state-of-the-art segmentation tools, NucLogic matches F1 scores at high SNR, with increasing outperformance as SNR decreases. Importantly, segmentation completes at 20–40% of the computation time, with greater speed gains on larger images. Beyond segmentation, NucLogic includes an intuitive graphical user interface allowing non-experts to segment, quantify, and visualize 3D and 4D data. This enables straightforward quantification of cell numbers, alongside integration of a wide range of both cell-intrinsic properties, such as phenotype and morphology, and local environment metrics, such as density and spatial interactions. Together, NucLogic makes quantitative 3D nuclear analysis of previously unmanageable datasets accessible to a broad research community. 
 
 #### The overall NucLogic pipeline:
@@ -100,5 +98,8 @@ bioRxiv 2025.04.28.651001; doi: https://doi.org/10.1101/2025.04.28.651001
 # License
 NucLogic is released under the [MIT License](LICENSE).
 
-The pretrained model weights are distributed under their own licences: the SAM 2.1 checkpoint under the Apache License 2.0, and the Cellpose models under the BSD 3-Clause License of the Cellpose-SAM weights they were trained from. See [models/LICENSE.txt](models/LICENSE.txt). The weights are archived on Zenodo at [10.5281/zenodo.23110965](https://doi.org/10.5281/zenodo.23110965). Third-party packages installed with NucLogic remain under their own licences.
+
+The pretrained model weights are distributed under their own licences: the SAM 2.1 checkpoint under the Apache License 2.0, and the Cellpose models under the BSD 3-Clause License of the Cellpose-SAM weights they were trained from. See [models/LICENSE.txt](models/LICENSE.txt). Third-party packages installed with NucLogic remain under their own licences.
+
+Software archived at [10.5281/zenodo.23110801](https://doi.org/10.5281/zenodo.23110801); pretrained models archived at [10.5281/zenodo.23110965](https://doi.org/10.5281/zenodo.23110965).
 
