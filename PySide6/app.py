@@ -3160,9 +3160,9 @@ class MainWindow(QMainWindow):
         self.export_summary_button.clicked.connect(self.create_export_summary)
         self.export_data_layout.addWidget(self.export_summary_button)
 
-        self.show_plots_button = QPushButton("Show Plots")
-        self.show_plots_button.clicked.connect(self.show_plots)
-        self.export_data_layout.addWidget(self.show_plots_button)
+        # self.show_plots_button = QPushButton("Show Plots")
+        # self.show_plots_button.clicked.connect(self.show_plots)
+        # self.export_data_layout.addWidget(self.show_plots_button)
 
         self.plot_status_label = QLabel("")
         self.plot_status_label.setVisible(False)

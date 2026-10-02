@@ -1,7 +1,8 @@
 [workspace]
 name = "NucLogic"
-version = "0.2.0"
 description = "NucLogic organoid segmentation desktop app"
+license = "MIT"
+license-file = "LICENSE"
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64"]
 

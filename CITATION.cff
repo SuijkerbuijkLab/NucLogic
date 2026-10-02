@@ -1,0 +1,78 @@
+cff-version: 1.2.0
+message: "If you use NucLogic, please cite it using the metadata below."
+title: "NucLogic"
+type: software
+abstract: >-
+  Nuclear segmentation in 3D microscopy remains challenging, particularly for
+  low signal-to-noise ratio (SNR) data from dense tissue samples, timelapse
+  imaging, or in vivo experiments. Yet accurate 3D nuclear segmentation is a
+  prerequisite for quantitative single-cell analysis, making this a key
+  bottleneck for high-throughput study of challenging datasets. We present
+  NucLogic, a fast and robust 3D nuclear segmentation algorithm that combines
+  the maturity of 2D segmentation with geometric stitching rules based on
+  nuclear shape, orientation, and intensity, to reconstruct accurate 3D volumes.
+  NucLogic reliably segments challenging datasets including long-term timelapse
+  imaging of organoids, and large dense structures such as the zebrafish brain.
+  Benchmarked against other state-of-the-art segmentation tools, NucLogic
+  matches F1 scores at high SNR, with increasing outperformance as SNR
+  decreases. Importantly, segmentation completes at 20–40% of the computation
+  time, with greater speed gains on larger images. Beyond segmentation, NucLogic
+  includes an intuitive graphical user interface allowing non-experts to
+  segment, quantify, and visualize 3D and 4D data. This enables straightforward
+  quantification of cell numbers, alongside integration of a wide range of both
+  cell-intrinsic properties, such as phenotype and morphology, and local
+  environment metrics, such as density and spatial interactions. Together,
+  NucLogic makes quantitative 3D nuclear analysis of previously unmanageable
+  datasets accessible to a broad research community.
+authors:
+  - given-names: "Sebastian G."
+    family-names: "van Dijk"
+    orcid: "https://orcid.org/0009-0001-4470-4152"
+    affiliation: "Division of Developmental Biology, Department of Biology, Faculty of Science, Utrecht University, Utrecht, Netherlands"
+  - given-names: "Mario"
+    family-names: "Ledesma-Terrón"
+    orcid: "https://orcid.org/0000-0003-4045-3939"
+    affiliation: "Independent Researcher, Madrid, Spain"
+  - given-names: "Susanne J."
+    family-names: "Kraus"
+    orcid: "https://orcid.org/0009-0005-0023-213X"
+    affiliation: "Cell Biology, Neurobiology and Biophysics, Department of Biology, Faculty of Science, Utrecht University, Utrecht, Netherlands"
+  - given-names: "Ruth"
+    family-names: "van Brussel"
+    orcid: "https://orcid.org/0009-0003-1516-8551"
+    affiliation: "Division of Developmental Biology, Department of Biology, Faculty of Science, Utrecht University, Utrecht, Netherlands"
+  - given-names: "Emmanuel"
+    family-names: "Marquez-Legorreta"
+    orcid: "https://orcid.org/0000-0001-6729-9404"
+    affiliation: "Cell Biology, Neurobiology and Biophysics, Department of Biology, Faculty of Science, Utrecht University, Utrecht, Netherlands"
+  - given-names: "Lars J. S."
+    family-names: "Kemp"
+    orcid: "https://orcid.org/0000-0002-9898-7469"
+    affiliation: "Division of Developmental Biology, Department of Biology, Faculty of Science, Utrecht University, Utrecht, Netherlands"
+  - given-names: "Saskia J. E."
+    family-names: "Suijkerbuijk"
+    orcid: "https://orcid.org/0000-0002-3197-1307"
+    affiliation: "Division of Developmental Biology, Department of Biology, Faculty of Science, Utrecht University, Utrecht, Netherlands"
+contact:
+  # Technical contact
+  - given-names: "Sebastian G."
+    family-names: "van Dijk"
+    orcid: "https://orcid.org/0009-0001-4470-4152"
+  # Lead contact
+  - given-names: "Saskia J. E."
+    family-names: "Suijkerbuijk"
+    orcid: "https://orcid.org/0000-0002-3197-1307"
+repository-code: "https://github.com/SuijkerbuijkLab/NucLogic"
+license: MIT
+keywords:
+  - 3D segmentation
+  - nuclear segmentation
+  - organoids
+  - microscopy
+  - image analysis
+  - Cellpose
+# Add when tagging a release, matching the tag (e.g. 1.0.0), and add the
+# Zenodo DOI once the first archive exists:
+# version: "1.0.0"
+# date-released: "2026-MM-DD"
+# doi: "10.5281/zenodo.XXXXXXX"
