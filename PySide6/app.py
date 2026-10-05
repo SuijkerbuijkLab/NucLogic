@@ -3588,7 +3588,7 @@ class PrewarmWorker(QThread):
         try:
             import torch
 
-            self.gpu_available.emit(bool(torch.cuda.is_available()))
+            self.gpu_available.emit(bool( torch.cuda.is_available() or torch.mps.is_available() ))
         except Exception as exc:
             print(f"[prewarm] torch import failed: {type(exc).__name__}: {exc}")
             self.gpu_available.emit(False)

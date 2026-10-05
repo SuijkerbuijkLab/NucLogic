@@ -12,14 +12,24 @@ def load_model(model_path=None):
     from cellpose import models
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if torch.cuda.is_available():
+        device = "cuda"
+        gpu = True
+    elif torch.mps.is_available():
+        device = "mps"
+        gpu = True
+    else:
+        gpu = False
+
     print(f"Using {device.upper()} for processing.")
 
     if model_path and model_path != CELLPOSE_SAM_MODEL_NAME:
         model = models.CellposeModel(
-            gpu=(device == "cuda"), pretrained_model=model_path
+            gpu=gpu, pretrained_model=model_path
         )
         print(f"loaded custom model: {os.path.basename(model_path)}")
     else:
-        model = models.CellposeModel(gpu=(device == "cuda"))
+        model = models.CellposeModel(gpu=gpu)
         print(f"loaded {CELLPOSE_SAM_MODEL_NAME}")
     return model
