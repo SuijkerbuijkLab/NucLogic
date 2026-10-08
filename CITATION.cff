@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use NucLogic, please cite it using the metadata below."
+message: "If you use NucLogic, please cite the paper listed under preferred-citation."
 title: "NucLogic"
 type: software
 abstract: >-
@@ -83,6 +83,39 @@ identifiers:
   - type: doi
     value: "10.5281/zenodo.23110802"
     description: "Version DOI for NucLogic v1.0.0."
+preferred-citation:
+  type: article
+  title: "NucLogic: Logic-based geometric 3D nuclear segmentation for fast and robust analysis of challenging biological imaging data"
+  authors:
+    - given-names: "Sebastian G."
+      family-names: "van Dijk"
+      orcid: "https://orcid.org/0009-0001-4470-4152"
+    - given-names: "Mario"
+      family-names: "Ledesma-Terrón"
+      orcid: "https://orcid.org/0000-0003-4045-3939"
+    - given-names: "Susanne J."
+      family-names: "Kraus"
+      orcid: "https://orcid.org/0009-0005-0023-213X"
+    - given-names: "Ruth"
+      family-names: "van Brussel"
+      orcid: "https://orcid.org/0009-0003-1516-8551"
+    - given-names: "Emmanuel"
+      family-names: "Marquez-Legorreta"
+      orcid: "https://orcid.org/0000-0001-6729-9404"
+    - given-names: "Lars J. S."
+      family-names: "Kemp"
+      orcid: "https://orcid.org/0000-0002-9898-7469"
+    - given-names: "Saskia J. E."
+      family-names: "Suijkerbuijk"
+      orcid: "https://orcid.org/0000-0002-3197-1307"
+  journal: "bioRxiv"
+  publisher:
+    name: "Cold Spring Harbor Laboratory"
+  status: preprint
+  year: 2026
+  month: 10
+  doi: "10.64898/2026.10.05.756154"
+  url: "https://doi.org/10.64898/2026.10.05.756154"
 references:
   - type: data
     title: "NucLogic pretrained models"

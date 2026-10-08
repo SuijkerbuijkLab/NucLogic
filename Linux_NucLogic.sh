@@ -1,5 +1,6 @@
 #!/bin/bash
-# NucLogic launcher for Linux, mirroring NucLogic.bat.
+# NucLogic launcher for Linux and macOS, mirroring NucLogic.bat. On a Mac it is
+# started by double-clicking NucLogic.command.
 #
 # There is no administrator step here: pixi writes only inside this folder, and
 # sharing an install between Linux accounts is done with ordinary group
@@ -17,7 +18,15 @@ cd "$SCRIPT_DIR" || exit 1
 export PIXI_CACHE_DIR="$SCRIPT_DIR/pixi_cache"
 ENV_DIR="$SCRIPT_DIR/.pixi/envs/default"
 PIXI_LOCAL="$SCRIPT_DIR/tools/pixi"
-PIXI_URL="https://github.com/prefix-dev/pixi/releases/latest/download/pixi-x86_64-unknown-linux-musl"
+PIXI_RELEASES="https://github.com/prefix-dev/pixi/releases/latest/download"
+
+# Git is needed during setup (pixi fetches SAM 2 from GitHub); on a Mac it comes
+# with Apple's command line developer tools.
+if [ "$(uname -s)" = "Darwin" ]; then
+    GIT_HINT="xcode-select --install"
+else
+    GIT_HINT="sudo apt install git"
+fi
 
 SETUP_ONLY=""
 [ "$1" = "--setup" ] && SETUP_ONLY=1
@@ -40,9 +49,13 @@ ensure_pixi() {
     elif command -v pixi >/dev/null 2>&1; then
         PIXI="pixi"
     else
-        if [ "$(uname -m)" != "x86_64" ]; then
-            die "NucLogic supports 64-bit x86 Linux only (this machine is $(uname -m))."
-        fi
+        # The platforms pixi.toml supports, each with its own pixi build.
+        case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  PIXI_URL="$PIXI_RELEASES/pixi-x86_64-unknown-linux-musl" ;;
+            Darwin-arm64)  PIXI_URL="$PIXI_RELEASES/pixi-aarch64-apple-darwin" ;;
+            Darwin-x86_64) die "NucLogic needs an Apple-silicon Mac (M1 or newer); PyTorch no longer supports Intel Macs." ;;
+            *)             die "unsupported system: $(uname -s) $(uname -m). NucLogic runs on 64-bit x86 Linux, Apple-silicon Macs and Windows." ;;
+        esac
         echo "pixi not found. Downloading it into the tools folder..."
         mkdir -p "$SCRIPT_DIR/tools" || die "could not create $SCRIPT_DIR/tools; this folder is not writable by your account."
 
@@ -84,7 +97,7 @@ ensure_pixi
 if [ ! -d "$ENV_DIR" ]; then
     echo "First-time setup: building the environment, this may take several minutes..."
     "$PIXI" install || die "pixi install failed with exit code $?.
-If the message above mentions git, install git (for example 'sudo apt install git')
+If the message above mentions git, install git (for example '$GIT_HINT')
 and run this script again."
 fi
 

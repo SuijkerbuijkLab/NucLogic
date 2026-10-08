@@ -1,7 +1,10 @@
 # NucLogic
 
+[![bioRxiv](https://img.shields.io/badge/bioRxiv-10.64898%2F2026.10.05.756154-b31b1b)](https://doi.org/10.64898/2026.10.05.756154)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23110801.svg)](https://doi.org/10.5281/zenodo.23110801)
 [![Models DOI](https://img.shields.io/badge/models%20DOI-10.5281%2Fzenodo.23110965-blue)](https://doi.org/10.5281/zenodo.23110965)
+
+Paper on bioRxiv: [10.64898/2026.10.05.756154](https://doi.org/10.64898/2026.10.05.756154). Software archived at [10.5281/zenodo.23110801](https://doi.org/10.5281/zenodo.23110801); pretrained models archived at [10.5281/zenodo.23110965](https://doi.org/10.5281/zenodo.23110965). If you use NucLogic, please cite the paper (see [Citation](#citation)).
 
 We present NucLogic, a fast and robust 3D nuclear segmentation algorithm that combines the maturity of 2D segmentation with geometric stitching rules based on nuclear shape, orientation, and intensity, to reconstruct accurate 3D volumes. NucLogic reliably segments challenging datasets including long-term timelapse imaging of organoids, and large dense structures such as the zebrafish brain. Benchmarked against other state-of-the-art segmentation tools, NucLogic matches F1 scores at high SNR, with increasing outperformance as SNR decreases. Importantly, segmentation completes at 20–40% of the computation time, with greater speed gains on larger images. Beyond segmentation, NucLogic includes an intuitive graphical user interface allowing non-experts to segment, quantify, and visualize 3D and 4D data. This enables straightforward quantification of cell numbers, alongside integration of a wide range of both cell-intrinsic properties, such as phenotype and morphology, and local environment metrics, such as density and spatial interactions. Together, NucLogic makes quantitative 3D nuclear analysis of previously unmanageable datasets accessible to a broad research community. 
 
@@ -31,13 +34,14 @@ https://github.com/user-attachments/assets/044b71ff-695d-489e-83bf-30c1071486dc
 
 3. **Windows:** Go into the installed "NucLogic" folder and start the software by double clicking **NucLogic.bat**. On the first launch you'll be asked for administrator rights. These are only needed to make NucLogic available to every user on the computer; if you decline, it installs for your own account only. You can create a shortcut of the NucLogic.bat file and save this on your desktop for easy access.  
    **Linux:** Run **Linux_NucLogic.sh** from a terminal (`bash Linux_NucLogic.sh`).  
+   **Mac:** Run **NucLogic.command** by double clicking it. Only Apple silicon Macs are supported, not Intel.
    The first time you do this it will take some time, as it sets up the environment automatically. You will use the same file to start the app next time.  
    On this first launch NucLogic also downloads the model weights (~1.4 GB), showing progress in a bar at the top of the window. This happens only once.
    Additionally, NucLogic automatically checks for updates and will prompt ask you to update the software every time a new version is released.
 
 **Note:**  
 If the app does not start, check the *logs* folder in the installation directory for error details.   
-NucLogic uses Cellpose-SAM, which is extremely slow on CPU. Please use an NVIDIA GPU for segmentation. NucLogic uses CUDA 12.8 for GPU acceleration, which requires an NVIDIA GPU with compute capability 7.0 or higher (for example GeForce GTX 16 / RTX 20 series and newer). You can check your GPU's compute capability [here](https://developer.nvidia.com/cuda/gpus). Make sure your computer has the latest GPU drivers installed.
+NucLogic uses Cellpose-SAM, which is extremely slow on CPU. Please use an NVIDIA GPU for segmentation. NucLogic uses CUDA 12.8 for GPU acceleration, which requires an NVIDIA GPU with compute capability 7.0 or higher (for example GeForce GTX 16 / RTX 20 series and newer). You can check your GPU's compute capability [here](https://developer.nvidia.com/cuda/gpus). Make sure your computer has the latest GPU drivers installed. On Apple silicon Macs, NucLogic uses the built-in Apple GPU automatically (MPS).
 
 
 <br>
@@ -78,6 +82,16 @@ Save and load your configuration between experiments or segmentation runs for re
 **Viewing and exporting:**  
 The view data tab can be used to open and inspect your samples and segmentations in napari. A custom napari plugin links each label layer to that sample's segmentation statistics tsv file. Any property can be selected, upon which a histogram and a range slider are shown, and the displayed nuclei or cells are restricted in place to those falling inside every active range. This allows populations to be identified visually and interactively. The resulting selection can be saved as a TIFF, or annotated back into the statistics table as an additional column for downstream use. Use this tool to find the optimal custom cutoff value for phenotype calling!
 The export data tab can be used to generate tsv files (can be opened in Excel or any programming language) of the generated data of all your selected samples.
+
+<br>
+
+# Citation
+If you use NucLogic in your research, please cite:
+- NucLogic: Logic-based geometric 3D nuclear segmentation for fast and robust analysis of challenging biological imaging data;
+Sebastian G. van Dijk, Mario Ledesma-Terrón, Susanne J. Kraus, Ruth van Brussel, Emmanuel Marquez-Legorreta, Lars J. S. Kemp, Saskia J. E. Suijkerbuijk;
+bioRxiv 2026.10.05.756154; doi: https://doi.org/10.64898/2026.10.05.756154
+
+GitHub's "Cite this repository" button gives the same reference in APA and BibTeX format.
 
 <br>
 
