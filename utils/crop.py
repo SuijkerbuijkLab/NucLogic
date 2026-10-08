@@ -292,13 +292,16 @@ def segment_organoid(proj_XY_8bit, model, drop_frac=0.30, max_repairs=100):
     # Drop-triggered re-prompting: when the area suddenly collapses (> drop_frac vs
     # the immediately previous frame), SAM has lost part of the organoid. Re-anchor
     # that frame with SAM's own last good mask (never the classical threshold mask,
-    # which fails when organoids touch) and re-propagate the tail. The next drop is
-    # always after the repaired frame, so this terminates.
+    # which fails when organoids touch) and re-propagate the tail. SAM's refined
+    # output for the re-anchored frame can still show the drop, so the search always
+    # resumes after the repaired frame: each frame is repaired at most once, instead
+    # of the same frame being retried until max_repairs.
+    search_from = 1
     for _ in range(max_repairs):
         drop_t = next(
             (
                 t
-                for t in range(1, T)
+                for t in range(search_from, T)
                 if masks[t - 1].sum() > 0
                 and masks[t].sum() < (1 - drop_frac) * masks[t - 1].sum()
             ),
@@ -317,6 +320,7 @@ def segment_organoid(proj_XY_8bit, model, drop_frac=0.30, max_repairs=100):
             mask=good_mask.astype(bool),
         )
         masks.update(run_propagation(drop_t))  # redo tail, overwrite downstream
+        search_from = drop_t + 1
 
     shutil.rmtree(temp_dir)
 

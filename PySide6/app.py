@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         # Driven by PrewarmWorker.gpu_available (runs on the UI thread via the
         # queued signal), so torch need not be imported before the window shows.
         if not available:
-            print("[gpu] No CUDA-capable GPU found. Running in CPU mode.")
+            print("[gpu] No CUDA or Apple MPS GPU found. Running in CPU mode.")
             self._gpu_banner.setVisible(True)
 
     # ── Background pre-warm ───────────────────────────────────────────────────
@@ -1408,7 +1408,8 @@ class MainWindow(QMainWindow):
             "Choose .ims only if you work in Imaris."
         ))
         combo_row.addStretch()
-        sub_layout.addLayout(combo_row)
+        if sys.platform == "win32":  # PyImarisWriter only ships Windows DLLs; elsewhere .tif is used
+            sub_layout.addLayout(combo_row)
 
         layout.addWidget(self.crop_suboptions_widget)
         self._on_crop_mode_changed()
@@ -3574,7 +3575,7 @@ class PrewarmWorker(QThread):
         "main_functions.split_phenotype_mask",
     )
 
-    # Emitted once torch is imported here, carrying torch.cuda.is_available().
+    # Emitted once torch is imported here: True when a CUDA or Apple MPS GPU is usable.
     # Lets the GPU banner resolve off the UI-show critical path.
     gpu_available = Signal(bool)
 
@@ -3586,9 +3587,9 @@ class PrewarmWorker(QThread):
 
         # torch first: it is the heaviest single import and gates the GPU check.
         try:
-            import torch
+            from utils.load_model import get_device
 
-            self.gpu_available.emit(bool(torch.cuda.is_available()))
+            self.gpu_available.emit(get_device() != "cpu")
         except Exception as exc:
             print(f"[prewarm] torch import failed: {type(exc).__name__}: {exc}")
             self.gpu_available.emit(False)
@@ -3765,7 +3766,7 @@ class SegmentationWorker(QThread):
             # first to avoid a silent gap before "Using CUDA for processing".
             print("Preparing pipeline (loading libraries and model)...")
             from main_functions.segment_organoid import segment_organoid
-            from utils.load_model import load_model
+            from utils.load_model import get_device, load_model
             from main_functions.calculate_phenotypes import (
                 calculate_phenotypes,
                 phenotype_column_name,
@@ -3802,6 +3803,7 @@ class SegmentationWorker(QThread):
                 organoid_model = build_sam2_video_predictor(
                     os.path.join(model_path, "sam2.1_hiera_s.yaml"),
                     os.path.join(model_path, "sam2.1_hiera_small.pt"),
+                    device=get_device(),  # SAM 2 defaults to CUDA and crashes without it
                 )
             else:
                 organoid_model = None
@@ -3995,7 +3997,8 @@ class SegmentationWorker(QThread):
 def get_windows_theme():
     """Return True if the OS is in dark mode, False for light mode."""
     if sys.platform != "win32":
-        return True  # default to dark on Linux
+        from PySide6.QtGui import QGuiApplication
+        return QGuiApplication.styleHints().colorScheme() != Qt.ColorScheme.Light
     try:
         registry_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
         registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path)
@@ -4042,7 +4045,7 @@ if __name__ == "__main__":
     app = QApplication([])
 
     # Set desired font size here
-    additional_qss = get_additional_qss(size=10)
+    additional_qss = get_additional_qss(size=13 if sys.platform == "darwin" else 10)
 
     if get_windows_theme():
         qdarktheme.setup_theme(additional_qss=additional_qss)
