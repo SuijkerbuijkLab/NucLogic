@@ -225,6 +225,13 @@ class Updater(QThread):
             extract_dir = tmp / "extracted"
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(extract_dir)
+                # extractall drops Unix permissions, so NucLogic.command would lose its
+                # executable bit on macOS; restore the modes the zip records.
+                if os.name != "nt":
+                    for info in zf.infolist():
+                        mode = (info.external_attr >> 16) & 0o777
+                        if mode:
+                            os.chmod(extract_dir / info.filename, mode)
 
             # GitHub wraps everything in a top-level folder — find it
             children = list(extract_dir.iterdir())
