@@ -1,0 +1,72 @@
+# pip package for the NucLogic library code. The app itself is still managed by
+# pixi.toml (pixi prefers it when both files exist). This builds `nuclogic-core`:
+# the modules below, imported as `nuclogic`, needing only numpy + scipy.
+# `pip install nuclogic` (packaging/nuclogic) is the full install.
+# `version` is a placeholder: publish.yml sets it from the release tag.
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nuclogic-core"
+version = "0.0.0"
+description = "NucLogic 3D nuclear stitching (stitch_3d) and image I/O, minimal install"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Sebastian G. van Dijk" }, { name = "Saskia J. E. Suijkerbuijk" }]
+keywords = ["3D segmentation", "nuclear segmentation", "organoids", "microscopy"]
+dependencies = ["numpy", "scipy"]
+
+[project.optional-dependencies]
+io = ["pandas", "tifffile>=2025.5", "dask>=2025.1", "zarr>=3,<4", "scikit-image"]
+formats = ["nd2", "pylibCZIrw", "liffile", "h5py", "hdf5plugin", "imaris-ims-file-reader"]
+# PyImarisWriter's wheel only bundles the Windows DLL, so IMS writing is Windows-only.
+ims = ["PyImarisWriter; sys_platform == 'win32'", "h5py", "alive-progress", "matplotlib"]
+napari = ["napari[pyside6]", "qtpy", "superqt", "matplotlib"]  # plugin pins QT_API=pyside6
+all = ["nuclogic-core[io,formats,ims,napari]"]
+
+[project.urls]
+Homepage = "https://github.com/SuijkerbuijkLab/NucLogic"
+Paper = "https://doi.org/10.64898/2026.10.05.756154"
+
+# Ship only these modules from utils/, renamed to the `nuclogic` package.
+# A shipped module that gains a new internal import must be added here too.
+[tool.hatch.build.targets.wheel]
+only-include = [
+    "utils/__init__.py",
+    "utils/stitch_3d.py",
+    "utils/load_image.py",
+    "utils/save_as_tiff.py",
+    "utils/save_as_ims.py",
+    "utils/dummy_callback.py",
+    "utils/properties_channel.py",
+    "utils/properties_mask.py",
+    "utils/offset_image.py",
+    "utils/expand_mask.py",
+    "utils/measure_dilated.py",
+    "utils/napari_slider_plugin.py",
+]
+
+[tool.hatch.build.targets.wheel.sources]
+"utils" = "nuclogic"
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "utils/__init__.py",
+    "utils/stitch_3d.py",
+    "utils/load_image.py",
+    "utils/save_as_tiff.py",
+    "utils/save_as_ims.py",
+    "utils/dummy_callback.py",
+    "utils/properties_channel.py",
+    "utils/properties_mask.py",
+    "utils/offset_image.py",
+    "utils/expand_mask.py",
+    "utils/measure_dilated.py",
+    "utils/napari_slider_plugin.py",
+    "README.md",
+    "LICENSE",
+]

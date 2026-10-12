@@ -18,6 +18,7 @@ From the widget you can also:
 Integration (see ``PySide6/app.py``)::
 
     from utils.napari_slider_plugin import attach_property_filter
+    # (installed via pip: from nuclogic.napari_slider_plugin import ...)
     ...
     attach_property_filter(viewer)
 
@@ -68,7 +69,7 @@ from qtpy.QtWidgets import (
 )
 from superqt import QLabeledDoubleRangeSlider
 
-from utils.save_as_tiff import save_as_tiff
+from .save_as_tiff import save_as_tiff
 
 # Columns that identify a cell / are not meaningful to filter on with a slider.
 _NON_FILTERABLE = {"label", "bounding_box", "timepoint", "time"}

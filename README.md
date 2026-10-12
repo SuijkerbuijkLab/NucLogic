@@ -85,6 +85,30 @@ The export data tab can be used to generate tsv files (can be opened in Excel or
 
 <br>
 
+# Use as a Python library
+The stitching algorithm and image I/O can be used in your own pipeline without the app:
+
+```
+pip install nuclogic          # everything: all file formats, IMS writing, napari filter plugin
+pip install nuclogic-core     # stitching only: needs just numpy and scipy
+```
+
+Both are imported as `nuclogic`. `stitch_3d` takes a Z, Y, X stack of 2D labels (from any 2D segmenter; labels only need to be unique per slice) and the nuclear intensity image of the same shape, and returns a Z, Y, X array of 3D nuclei:
+
+```python
+from nuclogic.load_image import load_image, as_numpy
+from nuclogic.stitch_3d import stitch_3d
+
+movie, voxel_size, interval, _ = load_image("organoid_timelapse.ims")  # lazy, T, C, Z, Y, X
+nuclei_channel = as_numpy(movie[0, 0])                                 # timepoint 0, channel 0
+mask = my_2d_segmentation_method(nuclei_channel)                              # e.g. Cellpose per Z-slice
+labels = stitch_3d(mask, image1=nuclei, breaking_threshold=2.5, verbose=False) # use NucLogic stitching algorithm
+```
+
+For timelapses, call `stitch_3d` once per timepoint. `breaking_threshold=2` is the app's default, but depending on your sample a value between 1.5-8 can be used. Writing `.ims` files (`save_as_ims`) is Windows-only.
+
+<br>
+
 # Citation
 If you use NucLogic in your research, please cite:
 - NucLogic: Logic-based geometric 3D nuclear segmentation for fast and robust analysis of challenging biological imaging data;

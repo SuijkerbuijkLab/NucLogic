@@ -71,18 +71,13 @@ keywords:
   - microscopy
   - image analysis
   - Cellpose
-# Update version and date-released with every release, matching the tag.
-version: "1.0.0"
-date-released: "2026-10-02"
-# Concept DOI: always resolves to the latest archived version.
+# Concept DOI: always resolves to the latest archived version. No per-release
+# version here on purpose; the GitHub release tag is the single source of it.
 doi: "10.5281/zenodo.23110801"
 identifiers:
   - type: doi
     value: "10.5281/zenodo.23110801"
     description: "Concept DOI, representing all versions of NucLogic (resolves to the latest)."
-  - type: doi
-    value: "10.5281/zenodo.23110802"
-    description: "Version DOI for NucLogic v1.0.0."
 preferred-citation:
   type: article
   title: "NucLogic: Logic-based geometric 3D nuclear segmentation for fast and robust analysis of challenging biological imaging data"

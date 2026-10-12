@@ -672,6 +672,13 @@ def _quiet_ims_reader(path):
         # `ims` is a convenience function; ims_reader is the class behind it.
         from imaris_ims_file_reader.ims import ims_reader
 
+        # Registers the LZ4/shuffle HDF5 filters. The app imports this globally,
+        # but pip users of load_image would otherwise fail on compressed IMS.
+        try:
+            import hdf5plugin  # noqa: F401
+        except ImportError:
+            pass
+
         class QuietImsReader(ims_reader):
             def close(self):
                 try:

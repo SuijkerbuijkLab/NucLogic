@@ -1,0 +1,23 @@
+# Metadata-only package: `pip install nuclogic` = nuclogic-core with every extra.
+# Holds no code. Both versions are placeholders: publish.yml sets them from the
+# release tag.
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nuclogic"
+version = "0.0.0"
+description = "NucLogic 3D nuclear stitching and image I/O, full install (all formats, IMS writing, napari plugin)"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Sebastian G. van Dijk" }, { name = "Saskia J. E. Suijkerbuijk" }]
+dependencies = ["nuclogic-core[all]==0.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/SuijkerbuijkLab/NucLogic"
+Paper = "https://doi.org/10.64898/2026.10.05.756154"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

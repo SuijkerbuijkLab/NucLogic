@@ -1,0 +1,97 @@
+# Builds and publishes the pip packages `nuclogic-core` and `nuclogic`.
+# Publishing a GitHub release tagged v1.0.1 -> PyPI version 1.0.1.
+# Running it manually (Actions tab) -> TestPyPI version 0.0.0.dev<run number>.
+# Uses PyPI trusted publishing: no token is stored in the repo.
+name: Publish pip packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    # models-v* releases only carry model weights, not code.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set version from the release tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          pip install build packaging
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then V="${TAG#v}"; else V="0.0.0.dev${GITHUB_RUN_NUMBER}"; fi
+          python -c "from packaging.version import Version; Version('$V')"  # fails on a malformed tag
+          sed -i "s/^version = \".*\"/version = \"$V\"/" pyproject.toml packaging/nuclogic/pyproject.toml
+          sed -i "s/nuclogic-core\[all\]==[^\"]*/nuclogic-core[all]==$V/" packaging/nuclogic/pyproject.toml
+          grep -H -e "^version" -e "==" pyproject.toml packaging/nuclogic/pyproject.toml
+
+      - name: Build
+        run: |
+          python -m build -o dist .
+          python -m build -o dist packaging/nuclogic
+
+      - name: Smoke test minimal install (numpy + scipy only)
+        run: |
+          python -m venv /tmp/core && /tmp/core/bin/pip install -q dist/nuclogic_core-*.whl
+          cd /tmp && /tmp/core/bin/python -c "
+          import numpy as np
+          from nuclogic.stitch_3d import stitch_3d
+          z, y, x = np.mgrid[:12, :40, :40]
+          mask = ((((z-6)/4)**2 + ((y-20)/8)**2 + ((x-20)/8)**2) <= 1).astype(np.uint16)
+          out = stitch_3d(mask, image1=mask.astype(float) * 1000, verbose=False)
+          assert len(np.unique(out)) == 2, np.unique(out)
+          print('core ok')"
+
+      - name: Smoke test full install
+        run: |
+          python -m venv /tmp/full && /tmp/full/bin/pip install -q --find-links dist nuclogic
+          cd /tmp && QT_QPA_PLATFORM=offscreen /tmp/full/bin/python -c "
+          import nuclogic.load_image, nuclogic.save_as_tiff, nuclogic.measure_dilated
+          import nuclogic.expand_mask, nuclogic.properties_mask, nuclogic.offset_image
+          print('full ok')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # One job per package: PyPI allows one pending trusted publisher per
+  # (repo, workflow, environment), so each package needs its own environment.
+  publish-core:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'release' && 'pypi-core' || 'testpypi-core' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: rm -f dist/nuclogic-[0-9]*  # keep only nuclogic_core files
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ github.event_name == 'release' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+
+  # Runs after publish-core so the meta package's pinned dependency exists.
+  publish-full:
+    needs: publish-core
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'release' && 'pypi' || 'testpypi' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: rm -f dist/nuclogic_core-*  # keep only the nuclogic meta files
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ github.event_name == 'release' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
