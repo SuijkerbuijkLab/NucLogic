@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 [project]
 name = "nuclogic"
 version = "0.0.0"
-description = "NucLogic 3D nuclear stitching and image I/O, full install (all formats, IMS writing, napari plugin)"
+description = "NucLogic 3D nuclear stitching and image I/O, full install (all file formats and IMS writing)"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Sebastian G. van Dijk" }, { name = "Saskia J. E. Suijkerbuijk" }]

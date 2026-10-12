@@ -89,9 +89,11 @@ The export data tab can be used to generate tsv files (can be opened in Excel or
 The stitching algorithm and image I/O can be used in your own pipeline without the app:
 
 ```
-pip install nuclogic          # everything: all file formats, IMS writing, napari filter plugin
+pip install nuclogic          # everything: all file formats and IMS writing
 pip install nuclogic-core     # stitching only: needs just numpy and scipy
 ```
+
+The napari property-filter plugin (`nuclogic.napari_slider_plugin`) is included but needs napari, which is not installed for you; use it from an environment that already has napari.
 
 Both are imported as `nuclogic`. `stitch_3d` takes a Z, Y, X stack of 2D labels (from any 2D segmenter; labels only need to be unique per slice) and the nuclear intensity image of the same shape, and returns a Z, Y, X array of 3D nuclei:
 

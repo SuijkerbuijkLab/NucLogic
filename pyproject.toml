@@ -24,9 +24,11 @@ dependencies = ["numpy", "scipy"]
 io = ["pandas", "tifffile>=2025.5", "dask>=2025.1", "zarr>=3,<4", "scikit-image"]
 formats = ["nd2", "pylibCZIrw", "liffile", "h5py", "hdf5plugin", "imaris-ims-file-reader"]
 # PyImarisWriter's wheel only bundles the Windows DLL, so IMS writing is Windows-only.
-ims = ["PyImarisWriter; sys_platform == 'win32'", "h5py", "alive-progress", "matplotlib"]
+ims = ["PyImarisWriter; sys_platform == 'win32'", "h5py", "alive-progress"]
 napari = ["napari[pyside6]", "qtpy", "superqt", "matplotlib"]  # plugin pins QT_API=pyside6
-all = ["nuclogic-core[io,formats,ims,napari]"]
+# `napari` is left out on purpose: the filter plugin only runs inside napari, so
+# its users already have it, and napari + Qt would triple the install.
+all = ["nuclogic-core[io,formats,ims]"]
 
 [project.urls]
 Homepage = "https://github.com/SuijkerbuijkLab/NucLogic"
