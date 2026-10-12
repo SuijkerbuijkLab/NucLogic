@@ -25,3 +25,4 @@ miscellaneous/version.txt
 models/*
 !models/sam2.1_hiera_s.yaml
 !models/LICENSE.txt
+CLAUDE.md

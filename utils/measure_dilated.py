@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from skimage.measure import regionprops
 
-from utils.properties_channel import properties_channel
+from .properties_channel import properties_channel
 
 
 def measure_dilated(

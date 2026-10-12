@@ -1,3 +1,5 @@
+import contextlib
+import io
 import numpy as np
 from dataclasses import dataclass
 import scipy.spatial
@@ -744,7 +746,7 @@ def find_touching_pairs(organoid):
             continue
 
         _, indices = tree.query(cell.centroid, k=min(5, len(organoid)))
-        candidate_indices = indices[1:]
+        candidate_indices = np.atleast_1d(indices)[1:]  # k=1 returns a scalar
 
         touching_cells = []
         z_to_coords = z_to_coords_list[i]
@@ -1275,7 +1277,22 @@ def stitch_3d(
     size_2d_filter_multiplier=15,
     combine_fn=None,
     scale=(1, 1, 1),
+    verbose=True,
 ):
+
+    if not np.any(mask):
+        print("Mask is empty, nothing to stitch.")
+        return np.zeros(mask.shape, dtype=np.uint16)  # nothing to stitch
+        
+    if not verbose:
+        # Silence the progress prints of all helpers without touching each one.
+        with contextlib.redirect_stdout(io.StringIO()):
+            return stitch_3d(
+                mask, image1, image_type_1, image2, image_type_2,
+                breaking_threshold, size_2d_filter_multiplier, combine_fn, scale,
+                verbose=True,
+            )
+
     print("Starting 3D stitching process...")
     organoid = get_2d_mask_properties(
         mask,
