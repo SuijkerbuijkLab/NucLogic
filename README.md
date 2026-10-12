@@ -32,11 +32,12 @@ https://github.com/user-attachments/assets/044b71ff-695d-489e-83bf-30c1071486dc
    **Option B — Download as zip:**  
    Use the green code button above to download the zip and extract it to a folder of your choice.
 
-3. **Windows:** Start the software by double clicking **NucLogic.bat**. On the first launch you'll be asked for administrator rights. These are only needed to make NucLogic available to every user on the computer; if you decline, it installs for your own account only. You can create a shortcut of the NucLogic.bat file and save this on your desktop for easy access.  
+3. **Windows:** Go into the installed "NucLogic" folder and start the software by double clicking **NucLogic.bat**. On the first launch you'll be asked for administrator rights. These are only needed to make NucLogic available to every user on the computer; if you decline, it installs for your own account only. You can create a shortcut of the NucLogic.bat file and save this on your desktop for easy access.  
    **Linux:** Run **Linux_NucLogic.sh** from a terminal (`bash Linux_NucLogic.sh`).  
    **Mac:** Run **NucLogic.command** by double clicking it. Only Apple silicon Macs are supported, not Intel.
    The first time you do this it will take some time, as it sets up the environment automatically. You will use the same file to start the app next time.  
-   On this first launch NucLogic also downloads the model weights (~1.4 GB), showing progress in a bar at the top of the window. This happens only once — updates never re-download them.
+   On this first launch NucLogic also downloads the model weights (~1.4 GB), showing progress in a bar at the top of the window. This happens only once.
+   Additionally, NucLogic automatically checks for updates and will prompt ask you to update the software every time a new version is released.
 
 **Note:**  
 If the app does not start, check the *logs* folder in the installation directory for error details.   
@@ -112,5 +113,8 @@ bioRxiv 2025.04.28.651001; doi: https://doi.org/10.1101/2025.04.28.651001
 # License
 NucLogic is released under the [MIT License](LICENSE).
 
-The pretrained model weights are distributed under their own licences: the SAM 2.1 checkpoint under the Apache License 2.0, and the Cellpose models under the BSD 3-Clause License of the Cellpose-SAM weights they were trained from. See [models/LICENSE.txt](models/LICENSE.txt). The weights are archived on Zenodo at [10.5281/zenodo.23110965](https://doi.org/10.5281/zenodo.23110965). Third-party packages installed with NucLogic remain under their own licences.
+
+The pretrained model weights are distributed under their own licences: the SAM 2.1 checkpoint under the Apache License 2.0, and the Cellpose models under the BSD 3-Clause License of the Cellpose-SAM weights they were trained from. See [models/LICENSE.txt](models/LICENSE.txt). Third-party packages installed with NucLogic remain under their own licences.
+
+Software archived at [10.5281/zenodo.23110801](https://doi.org/10.5281/zenodo.23110801); pretrained models archived at [10.5281/zenodo.23110965](https://doi.org/10.5281/zenodo.23110965).
 
