@@ -5,10 +5,16 @@ import h5py  # noqa: F401
 
 from PyImarisWriter import PyImarisWriter as PW
 from alive_progress import alive_bar
-from matplotlib.colors import to_rgba
 from datetime import datetime, timedelta
 from .dummy_callback import dummy_callback
 import numpy as np
+
+# Channel colour names -> RGB, so writing IMS doesn't need matplotlib.
+_COLOR_RGB = {
+    "blue": (0, 0, 1), "lime": (0, 1, 0), "magenta": (1, 0, 1),
+    "gray": (128 / 255, 128 / 255, 128 / 255), "yellow": (1, 1, 0),
+    "red": (1, 0, 0), "green": (0, 128 / 255, 0), "cyan": (0, 1, 1), "white": (1, 1, 1),
+}
 
 
 def save_as_ims(
@@ -114,15 +120,14 @@ def save_as_ims(
     # Time info
     time_infos = [start_time + timedelta(hours=i * interval_hours) for i in range(T)]
 
-    # Convert to PW.Color using to_rgba
+    # Convert to PW.Color (same RGB values matplotlib's to_rgba gives these names)
     colors = []
     for name in channel_colors:
-        try:
-            r, g, b, a = to_rgba(name)
-            colors.append(PW.Color(r, g, b, a))
-        except ValueError:
+        rgb = _COLOR_RGB.get(str(name).lower())
+        if rgb is None:
             print(f"Color '{name}' is not recognized. Using default white.")
-            colors.append(PW.Color(1, 1, 1, 1))
+            rgb = (1, 1, 1)
+        colors.append(PW.Color(*rgb, 1))
 
     # --- Apply colors to ColorInfo objects ---
     color_infos = []
