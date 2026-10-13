@@ -58,6 +58,9 @@ def calculate_phenotypes(
         sep="\t",
     )
     properties.columns = [col.lower() for col in properties.columns]
+    if properties.empty:
+        print(f"No nuclei were segmented in {input_directory}; skipping phenotype calling.")
+        return
 
     column_1 = _intensity_column(
         properties.columns, phenotype_1, phenotype_1_region, suffix

@@ -77,7 +77,7 @@ def crop_fixed(
             np.uint8
         )
 
-        # Get polygon selection. Fall back to matplotlib when OpenCV GUI is unavailable.
+        # Get polygon selection.
         selected_mask, _, _ = polygon_selection(normalized_image)
         if selected_mask is None:
             raise ValueError(
@@ -239,10 +239,83 @@ def crop_fixed(
     return cropped_image_masked
 
 
+def _matplotlib_polygon(image, snap_px=10):
+    """Click points; the outline is drawn as you go. Undo/Backspace removes the
+    last point, clicking near the first point closes the polygon, Done/Enter
+    finishes. Returns the (x, y) points in image pixel coordinates."""
+    from matplotlib.widgets import Button
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    fig.subplots_adjust(bottom=0.1)
+    ax.imshow(image, cmap="gray")
+    ax.axis("off")
+    (outline,) = ax.plot([], [], "-o", color="yellow", markersize=4, linewidth=1)
+    points = []
+    closed = False
+
+    def redraw():
+        xy = points + points[:1] if closed else points
+        outline.set_data([p[0] for p in xy], [p[1] for p in xy])
+        ax.set_title(
+            "Outline closed: press Done (or Undo to edit)" if closed
+            else "Click around the organoid; click the first point to close"
+        )
+        fig.canvas.draw_idle()
+
+    def on_click(event):
+        nonlocal closed
+        # Ignore clicks outside the image, non-left clicks, and toolbar zoom/pan.
+        if event.inaxes is not ax or event.button != 1 or closed:
+            return
+        if getattr(fig.canvas.toolbar, "mode", ""):
+            return
+        # Snap: a click on an existing point never adds a new one; on the first
+        # point (with a polygon's worth of points) it closes the outline.
+        for i, p in enumerate(points):
+            px, py = ax.transData.transform(p)
+            if np.hypot(px - event.x, py - event.y) <= snap_px:
+                if i == 0 and len(points) > 2:
+                    closed = True
+                    redraw()
+                return
+        points.append((int(round(event.xdata)), int(round(event.ydata))))
+        redraw()
+
+    def undo(_=None):
+        nonlocal closed
+        if closed:
+            closed = False
+        elif points:
+            points.pop()
+        redraw()
+
+    def done(_=None):
+        fig.canvas.stop_event_loop()
+
+    def on_key(event):
+        if event.key in ("backspace", "ctrl+z"):
+            undo()
+        elif event.key == "enter":
+            done()
+
+    undo_button = Button(fig.add_axes([0.52, 0.02, 0.2, 0.05]), "Undo last point")
+    done_button = Button(fig.add_axes([0.75, 0.02, 0.15, 0.05]), "Done")
+    undo_button.on_clicked(undo)
+    done_button.on_clicked(done)
+    fig.canvas.mpl_connect("button_press_event", on_click)
+    fig.canvas.mpl_connect("key_press_event", on_key)
+    fig.canvas.mpl_connect("close_event", done)
+
+    redraw()
+    fig.show()
+    fig.canvas.start_event_loop(timeout=-1)  # blocks until Done, Enter or window close
+    plt.close(fig)
+    return points
+
+
 def polygon_selection(image, display_size=1024):
     """
-    Allow user to select a polygon region by clicking points.
-    Press 'c' to complete the selection.
+    Allow user to select a polygon region by clicking points (see _matplotlib_polygon).
     The image is resized for display, but the mask is created on the original resolution.
 
     Args:
@@ -270,59 +343,8 @@ def polygon_selection(image, display_size=1024):
         draw_image, (new_w, new_h), interpolation=cv2.INTER_LINEAR
     )
 
-    points = []
-
-    # First try OpenCV HighGUI. If unavailable (headless build), fall back to matplotlib ginput.
-    try:
-        # Mouse callback function
-        def draw_polygon(event, x, y, flags, param):
-            nonlocal draw_image_resized
-
-            # Left button click - add point
-            if event == cv2.EVENT_LBUTTONDOWN:
-                points.append((x, y))
-                # Draw a small circle at clicked point
-                cv2.circle(
-                    draw_image_resized,
-                    center=(x, y),
-                    radius=3,
-                    color=(255, 255, 0),
-                    thickness=-1,
-                )
-
-                # Connect lines between points
-                if len(points) > 1:
-                    cv2.line(
-                        draw_image_resized,
-                        points[-2],
-                        points[-1],
-                        thickness=1,
-                        color=(255, 0, 0),
-                    )
-
-                # Show the image with selected points
-                cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
-
-        # Create window and set mouse callback
-        cv2.imshow("Select Polygon - Press C when done", draw_image_resized)
-        cv2.setMouseCallback("Select Polygon - Press C when done", draw_polygon)
-
-        # Wait for key press
-        while True:
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("c"):  # Press 'c' to complete
-                break
-
-        # Close the window
-        cv2.destroyAllWindows()
-    except cv2.error:
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.imshow(draw_image_resized, cmap="gray")
-        ax.set_title("Click polygon points, then press Enter")
-        ax.axis("off")
-        selected_points = plt.ginput(n=-1, timeout=0)
-        plt.close(fig)
-        points = [(int(x), int(y)) for x, y in selected_points]
+    # matplotlib, not OpenCV HighGUI: cellpose installs headless OpenCV, which has no windows.
+    points = _matplotlib_polygon(draw_image_resized)
 
     # Create mask from polygon if we have enough points
     if len(points) > 2:
