@@ -1688,8 +1688,23 @@ class MainWindow(QMainWindow):
         """Add UI elements for advanced settings here"""
         self.advanced_layout = QVBoxLayout()
         self.advanced_layout.setSpacing(10)
-        self.advanced_layout.addLayout(self._create_model_settings())
-        
+        self.advanced_layout.addLayout(self._create_segmentation_method_settings())
+
+        # Rows below live in widgets so they can be hidden per segmentation method
+        self.model_settings_widget = QWidget()
+        model_layout = self._create_model_settings()
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        self.model_settings_widget.setLayout(model_layout)
+        self.advanced_layout.addWidget(self.model_settings_widget)
+        self.advanced_layout.addWidget(self._create_cellpose_3d_settings())
+        self.advanced_layout.addWidget(self._create_watershed_settings())
+
+        self.stitching_settings_widget = QWidget()
+        stitching_layout = QVBoxLayout(self.stitching_settings_widget)
+        stitching_layout.setContentsMargins(0, 0, 0, 0)
+        stitching_layout.setSpacing(10)
+        self.advanced_layout.addWidget(self.stitching_settings_widget)
+
         breaking_threshold_layout = QHBoxLayout()
         breaking_threshold_layout.addWidget(
             QLabel("Breaking threshold for cell stitching:")
@@ -1704,7 +1719,7 @@ class MainWindow(QMainWindow):
             "Default (2.5) works well for most datasets."
         ))
         breaking_threshold_layout.addStretch()
-        self.advanced_layout.addLayout(breaking_threshold_layout)
+        stitching_layout.addLayout(breaking_threshold_layout)
 
         size_filter_layout = QHBoxLayout()
         size_filter_layout.addWidget(QLabel("2D size filter multiplier:"))
@@ -1719,7 +1734,7 @@ class MainWindow(QMainWindow):
             "Default (15) works well for most datasets."
         ))
         size_filter_layout.addStretch()
-        self.advanced_layout.addLayout(size_filter_layout)
+        stitching_layout.addLayout(size_filter_layout)
 
         voxel_label_row = QHBoxLayout()
         voxel_label_row.addWidget(QLabel("Voxel size override (Z / X / Y in µm):"))
@@ -1751,7 +1766,112 @@ class MainWindow(QMainWindow):
 
         self.advanced_layout.addLayout(self._create_save_individual_files())
 
+        self._update_segmentation_method_settings()
         return self.advanced_layout
+
+    def _create_segmentation_method_settings(self):
+        layout = QHBoxLayout()
+        layout.setSpacing(12)
+        layout.addWidget(QLabel("Segmentation method:"))
+        self.method_nuclogic_radio = QRadioButton("NucLogic")
+        self.method_cellpose_3d_radio = QRadioButton("Cellpose-SAM 3D mode")
+        self.method_watershed_radio = QRadioButton("Watershed (CPU friendly)")
+        self.segmentation_method_group = QButtonGroup(self)
+        for button in (self.method_nuclogic_radio, self.method_cellpose_3d_radio, self.method_watershed_radio):
+            self.segmentation_method_group.addButton(button)
+            layout.addWidget(button)
+        self.method_nuclogic_radio.setChecked(True)
+        self.segmentation_method_group.buttonToggled.connect(self._update_segmentation_method_settings)
+        layout.addWidget(self._info_label(
+            "NucLogic: a Cellpose model segments every Z-slice in 2D, NucLogic stitches them into 3D nuclei.\n"
+            "Recommended; fast with a GPU.\n"
+            "Cellpose-SAM 3D mode: Cellpose segments the whole stack in 3D itself (no NucLogic stitching).\n"
+            "Watershed (CPU friendly): classical image processing instead of a deep-learning model,\n"
+            "stitched by NucLogic. Use it on computers without a GPU."
+        ))
+        layout.addStretch()
+        return layout
+
+    def _segmentation_method(self):
+        if self.method_cellpose_3d_radio.isChecked():
+            return "cellpose_3d"
+        if self.method_watershed_radio.isChecked():
+            return "watershed"
+        return "nuclogic"
+
+    def _update_segmentation_method_settings(self, *_):
+        method = self._segmentation_method()
+        self.model_settings_widget.setVisible(method != "watershed")
+        self.stitching_settings_widget.setVisible(method != "cellpose_3d")
+        self.cellpose_3d_settings_widget.setVisible(method == "cellpose_3d")
+        self.watershed_settings_widget.setVisible(method == "watershed")
+
+    def _create_cellpose_3d_settings(self):
+        self.cellpose_3d_settings_widget = QWidget()
+        row = QHBoxLayout(self.cellpose_3d_settings_widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(QLabel("3D flow smoothing (flow3D_smooth):"))
+        self.flow3d_smooth_input = QLineEdit("0.4")
+        self.flow3d_smooth_input.setMaximumWidth(90)
+        row.addWidget(self.flow3d_smooth_input)
+        row.addWidget(self._info_label(
+            "Smooths the 3D flows Cellpose predicts before it builds nuclei from them (Gaussian blur, in pixels).\n"
+            "This removes noisy splits, but too much smoothing merges neighbouring nuclei.\n"
+            "Higher value → smoother result, more merged nuclei.\n"
+            "Lower value → more and smaller nuclei. 0 turns smoothing off.\n"
+            "Default (0.4) works well for most datasets."
+        ))
+        row.addStretch()
+        return self.cellpose_3d_settings_widget
+
+    def _create_watershed_settings(self):
+        """Only the watershed settings that matter most; the rest keep their defaults."""
+        self.watershed_settings_widget = QWidget()
+        grid = QGridLayout(self.watershed_settings_widget)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(10)
+        rows = [
+            ("ws_diameter_input", "Nucleus diameter (pixels):", "", "auto",
+             "Typical diameter of a nucleus in XY, in pixels.\n"
+             "Leave empty to measure it automatically on the clearest Z-slices.\n"
+             "Fill it in if nuclei come out clearly too large (merged) or too small (cut up),\n"
+             "or for very dense tissue, where the automatic measurement can overshoot.\n"
+             "Tip: measure a few nuclei in napari or Fiji."),
+            ("ws_k_object_input", "Faint-object filter:", "12", "",
+             "Removes objects that do not clearly stand out from the camera noise.\n"
+             "This keeps empty slices above and below the sample empty.\n"
+             "Higher value → stricter, fewer faint objects. Lower value → keeps fainter nuclei.\n"
+             "Set to 0 if Z-slices are far apart compared to the nucleus size (Z step more than\n"
+             "~1/4 of the nucleus diameter): the filter compares neighbouring slices, and then\n"
+             "it can remove real nuclei.\n"
+             "Default (12) works well for most datasets."),
+            ("ws_min_rel_contrast_input", "Haze filter:", "0.25", "",
+             "Removes diffuse glow that is not a nucleus (cytoplasm, out-of-focus light).\n"
+             "Higher value → removes more haze, but also dim nuclei next to bright ones.\n"
+             "Set to 0 for very dense tissue where nuclei touch everywhere.\n"
+             "Default (0.25) works well for most datasets."),
+            ("ws_neck_depth_input", "Split touching nuclei:", "0.2", "",
+             "How readily two touching nuclei that were found as one object are split at their 'waist'.\n"
+             "Lower value → splits more readily (use if nuclei are merged).\n"
+             "Higher value → splits less (use if single nuclei are cut in two).\n"
+             "Default (0.2) works well for most datasets."),
+            ("ws_z_sigma_input", "Z smoothing (slices):", "1", "",
+             "Blurs slightly along Z so each slice borrows signal from its neighbours;\n"
+             "helps on noisy stacks with closely spaced slices.\n"
+             "Set to 0 if Z-slices are far apart compared to the nucleus size.\n"
+             "Default (1) works well for most datasets."),
+        ]
+        for row, (attr, label, default, placeholder, tooltip) in enumerate(rows):
+            grid.addWidget(QLabel(label), row, 0)
+            line_edit = QLineEdit(default)
+            line_edit.setPlaceholderText(placeholder)
+            line_edit.setMaximumWidth(90)
+            setattr(self, attr, line_edit)
+            grid.addWidget(line_edit, row, 1)
+            grid.addWidget(self._info_label(tooltip), row, 2)
+        grid.setColumnStretch(3, 1)
+        return self.watershed_settings_widget
 
     def _create_channel_config_layout(self):
         layout = QVBoxLayout()
@@ -2112,6 +2232,28 @@ class MainWindow(QMainWindow):
         except ValueError:
             return 15
 
+    def get_segmentation_method_settings(self):
+        """Returns (method, flow3d_smooth, watershed_settings); raises ValueError on bad input."""
+
+        def _number(line_edit, name, default):
+            text = line_edit.text().strip()
+            if not text:
+                return default
+            try:
+                return float(text)
+            except ValueError as exc:
+                raise ValueError(f"Invalid value for {name}: '{text}'. Please enter a number.") from exc
+
+        watershed_settings = {
+            "diameter": _number(self.ws_diameter_input, "nucleus diameter", None),
+            "k_object": _number(self.ws_k_object_input, "faint-object filter", 12.0),
+            "min_rel_contrast": _number(self.ws_min_rel_contrast_input, "haze filter", 0.25),
+            "neck_depth": _number(self.ws_neck_depth_input, "split touching nuclei", 0.2),
+            "z_sigma": _number(self.ws_z_sigma_input, "Z smoothing", 1.0),
+        }
+        flow3d_smooth = _number(self.flow3d_smooth_input, "3D flow smoothing", 0.4)
+        return self._segmentation_method(), flow3d_smooth, watershed_settings
+
     def get_phenotype_calling_settings(self):
         """Get phenotype calling settings"""
         do_calling = self.do_phenotype_calling_checkbox.isChecked()
@@ -2168,8 +2310,14 @@ class MainWindow(QMainWindow):
             self.segmentation_failures_label.setText("")
         QApplication.processEvents()
 
-        model_path = self.get_model_path()
-        if model_path is None:
+        try:
+            segmentation_method, flow3d_smooth, watershed_settings = self.get_segmentation_method_settings()
+        except ValueError as e:
+            self.segmentation_error(str(e))
+            return
+        # Watershed needs no Cellpose model
+        model_path = self.get_model_path() if segmentation_method != "watershed" else None
+        if model_path is None and segmentation_method != "watershed":
             self.segmentation_error(
                 "No segmentation model found. Please upload a model in the advanced segmentation settings."
             )
@@ -2302,6 +2450,9 @@ class MainWindow(QMainWindow):
             total_count=total_count,
             phenotype_1_region=phenotype_1_region,
             phenotype_2_region=phenotype_2_region,
+            segmentation_method=segmentation_method,
+            flow3d_smooth=flow3d_smooth,
+            watershed_settings=watershed_settings,
         )
         self.worker.progress_updated.connect(self.progressbar.setValue)
         self.worker.finished.connect(self.segmentation_finished)
@@ -2514,6 +2665,13 @@ class MainWindow(QMainWindow):
             "run_mode": self.run_mode_combo.currentText(),
             "breaking_threshold": self.breaking_threshold_input.text(),
             "size_2d_filter_multiplier": self.size_2d_filter_input.text(),
+            "segmentation_method": self._segmentation_method(),
+            "flow3d_smooth": self.flow3d_smooth_input.text(),
+            "watershed_diameter": self.ws_diameter_input.text(),
+            "watershed_k_object": self.ws_k_object_input.text(),
+            "watershed_min_rel_contrast": self.ws_min_rel_contrast_input.text(),
+            "watershed_neck_depth": self.ws_neck_depth_input.text(),
+            "watershed_z_sigma": self.ws_z_sigma_input.text(),
             "voxel_z": self.voxel_size_z_input.text(),
             "voxel_x": self.voxel_size_x_input.text(),
             "voxel_y": self.voxel_size_y_input.text(),
@@ -2624,6 +2782,17 @@ class MainWindow(QMainWindow):
         _set_combo(self.run_mode_combo, "run_mode", "Full pipeline")
         self.breaking_threshold_input.setText(config.get("breaking_threshold", "2.5"))
         self.size_2d_filter_input.setText(config.get("size_2d_filter_multiplier", "15"))
+        {
+            "nuclogic": self.method_nuclogic_radio,
+            "cellpose_3d": self.method_cellpose_3d_radio,
+            "watershed": self.method_watershed_radio,
+        }.get(config.get("segmentation_method", "nuclogic"), self.method_nuclogic_radio).setChecked(True)
+        self.flow3d_smooth_input.setText(config.get("flow3d_smooth", "0.4"))
+        self.ws_diameter_input.setText(config.get("watershed_diameter", ""))
+        self.ws_k_object_input.setText(config.get("watershed_k_object", "12"))
+        self.ws_min_rel_contrast_input.setText(config.get("watershed_min_rel_contrast", "0.25"))
+        self.ws_neck_depth_input.setText(config.get("watershed_neck_depth", "0.2"))
+        self.ws_z_sigma_input.setText(config.get("watershed_z_sigma", "1"))
         self.voxel_size_z_input.setText(config.get("voxel_z", ""))
         self.voxel_size_x_input.setText(config.get("voxel_x", ""))
         self.voxel_size_y_input.setText(config.get("voxel_y", ""))
@@ -3703,9 +3872,15 @@ class SegmentationWorker(QThread):
         total_count=None,
         phenotype_1_region="nuclei",
         phenotype_2_region="nuclei",
+        segmentation_method="nuclogic",
+        flow3d_smooth=0.4,
+        watershed_settings=None,
     ):
         super().__init__()
         self._stop_requested = False
+        self.segmentation_method = segmentation_method
+        self.flow3d_smooth = flow3d_smooth
+        self.watershed_settings = watershed_settings
         self.sample_path_list = sample_path_list
         self.index_offset = index_offset
         self.total_count = total_count if total_count is not None else len(sample_path_list)
@@ -3786,7 +3961,10 @@ class SegmentationWorker(QThread):
                 return format(numeric_value, "g").replace(".", "p")
 
             start_time = datetime.now()
-            loaded_cell_model = load_model(self.cell_model_path)
+            # Watershed runs without Cellpose, so skip loading it (and torch)
+            loaded_cell_model = (
+                load_model(self.cell_model_path) if self.segmentation_method != "watershed" else None
+            )
 
             needs_auto_crop = (
                 not self.phenotype_calling_only
@@ -3846,6 +4024,9 @@ class SegmentationWorker(QThread):
                             save_frames=self.save_frames,
                             save_segmentation=self.save_segmentation,
                             user_voxel_size=self.user_voxel_size,
+                            segmentation_method=self.segmentation_method,
+                            flow3d_smooth=self.flow3d_smooth,
+                            watershed_settings=self.watershed_settings,
                         )
 
                     # Statistics also measure the phenotype regions, so they run first.
