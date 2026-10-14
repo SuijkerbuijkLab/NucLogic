@@ -28,6 +28,7 @@ ims = ["PyImarisWriter; sys_platform == 'win32'", "h5py", "alive-progress"]
 napari = ["napari[pyside6]", "qtpy", "superqt", "matplotlib"]  # plugin pins QT_API=pyside6
 # `napari` is left out on purpose: the filter plugin only runs inside napari, so
 # its users already have it, and napari + Qt would triple the install.
+# watershed_segmenter needs scikit-image (io) and alive-progress (ims), both in `all`.
 all = ["nuclogic-core[io,formats,ims]"]
 
 [project.urls]
@@ -50,6 +51,7 @@ only-include = [
     "utils/expand_mask.py",
     "utils/measure_dilated.py",
     "utils/napari_slider_plugin.py",
+    "utils/watershed_segmenter.py",
 ]
 
 [tool.hatch.build.targets.wheel.sources]
@@ -69,6 +71,7 @@ only-include = [
     "utils/expand_mask.py",
     "utils/measure_dilated.py",
     "utils/napari_slider_plugin.py",
+    "utils/watershed_segmenter.py",
     "README.md",
     "LICENSE",
 ]

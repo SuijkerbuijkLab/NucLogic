@@ -54,6 +54,12 @@ jobs:
           cd /tmp && QT_QPA_PLATFORM=offscreen /tmp/full/bin/python -c "
           import nuclogic.load_image, nuclogic.save_as_tiff, nuclogic.measure_dilated
           import nuclogic.expand_mask, nuclogic.properties_mask, nuclogic.offset_image
+          import numpy as np
+          from nuclogic.watershed_segmenter import WatershedSegmenter
+          z, y, x = np.mgrid[:6, :64, :64]
+          image = 100 + 1000 * (((y - 32) ** 2 + (x - 32) ** 2) < 100) + np.random.default_rng(0).normal(0, 5, z.shape)
+          labels = WatershedSegmenter(diameter=20, workers=1).segment_stack(image, progress=False)
+          assert labels.shape == image.shape and labels.max() >= 1, labels.max()
           print('full ok')"
 
       - uses: actions/upload-artifact@v4
