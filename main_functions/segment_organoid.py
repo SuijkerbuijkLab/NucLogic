@@ -12,7 +12,7 @@ from utils.voxel_size import resolve_voxel_size
 import os
 import re
 import sys
-from utils.segment import segment
+from utils.segment import segment, segment_3d
 from utils.stitch_3d import stitch_3d
 from utils.properties_mask import properties_mask
 from utils.find_input_file import find_input_file
@@ -37,6 +37,9 @@ def segment_organoid(
     save_frames=True,
     save_segmentation=True,
     user_voxel_size=None,
+    segmentation_method="nuclogic",  # "nuclogic", "cellpose_3d" or "watershed"
+    flow3d_smooth=0.4,  # Cellpose 3D mode only
+    watershed_settings=None,  # WatershedSegmenter keyword arguments, watershed only
 ):
     nuclei_channels = []
 
@@ -92,13 +95,25 @@ def segment_organoid(
         print(f"frame nuclei shape {frame_nuclei.shape}")
         # print(f"Segmenting timepoint {timepoint} with shape {frame_nuclei.shape}...")
 
-        # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
-        # stdout silenced to stop printing random stuff
-        old_stdout = sys.stdout  # backup current stdout
-        sys.stdout = open(os.devnull, "w")
-        segmented_stack = segment(frame_nuclei, cell_model)
+        if segmentation_method == "cellpose_3d":
+            # Cellpose segments the whole stack in 3D itself, so no NucLogic stitching
+            anisotropy = voxel_size[0] / voxel_size[2] if voxel_size[2] else 1.0
+            segmented_stack_stitched = segment_3d(frame_nuclei, cell_model, anisotropy, flow3d_smooth)
+        else:
+            if segmentation_method == "watershed":
+                from utils.watershed_segmenter import WatershedSegmenter
 
-        sys.stdout = old_stdout  # reset old stdout
+                segmented_stack = WatershedSegmenter(**(watershed_settings or {})).segment_stack(
+                    frame_nuclei, progress=False
+                )
+            else:
+                # This function will segment every slice in the frame individually using the cell model, and then links them back into a 3D array
+                # stdout silenced to stop printing random stuff
+                old_stdout = sys.stdout  # backup current stdout
+                sys.stdout = open(os.devnull, "w")
+                segmented_stack = segment(frame_nuclei, cell_model)
+
+                sys.stdout = old_stdout  # reset old stdout
         # print(segmented_stack.shape, np.unique(segmented_stack))
         # tifffile.imwrite(
         #     os.path.join(input_directory, f"segmented_stack_timepoint_{timepoint}.tif"),
@@ -111,7 +126,9 @@ def segment_organoid(
 
         # This function will stitch the 3D segmentation stack into an actual 3D image where cells are linked through the Z.
         # In this way we actually identify full cell nuclei, instead of single masks per slice
-        if len(nuclei_channels) == 2:
+        if segmentation_method == "cellpose_3d":
+            pass  # already 3D
+        elif len(nuclei_channels) == 2:
             segmented_stack_stitched = stitch_3d(
                 segmented_stack,
                 image1=frame_nuclei_1,

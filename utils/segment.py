@@ -37,3 +37,23 @@ def segment(image, model):
     segmented_stack = np.stack(masks_list, axis=0).astype(np.uint16)
 
     return segmented_stack
+
+
+def segment_3d(image, model, anisotropy=1.0, flow3d_smooth=0.4):
+    """Cellpose's own 3D mode: one call on the whole (Z, Y, X) stack, no NucLogic stitching.
+
+    anisotropy = Z voxel size / XY voxel size, so Cellpose can rescale Z to match XY.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        mask, _, _ = model.eval(
+            image,
+            z_axis=0,
+            do_3D=True,
+            anisotropy=anisotropy,
+            flow3D_smooth=flow3d_smooth,
+            diameter=None,
+            normalize=True,
+            progress=None,
+        )
+    return mask.astype(np.uint32 if mask.max() > np.iinfo(np.uint16).max else np.uint16)
